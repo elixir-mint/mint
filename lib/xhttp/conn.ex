@@ -164,7 +164,7 @@ defmodule XHTTP.Conn do
 
       body_left == :until_closed or body_left > byte_size(data) ->
         conn = put_in(conn.request.body_left, body_left - byte_size(data))
-        responses = [{:done, request_ref}, {:body, request_ref, data} | responses]
+        responses = [{:body, request_ref, data} | responses]
         {:ok, conn, responses}
 
       body_left == byte_size(data) ->
