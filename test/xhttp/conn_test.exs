@@ -47,7 +47,7 @@ defmodule XHTTP.ConnTest do
 
   defp receive_stream(conn, responses) do
     receive do
-      {:tcp, _socket, _data} = message ->
+      {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
         assert {:ok, conn, new_responses} = Conn.stream(conn, message)
 
         if match?({:done, _}, Enum.at(new_responses, -1)) do
@@ -56,10 +56,10 @@ defmodule XHTTP.ConnTest do
           receive_stream(conn, responses ++ new_responses)
         end
 
-      {:tcp_closed, _socket} = message ->
+      {tag, _socket} = message when tag in [:tcp_close, :ssl_close] ->
         assert {:error, _conn, :closed} = Conn.stream(conn, message)
 
-      {:tcp_error, _reason} = message ->
+      {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
         assert {:error, _conn, _reason} = Conn.stream(conn, message)
     after
       5000 ->

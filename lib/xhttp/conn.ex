@@ -84,7 +84,8 @@ defmodule XHTTP.Conn do
     {:error, reason}
   end
 
-  def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {:tcp, socket, data}) do
+  def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
+  when tag in [:tcp, :ssl] do
     data = buffer <> data
 
     case decode(request.state, conn, data, []) do
@@ -96,7 +97,8 @@ defmodule XHTTP.Conn do
       {:error, request.ref, reason}
   end
 
-  def stream(%Conn{socket: socket, request: request} = conn, {:tcp_closed, socket}) do
+  def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
+  when tag in [:tcp_close, :ssl_close] do
     # TODO: Update conn state informing socket is closed
     if request.body_left == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
@@ -105,7 +107,8 @@ defmodule XHTTP.Conn do
     end
   end
 
-  def stream(%Conn{socket: socket} = conn, {:tcp_error, socket, reason}) do
+  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
+  when tag in [:tcp_error, :ssl_error] do
     # TODO: Update conn state informing socket is closed
     {:error, conn, reason}
   end
