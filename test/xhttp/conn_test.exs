@@ -3,46 +3,51 @@ defmodule XHTTP.ConnTest do
   alias XHTTP.Conn
 
   @tag :integration
-  test "google.com" do
+  test "302 response - google.com" do
     assert {:ok, conn} = Conn.connect("google.com", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn, [])
 
     assert conn.buffer == ""
-    assert [status, headers, body, {:done, ^request}] = responses
+    assert [status, headers | responses] = responses
     assert {:status, ^request, {{1, 1}, 302, "Found"}} = status
     assert {:headers, ^request, headers} = headers
-    assert {:body, ^request, body} = body
     assert hd(get_header(headers, "location")) =~ "www.google."
-    assert body =~ "<TITLE>302 Moved</TITLE>"
+    assert merge_body(responses, request) =~ "<TITLE>302 Moved</TITLE>"
   end
 
   @tag :integration
-  test "hex.pm" do
-    assert {:ok, conn} = Conn.connect("hex.pm", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
-
-    assert conn.buffer == ""
-    assert [status, headers, body, {:done, ^request}] = responses
-    assert {:status, ^request, {{1, 1}, 301, "Moved Permanently"}} = status
-    assert {:headers, ^request, headers} = headers
-    assert {:body, ^request, ""} = body
-    assert get_header(headers, "location") == ["https://hex.pm/"]
-  end
-
-  @tag :integration
-  test "example.com" do
+  test "200 response - example.com" do
     assert {:ok, conn} = Conn.connect("example.com", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn, [])
 
     assert conn.buffer == ""
-    assert [status, headers, body, {:done, ^request}] = responses
+    assert [status, headers | responses] = responses
     assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
     assert {:headers, ^request, _} = headers
-    assert {:body, ^request, body} = body
-    assert body =~ "<title>Example Domain</title>"
+    assert merge_body(responses, request) =~ "<title>Example Domain</title>"
+  end
+
+  @tag :integration
+  test "ssl, path, long body - tools.ietf.org" do
+    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc2616", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn, [])
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert merge_body(responses, request) =~ "Full Copyright Statement"
+  end
+
+  defp merge_body([{:body, request, body} | responses], request) do
+    body <> merge_body(responses, request)
+  end
+
+  defp merge_body([{:done, request}], request) do
+    ""
   end
 
   defp receive_stream(conn, responses) do
