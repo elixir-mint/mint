@@ -5,9 +5,9 @@ defmodule XHTTP.Conn do
 
   @type request_ref() :: reference()
   @type tcp_message() ::
-          {:tcp, :gen_tcp.socket(), binary()}
-          | {:tcp_closed, :gen_tcp.socket()}
-          | {:tcp_error, :gen_tcp.socket(), term()}
+          {:tcp | :ssl, :gen_tcp.socket(), binary()}
+          | {:tcp_close | :ssl_close, :gen_tcp.socket()}
+          | {:tcp_error | :ssl_error, :gen_tcp.socket(), term()}
   @type response() ::
           {:status, request_ref(), status_line()}
           | {:headers, request_ref(), headers()}
