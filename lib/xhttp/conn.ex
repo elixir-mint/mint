@@ -76,14 +76,6 @@ defmodule XHTTP.Conn do
           {:ok, t(), [response()]}
           | {:error, t(), term()}
           | :unknown
-  def stream(%Conn{socket: socket}, {:tcp_closed, socket}) do
-    {:error, :closed}
-  end
-
-  def stream(%Conn{socket: socket}, {:tcp_error, socket, reason}) do
-    {:error, reason}
-  end
-
   def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
   when tag in [:tcp, :ssl] do
     data = buffer <> data
