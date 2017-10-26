@@ -1,6 +1,8 @@
 defmodule XHTTP.Request do
   @moduledoc false
 
+  @user_agent "xhttp/0.1.0"
+
   def encode(method, path, host, headers, body) do
     headers = add_default_headers(headers, host, body)
 
@@ -20,6 +22,7 @@ defmodule XHTTP.Request do
   defp add_default_headers(headers, host, body) do
     headers
     |> put_new_header("host", host)
+    |> put_new_header("user-agent", @user_agent)
     |> add_content_length(body)
   end
 
