@@ -26,12 +26,12 @@ defmodule XHTTP.Request do
     |> add_content_length(body)
   end
 
-  defp add_content_length(headers, nil) do
-    headers
-  end
+  defp add_content_length(headers, nil), do: headers
+
+  defp add_content_length(headers, :stream), do: headers
 
   defp add_content_length(headers, body) do
-    length = body |> byte_size() |> Integer.to_string()
+    length = body |> IO.iodata_length() |> Integer.to_string()
     put_new_header(headers, "content-length", length)
   end
 
@@ -55,5 +55,6 @@ defmodule XHTTP.Request do
   end
 
   defp encode_body(nil), do: ""
+  defp encode_body(:stream), do: ""
   defp encode_body(body), do: body
 end
