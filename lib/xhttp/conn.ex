@@ -24,6 +24,7 @@ defmodule XHTTP.Conn do
     :host,
     :request,
     :transport,
+    state: :closed,
     buffer: ""
   ]
 
@@ -36,12 +37,15 @@ defmodule XHTTP.Conn do
 
     case transport.connect(String.to_charlist(hostname), port, transport_opts) do
       {:ok, socket} ->
-        {:ok, %Conn{socket: socket, host: hostname, transport: transport}}
+        {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  @spec open?(t()) :: boolean()
+  def open?(%Conn{state: state}), do: state == :open
 
   @spec request(t(), method :: atom | String.t(), path :: String.t(), headers(), body :: binary()) ::
           {:ok, t(), request_ref()}
@@ -77,7 +81,7 @@ defmodule XHTTP.Conn do
           | {:error, t(), term()}
           | :unknown
   def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
-  when tag in [:tcp, :ssl] do
+      when tag in [:tcp, :ssl] do
     data = buffer <> data
 
     case decode(request.state, conn, data, []) do
@@ -90,8 +94,9 @@ defmodule XHTTP.Conn do
   end
 
   def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
-  when tag in [:tcp_close, :ssl_close] do
-    # TODO: Update conn state informing socket is closed
+      when tag in [:tcp_close, :ssl_close] do
+    conn = put_in(conn.state, :closed)
+
     if request.body_left == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
     else
@@ -100,8 +105,8 @@ defmodule XHTTP.Conn do
   end
 
   def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
-  when tag in [:tcp_error, :ssl_error] do
-    # TODO: Update conn state informing socket is closed
+      when tag in [:tcp_error, :ssl_error] do
+    conn = put_in(conn.state, :closed)
     {:error, conn, reason}
   end
 
