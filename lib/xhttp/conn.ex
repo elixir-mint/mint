@@ -65,7 +65,13 @@ defmodule XHTTP.Conn do
   @spec open?(t()) :: boolean()
   def open?(%Conn{state: state}), do: state == :open
 
-  @spec request(t(), method :: atom | String.t(), path :: String.t(), headers(), body :: binary()) ::
+  @spec request(
+          t(),
+          method :: atom | String.t(),
+          path :: String.t(),
+          headers(),
+          body :: iodata() | :stream
+        ) ::
           {:ok, t(), request_ref()}
           | {:error, term()}
   def request(%Conn{request: request}, _method, _path, _headers, _body) when is_reference(request) do
@@ -86,7 +92,8 @@ defmodule XHTTP.Conn do
     case transport.send(socket, iodata) do
       :ok ->
         request_ref = make_ref()
-        conn = %Conn{conn | request: new_request(request_ref, method)}
+        state = if body == :stream, do: :stream_request, else: :status
+        conn = %Conn{conn | request: new_request(request_ref, state, method)}
         {:ok, conn, request_ref}
 
       {:error, reason} ->
@@ -94,10 +101,29 @@ defmodule XHTTP.Conn do
     end
   end
 
+  @spec stream_request_body(t(), body :: iodata() | :eof) :: {:ok, t()} | {:error, term()}
+  def stream_request_body(%Conn{request: %{state: :stream_request}} = conn, :eof) do
+    {:ok, put_in(conn.request.state, :status)}
+  end
+
+  def stream_request_body(
+        %Conn{request: %{state: :stream_request}, transport: transport, socket: socket} = conn,
+        body
+      ) do
+    case transport.send(socket, body) do
+      :ok -> {:ok, conn}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @spec stream(t(), tcp_message()) ::
           {:ok, t(), [response()]}
           | {:error, t(), term()}
           | :unknown
+  def stream(%Conn{request: %{state: :stream_request}}, _message) do
+    {:error, :request_body_not_streamed}
+  end
+
   def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     data = buffer <> data
@@ -299,10 +325,10 @@ defmodule XHTTP.Conn do
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
   defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
 
-  defp new_request(ref, method) do
+  defp new_request(ref, state, method) do
     %{
       ref: ref,
-      state: :status,
+      state: state,
       method: method,
       version: nil,
       status: nil,

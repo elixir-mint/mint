@@ -2,7 +2,8 @@ defmodule XHTTP.ConnTest do
   use ExUnit.Case, async: true
   alias XHTTP.Conn
 
-  @tag :integration
+  @moduletag :integration
+
   test "302 response - google.com" do
     assert {:ok, conn} = Conn.connect("google.com", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
@@ -16,7 +17,6 @@ defmodule XHTTP.ConnTest do
     assert merge_body(responses, request) =~ "<TITLE>302 Moved</TITLE>"
   end
 
-  @tag :integration
   test "200 response - example.com" do
     assert {:ok, conn} = Conn.connect("example.com", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
@@ -29,7 +29,6 @@ defmodule XHTTP.ConnTest do
     assert merge_body(responses, request) =~ "<title>Example Domain</title>"
   end
 
-  @tag :integration
   test "ssl, path, long body - tools.ietf.org" do
     assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc2616", [], nil)
@@ -42,7 +41,6 @@ defmodule XHTTP.ConnTest do
     assert merge_body(responses, request) =~ "Full Copyright Statement"
   end
 
-  @tag :integration
   test "keep alive - tools.ietf.org" do
     assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7230", [], nil)
@@ -63,6 +61,34 @@ defmodule XHTTP.ConnTest do
     assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "Semantics and Content"
+  end
+
+  test "POST body - httpbin.org" do
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", [], "BODY")
+    assert {:ok, conn, responses} = receive_stream(conn, [])
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert merge_body(responses, request) =~ ~s("BODY")
+  end
+
+  test "POST body streaming - httpbin.org" do
+    headers = [{"content-length", "4"}]
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", headers, :stream)
+    assert {:ok, conn} = Conn.stream_request_body(conn, "BO")
+    assert {:ok, conn} = Conn.stream_request_body(conn, "DY")
+    assert {:ok, conn} = Conn.stream_request_body(conn, :eof)
+    assert {:ok, conn, responses} = receive_stream(conn, [])
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert merge_body(responses, request) =~ ~s("BODY")
   end
 
   defp merge_body([{:body, request, body} | responses], request) do
