@@ -42,6 +42,29 @@ defmodule XHTTP.ConnTest do
     assert merge_body(responses, request) =~ "Full Copyright Statement"
   end
 
+  @tag :integration
+  test "keep alive - tools.ietf.org" do
+    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7230", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn, [])
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert merge_body(responses, request) =~ "Security Considerations"
+
+    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7231", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn, [])
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert merge_body(responses, request) =~ "Semantics and Content"
+  end
+
   defp merge_body([{:body, request, body} | responses], request) do
     body <> merge_body(responses, request)
   end

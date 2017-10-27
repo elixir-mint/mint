@@ -1,6 +1,8 @@
 defmodule XHTTP.Conn do
   alias XHTTP.{Conn, Request, Response}
 
+  require Logger
+
   @type t() :: %Conn{}
 
   @type request_ref() :: reference()
@@ -130,14 +132,15 @@ defmodule XHTTP.Conn do
     :unknown
   end
 
-  defp decode(:status, conn, data, []) do
+  defp decode(:status, %{request: request} = conn, data, []) do
     case Response.decode_status_line(data) do
-      {:ok, {_version, status, _reason} = status_line, rest} ->
-        conn = put_in(conn.request.status, status)
-        decode(:headers, conn, rest, [{:status, conn.request.ref, status_line}])
+      {:ok, {version, status, _reason} = status_line, rest} ->
+        request = %{request | version: version, status: status}
+        conn = put_in(conn.request, request)
+        decode(:headers, conn, rest, [{:status, request.ref, status_line}])
 
       :more ->
-        conn = put_in(conn.request.state, :status)
+        conn = put_in(request.state, :status)
         {:ok, conn, []}
 
       :error ->
@@ -145,17 +148,23 @@ defmodule XHTTP.Conn do
     end
   end
 
-  defp decode(:headers, conn, data, responses) do
+  defp decode(:headers, %{request: request} = conn, data, responses) do
     case Response.decode_header(data) do
       {:ok, {name, value}, rest} ->
-        responses = add_header(name, value, conn.request.ref, responses)
+        responses = add_header(name, value, request.ref, responses)
         decode(:headers, conn, rest, responses)
 
       {:ok, :eof, rest} ->
         responses = reverse_headers(responses)
-        content_length = content_length(responses)
-        conn = put_in(conn.request.content_length, content_length)
-        conn = put_in(conn.request.state, :body)
+
+        request = %{
+          request
+          | content_length: content_length_header(responses),
+            connection: connection_header(responses),
+            state: :body
+        }
+
+        conn = put_in(conn.request, request)
         decode(:body, conn, rest, responses)
 
       :more ->
@@ -181,19 +190,19 @@ defmodule XHTTP.Conn do
       body_left == :until_closed or body_left > byte_size(data) ->
         conn = put_in(conn.request.body_left, body_left - byte_size(data))
         responses = [{:body, request_ref, data} | responses]
-        {:ok, conn, responses}
+        {:ok, request_done(conn), responses}
 
       body_left == byte_size(data) ->
         conn = put_in(conn.request.body_left, 0)
         responses = [{:done, request_ref}, {:body, request_ref, data} | responses]
-        {:ok, conn, responses}
+        {:ok, request_done(conn), responses}
 
       body_left < byte_size(data) ->
         {body, rest} = :binary.part(data, 0, body_left)
         conn = put_in(conn.buffer, rest)
         conn = put_in(conn.request.body_left, 0)
         responses = [{:done, request_ref}, {:body, request_ref, body} | responses]
-        {:ok, conn, responses}
+        {:ok, request_done(conn), responses}
     end
   end
 
@@ -215,7 +224,7 @@ defmodule XHTTP.Conn do
     responses
   end
 
-  defp content_length([{:headers, _request_ref, headers} | _responses]) do
+  defp content_length_header([{:headers, _request_ref, headers} | _responses]) do
     with [string] <- get_header(headers, "content-length"),
          {length, ""} <- Integer.parse(string) do
       length
@@ -226,6 +235,41 @@ defmodule XHTTP.Conn do
       _other ->
         throw({:xhttp, :invalid_response})
     end
+  end
+
+  defp connection_header([{:headers, _request_ref, headers} | _responses]) do
+    case get_header(headers, "connection") do
+      [token] ->
+        token
+
+      _ ->
+        nil
+    end
+  end
+
+  defp request_done(%{request: request} = conn) do
+    cond do
+      request.connection == "close" ->
+        close(conn)
+
+      request.version >= {1, 1} ->
+        conn
+
+      request.connection == "keep-alive" ->
+        conn
+
+      true ->
+        close(conn)
+    end
+  end
+
+  defp close(conn) do
+    if conn.buffer != "" do
+      Logger.debug("Connection closed with data left on the socket: ", inspect(conn.buffer))
+    end
+
+    :gen_tcp.close(conn.socket)
+    %{conn | state: :closed}
   end
 
   defp body_left(%{body_left: nil, method: method, status: status, content_length: content_length}) do
@@ -260,8 +304,10 @@ defmodule XHTTP.Conn do
       ref: ref,
       state: :status,
       method: method,
+      version: nil,
       status: nil,
       content_length: nil,
+      connection: nil,
       body_left: nil
     }
   end
