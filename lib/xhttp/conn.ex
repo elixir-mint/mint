@@ -33,16 +33,32 @@ defmodule XHTTP.Conn do
           | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = Keyword.get(opts, :transport, :gen_tcp)
-    transport_opts = [active: true, mode: :binary]
+    transport_opts = [packet: :raw, mode: :binary, active: true]
 
     case transport.connect(String.to_charlist(hostname), port, transport_opts) do
       {:ok, socket} ->
+        inet_opts(transport, socket)
         {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  defp inet_opts(transport, socket) do
+    inet = transport_to_inet(transport)
+    {:ok, opts} = inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
+
+    buffer =
+      Keyword.fetch!(opts, :buffer)
+      |> max(Keyword.fetch!(opts, :sndbuf))
+      |> max(Keyword.fetch!(opts, :recbuf))
+
+    :ok = inet.setopts(socket, buffer: buffer)
+  end
+
+  defp transport_to_inet(:gen_tcp), do: :inet
+  defp transport_to_inet(:ssl), do: :ssl
 
   @spec open?(t()) :: boolean()
   def open?(%Conn{state: state}), do: state == :open
