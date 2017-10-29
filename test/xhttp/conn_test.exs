@@ -1,127 +1,149 @@
 defmodule XHTTP.ConnTest do
   use ExUnit.Case, async: true
   alias XHTTP.Conn
+  alias XHTTP.ConnTest.TCPMock
 
-  @moduletag :integration
-
-  test "302 response - google.com" do
-    assert {:ok, conn} = Conn.connect("google.com", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
-
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 302, "Found"}} = status
-    assert {:headers, ^request, headers} = headers
-    assert hd(get_header(headers, "location")) =~ "www.google."
-    assert merge_body(responses, request) =~ "<TITLE>302 Moved</TITLE>"
+  test "unknown message" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [], nil)
+    assert Conn.stream(conn, :unknown_message) == :unknown
   end
 
-  test "200 response - example.com" do
-    assert {:ok, conn} = Conn.connect("example.com", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+  test "status" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "<title>Example Domain</title>"
+    assert {:ok, _conn, [{:status, ^ref, {{1, 1}, 200, "OK"}}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
   end
 
-  test "ssl, path, long body - tools.ietf.org" do
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc2616", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+  test "partial status" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1"})
 
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Full Copyright Statement"
+    assert {:ok, _conn, [{:status, ^ref, {{1, 1}, 200, "OK"}}]} =
+             Conn.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
-  test "keep alive - tools.ietf.org" do
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7230", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+  test "headers" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, [_status]} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Security Considerations"
+    assert {:ok, _conn, [headers]} =
+             Conn.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\n\r\n"})
 
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7231", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
-
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Semantics and Content"
+    assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
   end
 
-  test "POST body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", [], "BODY")
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+  test "partial headers" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, [_status]} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ ~s("BODY")
+    assert {:ok, conn, [headers]} = Conn.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
+    assert {:headers, ^ref, [{"foo", "Bar"}]} = headers
+    assert {:ok, _conn, [headers]} = Conn.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
+    assert {:headers, ^ref, [{"baz", "Boz"}]} = headers
   end
 
-  test "POST body streaming - httpbin.org" do
-    headers = [{"content-length", "4"}]
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", headers, :stream)
-    assert {:ok, conn} = Conn.stream_request_body(conn, "BO")
-    assert {:ok, conn} = Conn.stream_request_body(conn, "DY")
-    assert {:ok, conn} = Conn.stream_request_body(conn, :eof)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+  test "status and headers" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ ~s("BODY")
+    assert {:ok, _conn, [status, headers]} =
+             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: Bar\r\n\r\n"})
+
+    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^ref, [{"foo", "Bar"}]} = headers
   end
 
-  defp merge_body([{:body, request, body} | responses], request) do
-    body <> merge_body(responses, request)
+  test "body without content-length" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [_status, {:body, ^ref, "BODY1"}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nBODY1"})
+
+    assert {:ok, conn, [{:body, ^ref, "BODY2"}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
+
+    assert {:ok, conn, [{:done, ^ref}]} = Conn.stream(conn, {:tcp_close, conn.socket})
+    refute Conn.open?(conn)
   end
 
-  defp merge_body([{:done, request}], request) do
-    ""
+  test "body with content-length" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [_status, _headers]} =
+             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n"})
+
+    assert {:ok, conn, [{:body, ^ref, "012345678"}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "012345678"})
+    assert {:ok, conn, [{:body, ^ref, "9"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "9XXX"})
+
+    assert conn.buffer == "XXX"
+    assert Conn.open?(conn)
   end
 
-  defp receive_stream(conn, responses) do
-    receive do
-      {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
-        assert {:ok, conn, new_responses} = Conn.stream(conn, message)
+  test "no body with HEAD request" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "HEAD", "/", [], nil)
 
-        if match?({:done, _}, Enum.at(new_responses, -1)) do
-          {:ok, conn, responses ++ new_responses}
-        else
-          receive_stream(conn, responses ++ new_responses)
-        end
+    assert {:ok, conn, [_status, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
 
-      {tag, _socket} = message when tag in [:tcp_close, :ssl_close] ->
-        assert {:error, _conn, :closed} = Conn.stream(conn, message)
+    assert conn.buffer == "XXX"
+    assert Conn.open?(conn)
+  end
 
-      {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
-        assert {:error, _conn, _reason} = Conn.stream(conn, message)
-    after
-      5000 ->
-        flunk("receive_stream timeout")
+  test "status, headers, and body" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nXX"
+
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
+
+    assert conn.buffer == "XX"
+  end
+
+  # test "connection: close" do
+  # end
+  #
+  # test "connection: keep-alive" do
+  # end
+  #
+  # test "implicit connection: keep-alive on http/1.1" do
+  # end
+  #
+  # test "implicit connection: close on http/1.0" do
+  # end
+
+  defmodule TCPMock do
+    def connect(hostname, port, opts \\ []) do
+      Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
+      {:ok, make_ref()}
     end
-  end
 
-  defp get_header(headers, name) do
-    for {n, v} <- headers, n == name, do: v
+    def getopts(socket, list) do
+      Kernel.send(self(), {:tcp_mock, :getopts, [socket, list]})
+      {:ok, Enum.map(list, &{&1, 0})}
+    end
+
+    def setopts(socket, opts) do
+      Kernel.send(self(), {:tcp_mock, :setopts, [socket, opts]})
+      :ok
+    end
+
+    def send(socket, data, opts \\ []) do
+      Kernel.send(self(), {:tcp_mock, :send, [socket, data, opts]})
+      :ok
+    end
   end
 end

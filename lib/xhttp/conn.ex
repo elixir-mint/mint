@@ -59,9 +59,6 @@ defmodule XHTTP.Conn do
     :ok = inet.setopts(socket, buffer: buffer)
   end
 
-  defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(:ssl), do: :ssl
-
   @spec open?(t()) :: boolean()
   def open?(%Conn{state: state}), do: state == :open
 
@@ -124,6 +121,13 @@ defmodule XHTTP.Conn do
     {:error, :request_body_not_streamed}
   end
 
+  def stream(%Conn{socket: socket, buffer: buffer, request: nil} = conn, {tag, socket, data})
+      when tag in [:tcp, :ssl] do
+    # TODO: Figure out we should keep buffering even though there are no
+    # requests in flight
+    {:ok, put_in(conn.buffer, buffer <> data), []}
+  end
+
   def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     data = buffer <> data
@@ -161,12 +165,12 @@ defmodule XHTTP.Conn do
   defp decode(:status, %{request: request} = conn, data, []) do
     case Response.decode_status_line(data) do
       {:ok, {version, status, _reason} = status_line, rest} ->
-        request = %{request | version: version, status: status}
+        request = %{request | version: version, status: status, state: :headers}
         conn = put_in(conn.request, request)
         decode(:headers, conn, rest, [{:status, request.ref, status_line}])
 
       :more ->
-        conn = put_in(request.state, :status)
+        conn = put_in(conn.buffer, data)
         {:ok, conn, []}
 
       :error ->
@@ -194,7 +198,7 @@ defmodule XHTTP.Conn do
         decode(:body, conn, rest, responses)
 
       :more ->
-        conn = put_in(conn.request.state, :headers)
+        conn = put_in(conn.buffer, data)
         {:ok, conn, responses}
 
       :error ->
@@ -213,24 +217,31 @@ defmodule XHTTP.Conn do
         responses = [{:done, request_ref} | responses]
         {:ok, conn, responses}
 
-      body_left == :until_closed or body_left > byte_size(data) ->
+      body_left == :until_closed ->
+        responses = add_body(data, request_ref, responses)
+        {:ok, request_done(conn), responses}
+
+      body_left > byte_size(data) ->
         conn = put_in(conn.request.body_left, body_left - byte_size(data))
-        responses = [{:body, request_ref, data} | responses]
+        responses = add_body(data, request_ref, responses)
         {:ok, request_done(conn), responses}
 
       body_left == byte_size(data) ->
         conn = put_in(conn.request.body_left, 0)
-        responses = [{:done, request_ref}, {:body, request_ref, data} | responses]
+        responses = [{:done, request_ref} | add_body(data, request_ref, responses)]
         {:ok, request_done(conn), responses}
 
       body_left < byte_size(data) ->
-        {body, rest} = :binary.part(data, 0, body_left)
+        <<body::binary-size(body_left), rest::binary>> = data
         conn = put_in(conn.buffer, rest)
         conn = put_in(conn.request.body_left, 0)
-        responses = [{:done, request_ref}, {:body, request_ref, body} | responses]
+        responses = [{:done, request_ref} | add_body(body, request_ref, responses)]
         {:ok, request_done(conn), responses}
     end
   end
+
+  defp add_body("", _request_ref, responses), do: responses
+  defp add_body(data, request_ref, responses), do: [{:body, request_ref, data} | responses]
 
   defp add_header(name, value, request_ref, [{:headers, request_ref, headers} | responses]) do
     headers = [{name, value} | headers]
@@ -255,37 +266,34 @@ defmodule XHTTP.Conn do
          {length, ""} <- Integer.parse(string) do
       length
     else
-      [] ->
-        nil
-
-      _other ->
-        throw({:xhttp, :invalid_response})
+      [] -> nil
+      _other -> throw({:xhttp, :invalid_response})
     end
+  end
+
+  defp content_length_header(_responses) do
+    nil
   end
 
   defp connection_header([{:headers, _request_ref, headers} | _responses]) do
     case get_header(headers, "connection") do
-      [token] ->
-        token
-
-      _ ->
-        nil
+      [token] -> token
+      _ -> nil
     end
   end
 
+  defp connection_header(_responses) do
+    nil
+  end
+
   defp request_done(%{request: request} = conn) do
+    conn = put_in(conn.request, nil)
+
     cond do
-      request.connection == "close" ->
-        close(conn)
-
-      request.version >= {1, 1} ->
-        conn
-
-      request.connection == "keep-alive" ->
-        conn
-
-      true ->
-        close(conn)
+      request.connection == "close" -> close(conn)
+      request.version >= {1, 1} -> conn
+      request.connection == "keep-alive" -> conn
+      true -> close(conn)
     end
   end
 
@@ -324,6 +332,9 @@ defmodule XHTTP.Conn do
 
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
   defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
+
+  defp transport_to_inet(:gen_tcp), do: :inet
+  defp transport_to_inet(other), do: other
 
   defp new_request(ref, state, method) do
     %{
