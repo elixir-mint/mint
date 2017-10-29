@@ -66,8 +66,7 @@ defmodule XHTTP.ConnTest do
     assert {:ok, conn, [_status, {:body, ^ref, "BODY1"}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nBODY1"})
 
-    assert {:ok, conn, [{:body, ^ref, "BODY2"}]} =
-             Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
+    assert {:ok, conn, [{:body, ^ref, "BODY2"}]} = Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
 
     assert {:ok, conn, [{:done, ^ref}]} = Conn.stream(conn, {:tcp_close, conn.socket})
     refute Conn.open?(conn)
@@ -76,12 +75,13 @@ defmodule XHTTP.ConnTest do
   test "body with content-length" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n"
 
-    assert {:ok, conn, [_status, _headers]} =
-             Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n"})
+    assert {:ok, conn, [_status, _headers]} = Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, [{:body, ^ref, "012345678"}]} =
              Conn.stream(conn, {:tcp, conn.socket, "012345678"})
+
     assert {:ok, conn, [{:body, ^ref, "9"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, "9XXX"})
 
@@ -113,22 +113,63 @@ defmodule XHTTP.ConnTest do
     assert conn.buffer == "XX"
   end
 
-  # test "connection: close" do
-  # end
-  #
-  # test "connection: keep-alive" do
-  # end
-  #
-  # test "implicit connection: keep-alive on http/1.1" do
-  # end
-  #
-  # test "implicit connection: close on http/1.0" do
-  # end
+  test "connection: close" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\nconnection: close\r\n\r\nX"
+
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
+    refute Conn.open?(conn)
+  end
+
+  test "connection: keep-alive" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\nconnection: keep-alive\r\n\r\nX"
+
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
+    assert Conn.open?(conn)
+  end
+
+  test "implicit connection: close on http/1.0" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\n\r\nX"
+
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
+    refute Conn.open?(conn)
+  end
+
+  test "implicit connection: keep-alive on http/1.1" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
+
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
+    assert Conn.open?(conn)
+  end
 
   defmodule TCPMock do
     def connect(hostname, port, opts \\ []) do
       Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
       {:ok, make_ref()}
+    end
+
+    def close(socket) do
+      Kernel.send(self(), {:tcp_mock, :close, [socket]})
+      :ok
     end
 
     def getopts(socket, list) do

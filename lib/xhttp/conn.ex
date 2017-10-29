@@ -219,12 +219,12 @@ defmodule XHTTP.Conn do
 
       body_left == :until_closed ->
         responses = add_body(data, request_ref, responses)
-        {:ok, request_done(conn), responses}
+        {:ok, conn, responses}
 
       body_left > byte_size(data) ->
         conn = put_in(conn.request.body_left, body_left - byte_size(data))
         responses = add_body(data, request_ref, responses)
-        {:ok, request_done(conn), responses}
+        {:ok, conn, responses}
 
       body_left == byte_size(data) ->
         conn = put_in(conn.request.body_left, 0)
@@ -302,7 +302,7 @@ defmodule XHTTP.Conn do
       Logger.debug("Connection closed with data left on the socket: ", inspect(conn.buffer))
     end
 
-    :gen_tcp.close(conn.socket)
+    :ok = conn.transport.close(conn.socket)
     %{conn | state: :closed}
   end
 
