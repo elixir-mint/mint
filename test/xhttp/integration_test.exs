@@ -91,6 +91,24 @@ defmodule XHTTP.IntegrationTest do
     assert merge_body(responses, request) =~ ~s("BODY")
   end
 
+  test "pipelining - httpbin.org" do
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn, request1} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request2} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request3} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request4} = Conn.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [_status, _headers | responses1]} = receive_stream(conn, [])
+    assert {:ok, conn, [_status, _headers | responses2]} = receive_stream(conn, [])
+    assert {:ok, conn, [_status, _headers | responses3]} = receive_stream(conn, [])
+    assert {:ok, _conn, [_status, _headers | responses4]} = receive_stream(conn, [])
+
+    assert merge_body(responses1, request1) =~ "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses2, request2) =~ "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses3, request3) =~ "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses4, request4) =~ "Testing an HTTP Library can become difficult sometimes"
+  end
+
   defp merge_body([{:body, request, body} | responses], request) do
     body <> merge_body(responses, request)
   end
@@ -101,14 +119,12 @@ defmodule XHTTP.IntegrationTest do
 
   defp receive_stream(conn, responses) do
     receive do
+      {:rest, conn, rest_responses} ->
+        maybe_done(conn, rest_responses, responses)
+
       {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
         assert {:ok, conn, new_responses} = Conn.stream(conn, message)
-
-        if match?({:done, _}, Enum.at(new_responses, -1)) do
-          {:ok, conn, responses ++ new_responses}
-        else
-          receive_stream(conn, responses ++ new_responses)
-        end
+        maybe_done(conn, new_responses, responses)
 
       {tag, _socket} = message when tag in [:tcp_close, :ssl_close] ->
         assert {:error, _conn, :closed} = Conn.stream(conn, message)
@@ -118,6 +134,18 @@ defmodule XHTTP.IntegrationTest do
     after
       5000 ->
         flunk("receive_stream timeout")
+    end
+  end
+
+  defp maybe_done(conn, responses, acc) do
+    {new, rest} = Enum.split_while(responses, &(not match?({:done, _}, &1)))
+
+    case {new, rest} do
+      {new, []} ->
+        receive_stream(conn, acc ++ new)
+      {new, [done | rest]} ->
+        if rest != [], do: send(self(), {:rest, conn, rest})
+        {:ok, conn, acc ++ new ++ [done]}
     end
   end
 

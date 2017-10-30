@@ -26,6 +26,7 @@ defmodule XHTTP.Conn do
     :host,
     :request,
     :transport,
+    requests: :queue.new(),
     state: :closed,
     buffer: ""
   ]
@@ -75,7 +76,6 @@ defmodule XHTTP.Conn do
     {:error, :request_already_in_flight}
   end
 
-  # TODO: Allow streaming body
   def request(
         %Conn{socket: socket, host: host, transport: transport} = conn,
         method,
@@ -90,8 +90,16 @@ defmodule XHTTP.Conn do
       :ok ->
         request_ref = make_ref()
         state = if body == :stream, do: :stream_request, else: :status
-        conn = %Conn{conn | request: new_request(request_ref, state, method)}
-        {:ok, conn, request_ref}
+        request = new_request(request_ref, state, method)
+
+        if conn.request == nil do
+          conn = %Conn{conn | request: request}
+          {:ok, conn, request_ref}
+        else
+          requests = :queue.in(request, conn.requests)
+          conn = %Conn{conn | requests: requests}
+          {:ok, conn, request_ref}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -123,7 +131,7 @@ defmodule XHTTP.Conn do
 
   def stream(%Conn{socket: socket, buffer: buffer, request: nil} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    # TODO: Figure out we should keep buffering even though there are no
+    # TODO: Figure out if we should keep buffering even though there are no
     # requests in flight
     {:ok, put_in(conn.buffer, buffer <> data), []}
   end
@@ -210,6 +218,7 @@ defmodule XHTTP.Conn do
     request_ref = conn.request.ref
     body_left = body_left(conn.request)
     conn = put_in(conn.request.body_left, body_left)
+    conn = put_in(conn.buffer, "")
 
     cond do
       body_left == :none ->
@@ -287,13 +296,22 @@ defmodule XHTTP.Conn do
   end
 
   defp request_done(%{request: request} = conn) do
-    conn = put_in(conn.request, nil)
+    conn = next_request(conn)
 
     cond do
       request.connection == "close" -> close(conn)
       request.version >= {1, 1} -> conn
       request.connection == "keep-alive" -> conn
       true -> close(conn)
+    end
+  end
+
+  defp next_request(conn) do
+    case :queue.out(conn.requests) do
+      {{:value, request}, requests} ->
+        %{conn | request: request, requests: requests}
+      {:empty, requests} ->
+        %{conn | request: nil, requests: requests}
     end
   end
 
