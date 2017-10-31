@@ -187,31 +187,7 @@ defmodule XHTTP.Conn do
   end
 
   defp decode(:headers, %{request: request} = conn, data, responses) do
-    case Response.decode_header(data) do
-      {:ok, {name, value}, rest} ->
-        responses = add_header(name, value, request.ref, responses)
-        decode(:headers, conn, rest, responses)
-
-      {:ok, :eof, rest} ->
-        responses = reverse_headers(responses)
-
-        request = %{
-          request
-          | content_length: content_length_header(responses),
-            connection: connection_header(responses),
-            state: :body
-        }
-
-        conn = put_in(conn.request, request)
-        decode(:body, conn, rest, responses)
-
-      :more ->
-        conn = put_in(conn.buffer, data)
-        {:ok, conn, responses}
-
-      :error ->
-        {:error, :invalid_response}
-    end
+    decode_headers(data, conn, request, responses, [])
   end
 
   defp decode(:body, conn, data, responses) do
@@ -249,50 +225,52 @@ defmodule XHTTP.Conn do
     end
   end
 
+  defp decode_headers(data, conn, request, responses, headers) do
+    case Response.decode_header(data) do
+      {:ok, {name, value}, rest} ->
+        headers = [{name, value} | headers]
+        request = store_header(request, name, value)
+        decode_headers(rest, conn, request, responses, headers)
+
+      {:ok, :eof, rest} ->
+        responses = add_headers(headers, request.ref, responses)
+        request = %{request | state: :body}
+        conn = put_in(conn.request, request)
+        decode(:body, conn, rest, responses)
+
+      :more ->
+        responses = add_headers(headers, request.ref, responses)
+        conn = %{conn | buffer: data, request: request}
+        {:ok, conn, responses}
+
+      :error ->
+        {:error, :invalid_response}
+    end
+  end
+
+  defp add_headers([], _request_ref, responses),
+    do: responses
+  defp add_headers(headers, request_ref, responses),
+    do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
+
   defp add_body("", _request_ref, responses), do: responses
   defp add_body(data, request_ref, responses), do: [{:body, request_ref, data} | responses]
 
-  defp add_header(name, value, request_ref, [{:headers, request_ref, headers} | responses]) do
-    headers = [{name, value} | headers]
-    [{:headers, request_ref, headers} | responses]
-  end
-
-  defp add_header(name, value, request_ref, responses) do
-    headers = [{name, value}]
-    [{:headers, request_ref, headers} | responses]
-  end
-
-  defp reverse_headers([{:headers, request_ref, headers} | responses]) do
-    [{:headers, request_ref, Enum.reverse(headers)} | responses]
-  end
-
-  defp reverse_headers(responses) do
-    responses
-  end
-
-  defp content_length_header([{:headers, _request_ref, headers} | _responses]) do
-    with [string] <- get_header(headers, "content-length"),
-         {length, ""} <- Integer.parse(string) do
-      length
-    else
-      [] -> nil
-      _other -> throw({:xhttp, :invalid_response})
+  defp store_header(request, "content-length", value) do
+    case Integer.parse(value) do
+      {length, ""} ->
+        %{request | content_length: length}
+      _other ->
+        throw({:xhttp, :invalid_response})
     end
   end
 
-  defp content_length_header(_responses) do
-    nil
+  defp store_header(request, "connection", value) do
+    %{request | connection: value}
   end
 
-  defp connection_header([{:headers, _request_ref, headers} | _responses]) do
-    case get_header(headers, "connection") do
-      [token] -> token
-      _ -> nil
-    end
-  end
-
-  defp connection_header(_responses) do
-    nil
+  defp store_header(request, _name, _value) do
+    request
   end
 
   defp request_done(%{request: request} = conn) do
@@ -342,10 +320,6 @@ defmodule XHTTP.Conn do
 
   defp body_left(%{body_left: body_left}) do
     body_left
-  end
-
-  defp get_header(headers, name) do
-    for {n, v} <- headers, n == name, do: v
   end
 
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
