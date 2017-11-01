@@ -1,14 +1,14 @@
 defmodule XHTTP.Parse do
   # TODO: Inline and optimize, reduce String module usage
 
-  defmacrop digit?(char), do: quote(do: unquote(char) in ?0..?9)
-  defmacrop alpha?(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
-  defmacrop whitespace?(char), do: quote(do: unquote(char) in '\s\t')
-  defmacrop comma?(char), do: quote(do: unquote(char) == ?,)
+  defmacrop is_digit(char), do: quote(do: unquote(char) in ?0..?9)
+  defmacrop is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
+  defmacrop is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
+  defmacrop is_comma(char), do: quote(do: unquote(char) == ?,)
 
-  defmacrop tchar?(char) do
+  defmacrop is_tchar(char) do
     quote do
-      unquote(char) in '!#$%&\'*+-.^_`|~' or digit?(unquote(char)) or alpha?(unquote(char))
+      unquote(char) in '!#$%&\'*+-.^_`|~' or is_digit(unquote(char)) or is_alpha(unquote(char))
     end
   end
 
@@ -34,12 +34,12 @@ defmodule XHTTP.Parse do
 
   defp token_list(<<>>, acc), do: Enum.reverse(acc)
 
-  defp token_list(<<char, rest::binary>>, acc) when whitespace?(char) or comma?(char),
+  defp token_list(<<char, rest::binary>>, acc) when is_whitespace(char) or is_comma(char),
     do: token_list(rest, acc)
 
   defp token_list(rest, acc), do: token(rest, <<>>, acc)
 
-  defp token(<<char, rest::binary>>, token, acc) when tchar?(char),
+  defp token(<<char, rest::binary>>, token, acc) when is_tchar(char),
     do: token(rest, <<token::binary, char>>, acc)
 
   defp token(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
@@ -48,7 +48,7 @@ defmodule XHTTP.Parse do
 
   defp token_list_sep(<<>>, acc), do: Enum.reverse(acc)
 
-  defp token_list_sep(<<char, rest::binary>>, acc) when whitespace?(char),
+  defp token_list_sep(<<char, rest::binary>>, acc) when is_whitespace(char),
     do: token_list_sep(rest, acc)
 
   defp token_list_sep(<<?,, rest::binary>>, acc), do: token_list(rest, acc)
