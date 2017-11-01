@@ -153,7 +153,7 @@ defmodule XHTTP.Conn do
       when tag in [:tcp_close, :ssl_close] do
     conn = put_in(conn.state, :closed)
 
-    if request.body_left == :until_closed do
+    if request.body == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
     else
       {:error, conn, :closed}
@@ -192,37 +192,11 @@ defmodule XHTTP.Conn do
 
   defp decode(:body, conn, data, responses) do
     request_ref = conn.request.ref
-    body_left = body_left(conn.request)
-    conn = put_in(conn.request.body_left, body_left)
+    body = message_body(conn.request)
+    conn = put_in(conn.request.body, body)
     conn = put_in(conn.buffer, "")
 
-    cond do
-      body_left == :none ->
-        conn = put_in(conn.buffer, data)
-        responses = [{:done, request_ref} | responses]
-        {:ok, conn, responses}
-
-      body_left == :until_closed ->
-        responses = add_body(data, request_ref, responses)
-        {:ok, conn, responses}
-
-      body_left > byte_size(data) ->
-        conn = put_in(conn.request.body_left, body_left - byte_size(data))
-        responses = add_body(data, request_ref, responses)
-        {:ok, conn, responses}
-
-      body_left == byte_size(data) ->
-        conn = put_in(conn.request.body_left, 0)
-        responses = [{:done, request_ref} | add_body(data, request_ref, responses)]
-        {:ok, request_done(conn), responses}
-
-      body_left < byte_size(data) ->
-        <<body::binary-size(body_left), rest::binary>> = data
-        conn = put_in(conn.buffer, rest)
-        conn = put_in(conn.request.body_left, 0)
-        responses = [{:done, request_ref} | add_body(body, request_ref, responses)]
-        {:ok, request_done(conn), responses}
-    end
+    decode_body(body, conn, data, request_ref, responses)
   end
 
   defp decode_headers(data, conn, request, responses, headers) do
@@ -245,6 +219,38 @@ defmodule XHTTP.Conn do
 
       :error ->
         {:error, :invalid_response}
+    end
+  end
+
+  defp decode_body(:none, conn, data, request_ref, responses) do
+    conn = put_in(conn.buffer, data)
+    responses = [{:done, request_ref} | responses]
+    {:ok, conn, responses}
+  end
+
+  defp decode_body(:until_closed, conn, data, request_ref, responses) do
+    responses = add_body(data, request_ref, responses)
+    {:ok, conn, responses}
+  end
+
+  defp decode_body({:content_length, length}, conn, data, request_ref, responses) do
+    cond do
+      length > byte_size(data) ->
+        conn = put_in(conn.request.body, {:content_length, length - byte_size(data)})
+        responses = add_body(data, request_ref, responses)
+        {:ok, conn, responses}
+
+      length == byte_size(data) ->
+        conn = put_in(conn.request.body, {:content_length, 0})
+        responses = [{:done, request_ref} | add_body(data, request_ref, responses)]
+        {:ok, request_done(conn), responses}
+
+      length < byte_size(data) ->
+        <<body::binary-size(length), rest::binary>> = data
+        conn = put_in(conn.buffer, rest)
+        conn = put_in(conn.request.body, {:content_length, 0})
+        responses = [{:done, request_ref} | add_body(body, request_ref, responses)]
+        {:ok, request_done(conn), responses}
     end
   end
 
@@ -302,7 +308,7 @@ defmodule XHTTP.Conn do
     %{conn | state: :closed}
   end
 
-  defp body_left(%{body_left: nil, method: method, status: status, content_length: content_length}) do
+  defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       method == "HEAD" or status in 100..199 or status in [204, 304] ->
         :none
@@ -310,16 +316,16 @@ defmodule XHTTP.Conn do
       # method == "CONNECT" and status in 200..299 -> nil
       # transfer-encoding
 
-      content_length ->
-        content_length
+      request.content_length ->
+        {:content_length, request.content_length}
 
       true ->
         :until_closed
     end
   end
 
-  defp body_left(%{body_left: body_left}) do
-    body_left
+  defp message_body(%{body: body}) do
+    body
   end
 
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
@@ -337,7 +343,7 @@ defmodule XHTTP.Conn do
       status: nil,
       content_length: nil,
       connection: [],
-      body_left: nil
+      body: nil
     }
   end
 end
