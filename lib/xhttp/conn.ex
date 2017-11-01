@@ -1,5 +1,5 @@
 defmodule XHTTP.Conn do
-  alias XHTTP.{Conn, Request, Response}
+  alias XHTTP.{Conn, Parse, Request, Response}
 
   require Logger
 
@@ -248,25 +248,24 @@ defmodule XHTTP.Conn do
     end
   end
 
-  defp add_headers([], _request_ref, responses),
-    do: responses
+  defp add_headers([], _request_ref, responses), do: responses
+
   defp add_headers(headers, request_ref, responses),
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
   defp add_body("", _request_ref, responses), do: responses
   defp add_body(data, request_ref, responses), do: [{:body, request_ref, data} | responses]
 
-  defp store_header(request, "content-length", value) do
-    case Integer.parse(value) do
-      {length, ""} ->
-        %{request | content_length: length}
-      _other ->
-        throw({:xhttp, :invalid_response})
-    end
+  defp store_header(%{content_length: nil} = request, "content-length", value) do
+    %{request | content_length: Parse.content_length_header(value)}
   end
 
-  defp store_header(request, "connection", value) do
-    %{request | connection: value}
+  defp store_header(%{connection: connection} = request, "connection", value) do
+    %{request | connection: connection ++ Parse.connection_header(value)}
+  end
+
+  defp store_header(_request, name, _value) when name in ~w(content-length) do
+    throw({:xhttp, :invalid_response})
   end
 
   defp store_header(request, _name, _value) do
@@ -277,9 +276,9 @@ defmodule XHTTP.Conn do
     conn = next_request(conn)
 
     cond do
-      request.connection == "close" -> close(conn)
+      "close" in request.connection -> close(conn)
       request.version >= {1, 1} -> conn
-      request.connection == "keep-alive" -> conn
+      "keep-alive" in request.connection -> conn
       true -> close(conn)
     end
   end
@@ -288,6 +287,7 @@ defmodule XHTTP.Conn do
     case :queue.out(conn.requests) do
       {{:value, request}, requests} ->
         %{conn | request: request, requests: requests}
+
       {:empty, requests} ->
         %{conn | request: nil, requests: requests}
     end
@@ -336,7 +336,7 @@ defmodule XHTTP.Conn do
       version: nil,
       status: nil,
       content_length: nil,
-      connection: nil,
+      connection: [],
       body_left: nil
     }
   end

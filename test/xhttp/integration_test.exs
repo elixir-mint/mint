@@ -103,10 +103,17 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn, [_status, _headers | responses3]} = receive_stream(conn, [])
     assert {:ok, _conn, [_status, _headers | responses4]} = receive_stream(conn, [])
 
-    assert merge_body(responses1, request1) =~ "Testing an HTTP Library can become difficult sometimes"
-    assert merge_body(responses2, request2) =~ "Testing an HTTP Library can become difficult sometimes"
-    assert merge_body(responses3, request3) =~ "Testing an HTTP Library can become difficult sometimes"
-    assert merge_body(responses4, request4) =~ "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses1, request1) =~
+             "Testing an HTTP Library can become difficult sometimes"
+
+    assert merge_body(responses2, request2) =~
+             "Testing an HTTP Library can become difficult sometimes"
+
+    assert merge_body(responses3, request3) =~
+             "Testing an HTTP Library can become difficult sometimes"
+
+    assert merge_body(responses4, request4) =~
+             "Testing an HTTP Library can become difficult sometimes"
   end
 
   defp merge_body([{:body, request, body} | responses], request) do
@@ -143,6 +150,7 @@ defmodule XHTTP.IntegrationTest do
     case {new, rest} do
       {new, []} ->
         receive_stream(conn, acc ++ new)
+
       {new, [done | rest]} ->
         if rest != [], do: send(self(), {:rest, conn, rest})
         {:ok, conn, acc ++ new ++ [done]}

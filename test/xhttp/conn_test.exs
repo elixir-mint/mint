@@ -161,6 +161,14 @@ defmodule XHTTP.ConnTest do
     assert Conn.open?(conn)
   end
 
+  test "error with multiple content-length headers" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
+
+    assert {:error, ^ref, :invalid_response} = Conn.stream(conn, {:tcp, conn.socket, response})
+  end
+
   defmodule TCPMock do
     def connect(hostname, port, opts \\ []) do
       Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
