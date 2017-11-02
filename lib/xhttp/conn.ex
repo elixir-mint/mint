@@ -72,6 +72,10 @@ defmodule XHTTP.Conn do
         ) ::
           {:ok, t(), request_ref()}
           | {:error, term()}
+  def request(%Conn{request: %{state: :stream_request}}, _method, _path, _headers, _body) do
+    {:error, :request_body_is_streaming}
+  end
+
   def request(
         %Conn{socket: socket, host: host, transport: transport} = conn,
         method,
