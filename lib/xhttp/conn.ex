@@ -72,10 +72,6 @@ defmodule XHTTP.Conn do
         ) ::
           {:ok, t(), request_ref()}
           | {:error, term()}
-  def request(%Conn{request: request}, _method, _path, _headers, _body) when is_reference(request) do
-    {:error, :request_already_in_flight}
-  end
-
   def request(
         %Conn{socket: socket, host: host, transport: transport} = conn,
         method,
