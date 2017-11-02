@@ -12,6 +12,14 @@ defmodule XHTTP.Parse do
     end
   end
 
+  def strip_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
+  def strip_crlf(binary) when byte_size(binary) < 2, do: :more
+  def strip_crlf(_other), do: :error
+
+  def ignore_until_crlf(<<>>), do: :more
+  def ignore_until_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
+  def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
+
   def content_length_header(string) do
     case Integer.parse(string) do
       {length, ""} when length >= 0 ->
@@ -23,6 +31,12 @@ defmodule XHTTP.Parse do
   end
 
   def connection_header(string) do
+    string
+    |> token_list_downcase()
+    |> not_empty!()
+  end
+
+  def transfer_encoding_header(string) do
     string
     |> token_list_downcase()
     |> not_empty!()

@@ -170,7 +170,7 @@ defmodule XHTTP.Conn do
     :unknown
   end
 
-  defp decode(:status, %{request: request} = conn, data, []) do
+  defp decode(:status, %{request: request} = conn, data, responses) do
     case Response.decode_status_line(data) do
       {:ok, {version, status, _reason} = status_line, rest} ->
         request = %{request | version: version, status: status, state: :headers}
@@ -179,7 +179,7 @@ defmodule XHTTP.Conn do
 
       :more ->
         conn = put_in(conn.buffer, data)
-        {:ok, conn, []}
+        {:ok, conn, responses}
 
       :error ->
         {:error, :invalid_response}
@@ -187,7 +187,7 @@ defmodule XHTTP.Conn do
   end
 
   defp decode(:headers, %{request: request} = conn, data, responses) do
-    decode_headers(data, conn, request, responses, [])
+    decode_headers(conn, request, data, responses, [])
   end
 
   defp decode(:body, conn, data, responses) do
@@ -199,12 +199,12 @@ defmodule XHTTP.Conn do
     decode_body(body, conn, data, request_ref, responses)
   end
 
-  defp decode_headers(data, conn, request, responses, headers) do
+  defp decode_headers(conn, request, data, responses, headers) do
     case Response.decode_header(data) do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
         request = store_header(request, name, value)
-        decode_headers(rest, conn, request, responses, headers)
+        decode_headers(conn, request, rest, responses, headers)
 
       {:ok, :eof, rest} ->
         responses = add_headers(headers, request.ref, responses)
@@ -240,17 +240,102 @@ defmodule XHTTP.Conn do
         responses = add_body(data, request_ref, responses)
         {:ok, conn, responses}
 
-      length == byte_size(data) ->
-        conn = put_in(conn.request.body, {:content_length, 0})
-        responses = [{:done, request_ref} | add_body(data, request_ref, responses)]
-        {:ok, request_done(conn), responses}
-
-      length < byte_size(data) ->
+      length <= byte_size(data) ->
         <<body::binary-size(length), rest::binary>> = data
-        conn = put_in(conn.buffer, rest)
-        conn = put_in(conn.request.body, {:content_length, 0})
+        conn = request_done(conn)
         responses = [{:done, request_ref} | add_body(body, request_ref, responses)]
-        {:ok, request_done(conn), responses}
+        decode(:status, conn, rest, responses)
+    end
+  end
+
+  defp decode_body({:chunked, nil}, conn, "", _request_ref, responses) do
+    conn = put_in(conn.buffer, "")
+    conn = put_in(conn.request.body, {:chunked, nil})
+    {:ok, conn, responses}
+  end
+
+  defp decode_body({:chunked, nil}, conn, data, request_ref, responses) do
+    case Integer.parse(data, 16) do
+      {_size, ""} ->
+        conn = put_in(conn.buffer, data)
+        conn = put_in(conn.request.body, {:chunked, nil})
+        {:ok, conn, responses}
+
+      {0, rest} ->
+        decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
+
+      {size, rest} when size > 0 ->
+        decode_body({:chunked, :metadata, size + 2}, conn, rest, request_ref, responses)
+
+      _other ->
+        {:error, :invalid_response}
+    end
+  end
+
+  defp decode_body({:chunked, :metadata, size}, conn, data, request_ref, responses) do
+    case Parse.ignore_until_crlf(data) do
+      {:ok, rest} ->
+        decode_body({:chunked, size}, conn, rest, request_ref, responses)
+
+      :more ->
+        conn = put_in(conn.buffer, data)
+        conn = put_in(conn.request.body, {:chunked, :metadata, size})
+        {:ok, conn, responses}
+    end
+  end
+
+  defp decode_body({:chunked, :trailer}, conn, data, _request_ref, responses) do
+    decode_trailer_headers(conn, data, responses, [])
+  end
+
+  defp decode_body({:chunked, length}, conn, data, request_ref, responses) do
+    cond do
+      length > byte_size(data) ->
+        conn = put_in(conn.request.body, {:chunked, length - byte_size(data)})
+        responses = add_body(data, request_ref, responses)
+        {:ok, conn, responses}
+
+      length <= byte_size(data) ->
+        length = length - 2
+        <<body::binary-size(length), rest::binary>> = data
+
+        case Parse.strip_crlf(rest) do
+          {:ok, rest} ->
+            responses = add_body(body, request_ref, responses)
+            conn = put_in(conn.request.body, {:chunked, nil})
+            decode_body({:chunked, nil}, conn, rest, request_ref, responses)
+
+          :more ->
+            conn = put_in(conn.request.body, {:chunked, length})
+            conn = put_in(conn.buffer, data)
+            {:ok, conn, responses}
+
+          :error ->
+            throw({:xhttp, :invalid_response})
+        end
+    end
+  end
+
+  defp decode_trailer_headers(conn, data, responses, headers) do
+    case Response.decode_header(data) do
+      {:ok, {name, value}, rest} ->
+        headers = [{name, value} | headers]
+        decode_trailer_headers(conn, rest, responses, headers)
+
+      {:ok, :eof, rest} ->
+        responses = add_headers(headers, conn.request.ref, responses)
+        responses = [{:done, conn.request.ref} | responses]
+        conn = request_done(conn)
+        decode(:status, conn, rest, responses)
+
+      :more ->
+        responses = add_headers(headers, conn.request.ref, responses)
+        conn = %{conn | buffer: data}
+        conn = put_in(conn.request.body, {:chunked, :trailer})
+        {:ok, conn, responses}
+
+      :error ->
+        {:error, :invalid_response}
     end
   end
 
@@ -260,7 +345,13 @@ defmodule XHTTP.Conn do
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
   defp add_body("", _request_ref, responses), do: responses
-  defp add_body(data, request_ref, responses), do: [{:body, request_ref, data} | responses]
+
+  # TODO: Concat binaries or build iodata?
+  defp add_body(new_data, request_ref, [{:body, request_ref, data} | responses]),
+    do: [{:body, request_ref, data <> new_data} | responses]
+
+  defp add_body(new_data, request_ref, responses),
+    do: [{:body, request_ref, new_data} | responses]
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
     %{request | content_length: Parse.content_length_header(value)}
@@ -268,6 +359,10 @@ defmodule XHTTP.Conn do
 
   defp store_header(%{connection: connection} = request, "connection", value) do
     %{request | connection: connection ++ Parse.connection_header(value)}
+  end
+
+  defp store_header(%{transfer_encoding: transfer_encoding} = request, "transfer-encoding", value) do
+    %{request | transfer_encoding: transfer_encoding ++ Parse.transfer_encoding_header(value)}
   end
 
   defp store_header(_request, name, _value) when name in ~w(content-length) do
@@ -279,6 +374,8 @@ defmodule XHTTP.Conn do
   end
 
   defp request_done(%{request: request} = conn) do
+    # TODO: Figure out what to do if connection is closed or there is no next
+    # request and we still have data on the socket. RFC7230 3.4
     conn = next_request(conn)
 
     cond do
@@ -308,13 +405,25 @@ defmodule XHTTP.Conn do
     %{conn | state: :closed}
   end
 
+  # TODO: We should probably error if both transfer-encoding and content-length
+  # is set. RFC7230 3.3.3:
+  # > If a message is received with both a Transfer-Encoding and a
+  # > Content-Length header field, the Transfer-Encoding overrides the
+  # > Content-Length.  Such a message might indicate an attempt to
+  # > perform request smuggling (Section 9.5) or response splitting
+  # > (Section 9.4) and ought to be handled as an error.  A sender MUST
+  # > remove the received Content-Length field prior to forwarding such
+  # > a message downstream.
   defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       method == "HEAD" or status in 100..199 or status in [204, 304] ->
         :none
 
       # method == "CONNECT" and status in 200..299 -> nil
-      # transfer-encoding
+
+      # TODO: What do we do about transfer encodings we don't know about?
+      "chunked" in request.transfer_encoding ->
+        {:chunked, nil}
 
       request.content_length ->
         {:content_length, request.content_length}
@@ -343,6 +452,7 @@ defmodule XHTTP.Conn do
       status: nil,
       content_length: nil,
       connection: [],
+      transfer_encoding: [],
       body: nil
     }
   end
