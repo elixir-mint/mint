@@ -1,4 +1,21 @@
 defmodule XHTTP.Conn do
+  @moduledoc """
+  Streaming API for HTTP connections.
+
+  After a connection is established with `connect/3` and a request has been
+  sent with `request/5`, the connection needs to be streamed messages to
+  `stream/2` from `:gen_tcp` or `:ssl` socket active modes.
+
+  If the message is from the socket belonging to the given `%Conn{}` then
+  `stream/2` will return parts of the response.
+
+  All connection handling happens in the current process.
+
+  The `stream/2` function is pure because it's the users responsibility to
+  receive socket messages and pass them to the function, therefor it's important
+  to always store the returned `%Conn{}` struct from functions.
+  """
+
   alias XHTTP.{Conn, Parse, Request, Response}
 
   require Logger
@@ -31,6 +48,11 @@ defmodule XHTTP.Conn do
     buffer: ""
   ]
 
+  @doc """
+  Establishes a connection and returns a `%Conn{}` with the connection state.
+
+  The connection will be in `active: true` mode.
+  """
   @spec connect(hostname :: String.t(), port :: :inet.port_number(), opts :: Keyword.t()) ::
           {:ok, t()}
           | {:error, term()}
@@ -48,21 +70,25 @@ defmodule XHTTP.Conn do
     end
   end
 
-  defp inet_opts(transport, socket) do
-    inet = transport_to_inet(transport)
-    {:ok, opts} = inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
+  @doc """
+  Returns `true` if the connection is currently open.
 
-    buffer =
-      Keyword.fetch!(opts, :buffer)
-      |> max(Keyword.fetch!(opts, :sndbuf))
-      |> max(Keyword.fetch!(opts, :recbuf))
-
-    :ok = inet.setopts(socket, buffer: buffer)
-  end
-
+  Should be called between every request to check that server has not
+  closed the connection.
+  """
   @spec open?(t()) :: boolean()
   def open?(%Conn{state: state}), do: state == :open
 
+  @doc """
+  Sends an HTTP request.
+
+  Requests can be pipelined so the full response does not have to received
+  before the next request can be sent. It is up to users to verify that the
+  server supports pipelining and that the request is safe to pipeline.
+
+  If `:stream` is given as `body` the request body should be be streamed with
+  `stream_request_body/2`.
+  """
   @spec request(
           t(),
           method :: atom | String.t(),
@@ -106,6 +132,15 @@ defmodule XHTTP.Conn do
     end
   end
 
+  @doc """
+  Streams the request body.
+
+  Requires the `body` to be set as `:stream` in `request/5`. The body will be
+  sent until `:eof` is given.
+
+  Users should send the appropriate request headers to indicate the length of
+  the message body.
+  """
   @spec stream_request_body(t(), body :: iodata() | :eof) :: {:ok, t()} | {:error, term()}
   def stream_request_body(%Conn{request: %{state: :stream_request}} = conn, :eof) do
     {:ok, put_in(conn.request.state, :status)}
@@ -121,6 +156,26 @@ defmodule XHTTP.Conn do
     end
   end
 
+  @doc """
+  Streams the HTTP response.
+
+  This functions takes messages received from `:gen_tcp` or `:ssl` sockets in
+  active mode and returns the HTTP response in parts:
+
+    * `:status` - This response will always be returned and will be the first
+      response returned for a request.
+    * `:headers` - Headers are optional and can be returned multiple times if
+      the headers were split over multiple messages or if trailing headers were sent.
+    * `:body` - The body is optional and can be returned in multiple parts.
+    * `:done` - This is the last response for a request and indicates that the
+      response is done streaming.
+
+  If the message does not belong to the connection's socket `:unknown` will
+  be returned.
+
+  If requests are pipelined multiple responses may be returned, use the request
+  reference `t:request_ref/0` to distinguish them.
+  """
   @spec stream(t(), tcp_message()) ::
           {:ok, t(), [response()]}
           | {:error, t(), term()}
@@ -168,6 +223,18 @@ defmodule XHTTP.Conn do
 
   def stream(%Conn{}, _other) do
     :unknown
+  end
+
+  defp inet_opts(transport, socket) do
+    inet = transport_to_inet(transport)
+    {:ok, opts} = inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
+
+    buffer =
+      Keyword.fetch!(opts, :buffer)
+      |> max(Keyword.fetch!(opts, :sndbuf))
+      |> max(Keyword.fetch!(opts, :recbuf))
+
+    :ok = inet.setopts(socket, buffer: buffer)
   end
 
   defp decode(:status, %{request: request} = conn, data, responses) do

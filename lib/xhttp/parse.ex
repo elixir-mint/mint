@@ -1,4 +1,6 @@
 defmodule XHTTP.Parse do
+  @moduledoc false
+
   # TODO: Inline and optimize, reduce String module usage
 
   defmacrop is_digit(char), do: quote(do: unquote(char) in ?0..?9)
