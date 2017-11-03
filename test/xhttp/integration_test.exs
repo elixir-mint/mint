@@ -4,69 +4,57 @@ defmodule XHTTP.IntegrationTest do
 
   @moduletag :integration
 
-  test "302 response - google.com" do
-    assert {:ok, conn} = Conn.connect("google.com", 80)
+  test "200 response - httpbin.org" do
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+    assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 302, "Found"}} = status
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
     assert {:headers, ^request, headers} = headers
-    assert hd(get_header(headers, "location")) =~ "www.google."
-    assert merge_body(responses, request) =~ "<TITLE>302 Moved</TITLE>"
+    assert get_header(headers, "connection") == ["keep-alive"]
+    assert merge_body(responses, request) =~ "httpbin"
   end
 
-  test "200 response - example.com" do
-    assert {:ok, conn} = Conn.connect("example.com", 80)
+  test "ssl, path, long body - httpbin.org" do
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/50000", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn)
+
+    assert conn.buffer == ""
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^request, _} = headers
+    assert byte_size(merge_body(responses, request)) == 50000
+  end
+
+  test "keep alive - httpbin.org" do
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+    assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
     assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
     assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "<title>Example Domain</title>"
-  end
+    assert merge_body(responses, request) =~ "SEE ALSO"
 
-  test "ssl, path, long body - tools.ietf.org" do
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc2616", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
     assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
     assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Full Copyright Statement"
-  end
-
-  test "keep alive - tools.ietf.org" do
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7230", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
-
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Security Considerations"
-
-    assert {:ok, conn} = Conn.connect("tools.ietf.org", 443, transport: :ssl)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/html/rfc7231", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
-
-    assert conn.buffer == ""
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "Semantics and Content"
+    assert merge_body(responses, request) =~ "SEE ALSO"
   end
 
   test "POST body - httpbin.org" do
     assert {:ok, conn} = Conn.connect("httpbin.org", 80)
     assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", [], "BODY")
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+    assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
@@ -82,7 +70,7 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn} = Conn.stream_request_body(conn, "BO")
     assert {:ok, conn} = Conn.stream_request_body(conn, "DY")
     assert {:ok, conn} = Conn.stream_request_body(conn, :eof)
-    assert {:ok, conn, responses} = receive_stream(conn, [])
+    assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
@@ -98,10 +86,10 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn, request3} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, request4} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert {:ok, conn, [_status, _headers | responses1]} = receive_stream(conn, [])
-    assert {:ok, conn, [_status, _headers | responses2]} = receive_stream(conn, [])
-    assert {:ok, conn, [_status, _headers | responses3]} = receive_stream(conn, [])
-    assert {:ok, _conn, [_status, _headers | responses4]} = receive_stream(conn, [])
+    assert {:ok, conn, [_status, _headers | responses1]} = receive_stream(conn)
+    assert {:ok, conn, [_status, _headers | responses2]} = receive_stream(conn)
+    assert {:ok, conn, [_status, _headers | responses3]} = receive_stream(conn)
+    assert {:ok, _conn, [_status, _headers | responses4]} = receive_stream(conn)
 
     assert merge_body(responses1, request1) =~
              "Testing an HTTP Library can become difficult sometimes"
@@ -127,7 +115,7 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn} = Conn.connect("httpbin.org", 80)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/stream-bytes/0", [], nil)
 
-    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn, [])
+    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
   end
@@ -138,7 +126,7 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn, request} =
              Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=1024", [], nil)
 
-    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn, [])
+    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
   end
@@ -149,7 +137,7 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, conn, request} =
              Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=100", [], nil)
 
-    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn, [])
+    assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
   end
@@ -160,6 +148,10 @@ defmodule XHTTP.IntegrationTest do
 
   defp merge_body([{:done, request}], request) do
     ""
+  end
+
+  defp receive_stream(conn) do
+    receive_stream(conn, [])
   end
 
   defp receive_stream(conn, responses) do
@@ -177,7 +169,7 @@ defmodule XHTTP.IntegrationTest do
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
         assert {:error, _conn, _reason} = Conn.stream(conn, message)
     after
-      5000 ->
+      10000 ->
         flunk("receive_stream timeout")
     end
   end
