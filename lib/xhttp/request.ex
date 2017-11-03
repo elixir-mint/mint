@@ -21,9 +21,9 @@ defmodule XHTTP.Request do
 
   defp add_default_headers(headers, host, body) do
     headers
-    |> put_new_header("host", host)
-    |> put_new_header("user-agent", @user_agent)
     |> add_content_length(body)
+    |> put_new_header("user-agent", @user_agent)
+    |> put_new_header("host", host)
   end
 
   defp add_content_length(headers, nil), do: headers
