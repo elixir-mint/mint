@@ -38,6 +38,8 @@ defmodule XHTTP.Conn do
   @type reason() :: String.t()
   @type headers() :: [{String.t(), String.t()}]
 
+  # TODO: Currently we keep the Host on the conn but we could also supply
+  # it on each request so you can use multiple Hosts on a single conn
   defstruct [
     :socket,
     :host,
@@ -207,6 +209,7 @@ defmodule XHTTP.Conn do
   def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
       when tag in [:tcp_close, :ssl_close] do
     conn = put_in(conn.state, :closed)
+    conn = request_done(conn)
 
     if request.body == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
@@ -242,7 +245,8 @@ defmodule XHTTP.Conn do
       {:ok, {version, status, _reason} = status_line, rest} ->
         request = %{request | version: version, status: status, state: :headers}
         conn = put_in(conn.request, request)
-        decode(:headers, conn, rest, [{:status, request.ref, status_line}])
+        responses = [{:status, request.ref, status_line} | responses]
+        decode(:headers, conn, rest, responses)
 
       :more ->
         conn = put_in(conn.buffer, data)
@@ -261,7 +265,6 @@ defmodule XHTTP.Conn do
     request_ref = conn.request.ref
     body = message_body(conn.request)
     conn = put_in(conn.request.body, body)
-    conn = put_in(conn.buffer, "")
 
     decode_body(body, conn, data, request_ref, responses)
   end
@@ -291,6 +294,7 @@ defmodule XHTTP.Conn do
 
   defp decode_body(:none, conn, data, request_ref, responses) do
     conn = put_in(conn.buffer, data)
+    conn = request_done(conn)
     responses = [{:done, request_ref} | responses]
     {:ok, conn, responses}
   end
@@ -311,7 +315,7 @@ defmodule XHTTP.Conn do
         <<body::binary-size(length), rest::binary>> = data
         conn = request_done(conn)
         responses = [{:done, request_ref} | add_body(body, request_ref, responses)]
-        decode(:status, conn, rest, responses)
+        next_request(conn, rest, responses)
     end
   end
 
@@ -358,6 +362,7 @@ defmodule XHTTP.Conn do
   defp decode_body({:chunked, length}, conn, data, request_ref, responses) do
     cond do
       length > byte_size(data) ->
+        conn = put_in(conn.buffer, "")
         conn = put_in(conn.request.body, {:chunked, length - byte_size(data)})
         responses = add_body(data, request_ref, responses)
         {:ok, conn, responses}
@@ -393,17 +398,27 @@ defmodule XHTTP.Conn do
         responses = add_headers(headers, conn.request.ref, responses)
         responses = [{:done, conn.request.ref} | responses]
         conn = request_done(conn)
-        decode(:status, conn, rest, responses)
+        next_request(conn, rest, responses)
 
       :more ->
         responses = add_headers(headers, conn.request.ref, responses)
-        conn = %{conn | buffer: data}
+        conn = put_in(conn.buffer, data)
         conn = put_in(conn.request.body, {:chunked, :trailer})
         {:ok, conn, responses}
 
       :error ->
         {:error, :invalid_response}
     end
+  end
+
+  defp next_request(%{request: nil} = conn, data, responses) do
+    # TODO: Figure out if we should keep buffering even though there are no
+    # requests in flight
+    {:ok, %{conn | buffer: data}, responses}
+  end
+
+  defp next_request(conn, data, responses) do
+    decode(:status, %{conn | state: :status}, data, responses)
   end
 
   defp add_headers([], _request_ref, responses), do: responses
@@ -443,7 +458,7 @@ defmodule XHTTP.Conn do
   defp request_done(%{request: request} = conn) do
     # TODO: Figure out what to do if connection is closed or there is no next
     # request and we still have data on the socket. RFC7230 3.4
-    conn = next_request(conn)
+    conn = pop_request(conn)
 
     cond do
       "close" in request.connection -> close(conn)
@@ -453,7 +468,7 @@ defmodule XHTTP.Conn do
     end
   end
 
-  defp next_request(conn) do
+  defp pop_request(conn) do
     case :queue.out(conn.requests) do
       {{:value, request}, requests} ->
         %{conn | request: request, requests: requests}

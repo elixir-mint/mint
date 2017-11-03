@@ -169,6 +169,66 @@ defmodule XHTTP.ConnTest do
     assert {:error, ^ref, :invalid_response} = Conn.stream(conn, {:tcp, conn.socket, response})
   end
 
+  test "pipeline" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref4} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:body, ^ref1, "XXXXX"}, {:done, ^ref1}] =
+             responses
+
+    assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:body, ^ref2, "XXXXX"}, {:done, ^ref2}] =
+             responses
+
+    assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref3, _}, {:headers, ^ref3, _}, {:body, ^ref3, "XXXXX"}, {:done, ^ref3}] =
+             responses
+
+    assert {:ok, _conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:body, ^ref4, "XXXXX"}, {:done, ^ref4}] =
+             responses
+  end
+
+  test "pipeline with multiple responses in single message" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref4} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+    responses = for _ <- 1..4, do: response, into: ""
+
+    assert {:ok, _conn, responses} = Conn.stream(conn, {:tcp, conn.socket, responses})
+
+    assert [
+             {:status, ^ref1, _},
+             {:headers, ^ref1, _},
+             {:body, ^ref1, "XXXXX"},
+             {:done, ^ref1},
+             {:status, ^ref2, _},
+             {:headers, ^ref2, _},
+             {:body, ^ref2, "XXXXX"},
+             {:done, ^ref2},
+             {:status, ^ref3, _},
+             {:headers, ^ref3, _},
+             {:body, ^ref3, "XXXXX"},
+             {:done, ^ref3},
+             {:status, ^ref4, _},
+             {:headers, ^ref4, _},
+             {:body, ^ref4, "XXXXX"},
+             {:done, ^ref4}
+           ] = responses
+  end
+
   defmodule TCPMock do
     def connect(hostname, port, opts \\ []) do
       Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
