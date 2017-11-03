@@ -30,6 +30,13 @@ defmodule XHTTP.ParseTest do
   end
 
   test "token_list_downcase/1" do
+    assert token_list_downcase("") == []
+    assert token_list_downcase("foo") == ["foo"]
+    assert token_list_downcase("foo, bar") == ["foo", "bar"]
     assert token_list_downcase("FOO,bAr") == ["foo", "bar"]
+    assert token_list_downcase(",, , ,   ,") == []
+    assert token_list_downcase("   ,  ,,,  foo  , ,  ") == ["foo"]
+
+    assert catch_throw(token_list_downcase("\n")) == {:xhttp, :invalid_response}
   end
 end

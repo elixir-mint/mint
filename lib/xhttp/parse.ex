@@ -1,8 +1,6 @@
 defmodule XHTTP.Parse do
   @moduledoc false
 
-  # TODO: Inline and optimize, reduce String module usage
-
   defmacrop is_digit(char), do: quote(do: unquote(char) in ?0..?9)
   defmacrop is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
   defmacrop is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
@@ -13,6 +11,34 @@ defmodule XHTTP.Parse do
       unquote(char) in '!#$%&\'*+-.^_`|~' or is_digit(unquote(char)) or is_alpha(unquote(char))
     end
   end
+
+  defp lower_char(?A), do: ?a
+  defp lower_char(?B), do: ?b
+  defp lower_char(?C), do: ?c
+  defp lower_char(?D), do: ?d
+  defp lower_char(?E), do: ?e
+  defp lower_char(?F), do: ?f
+  defp lower_char(?G), do: ?g
+  defp lower_char(?H), do: ?h
+  defp lower_char(?I), do: ?i
+  defp lower_char(?J), do: ?j
+  defp lower_char(?K), do: ?k
+  defp lower_char(?L), do: ?l
+  defp lower_char(?M), do: ?m
+  defp lower_char(?N), do: ?n
+  defp lower_char(?O), do: ?o
+  defp lower_char(?P), do: ?p
+  defp lower_char(?Q), do: ?q
+  defp lower_char(?R), do: ?r
+  defp lower_char(?S), do: ?s
+  defp lower_char(?T), do: ?t
+  defp lower_char(?U), do: ?u
+  defp lower_char(?V), do: ?v
+  defp lower_char(?W), do: ?w
+  defp lower_char(?X), do: ?x
+  defp lower_char(?Y), do: ?y
+  defp lower_char(?Z), do: ?z
+  defp lower_char(char), do: char
 
   def strip_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
   def strip_crlf(binary) when byte_size(binary) < 2, do: :more
@@ -44,11 +70,34 @@ defmodule XHTTP.Parse do
     |> not_empty!()
   end
 
-  def token_list_downcase(string), do: string |> token_list() |> Enum.map(&String.downcase/1)
+  def token_list_downcase(string), do: token_list_downcase(string, [])
+
+  defp token_list_downcase(<<>>, acc), do: :lists.reverse(acc)
+
+  defp token_list_downcase(<<char, rest::binary>>, acc) when is_whitespace(char) or is_comma(char),
+    do: token_list_downcase(rest, acc)
+
+  defp token_list_downcase(rest, acc), do: token_downcase(rest, <<>>, acc)
+
+  defp token_downcase(<<char, rest::binary>>, token, acc) when is_tchar(char),
+    do: token_downcase(rest, <<token::binary, lower_char(char)>>, acc)
+
+  # defp token_downcase(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
+
+  defp token_downcase(rest, token, acc), do: token_list_sep_downcase(rest, [token | acc])
+
+  defp token_list_sep_downcase(<<>>, acc), do: :lists.reverse(acc)
+
+  defp token_list_sep_downcase(<<char, rest::binary>>, acc) when is_whitespace(char),
+    do: token_list_sep_downcase(rest, acc)
+
+  defp token_list_sep_downcase(<<?,, rest::binary>>, acc), do: token_list_downcase(rest, acc)
+
+  defp token_list_sep_downcase(_rest, _acc), do: throw({:xhttp, :invalid_response})
 
   def token_list(string), do: token_list(string, [])
 
-  defp token_list(<<>>, acc), do: Enum.reverse(acc)
+  defp token_list(<<>>, acc), do: :lists.reverse(acc)
 
   defp token_list(<<char, rest::binary>>, acc) when is_whitespace(char) or is_comma(char),
     do: token_list(rest, acc)
@@ -58,11 +107,11 @@ defmodule XHTTP.Parse do
   defp token(<<char, rest::binary>>, token, acc) when is_tchar(char),
     do: token(rest, <<token::binary, char>>, acc)
 
-  defp token(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
+  # defp token(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
 
   defp token(rest, token, acc), do: token_list_sep(rest, [token | acc])
 
-  defp token_list_sep(<<>>, acc), do: Enum.reverse(acc)
+  defp token_list_sep(<<>>, acc), do: :lists.reverse(acc)
 
   defp token_list_sep(<<char, rest::binary>>, acc) when is_whitespace(char),
     do: token_list_sep(rest, acc)
