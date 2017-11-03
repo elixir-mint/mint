@@ -1,6 +1,8 @@
 defmodule XHTTP.Response do
   @moduledoc false
 
+  alias XHTTP.Parse
+
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do
       {:ok, {:http_response, version, status, reason}, rest} ->
@@ -36,6 +38,6 @@ defmodule XHTTP.Response do
     end
   end
 
-  defp header_name(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.downcase()
-  defp header_name(binary) when is_binary(binary), do: String.downcase(binary)
+  defp header_name(atom) when is_atom(atom), do: atom |> Atom.to_string() |> Parse.lower()
+  defp header_name(binary) when is_binary(binary), do: Parse.lower(binary)
 end

@@ -40,6 +40,8 @@ defmodule XHTTP.Parse do
   defp lower_char(?Z), do: ?z
   defp lower_char(char), do: char
 
+  def lower(string), do: for <<char <- string>>, do: <<lower_char(char)>>, into: ""
+
   def strip_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
   def strip_crlf(binary) when byte_size(binary) < 2, do: :more
   def strip_crlf(_other), do: :error
