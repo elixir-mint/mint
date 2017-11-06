@@ -42,10 +42,9 @@ defmodule XHTTP.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, [_status]} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
-    assert {:ok, conn, [headers]} = Conn.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
-    assert {:headers, ^ref, [{"foo", "Bar"}]} = headers
+    assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
     assert {:ok, _conn, [headers]} = Conn.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
-    assert {:headers, ^ref, [{"baz", "Boz"}]} = headers
+    assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
   end
 
   test "status and headers" do
@@ -63,7 +62,7 @@ defmodule XHTTP.ConnTest do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert {:ok, conn, [_status, {:body, ^ref, "BODY1"}]} =
+    assert {:ok, conn, [_status, _headers, {:body, ^ref, "BODY1"}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nBODY1"})
 
     assert {:ok, conn, [{:body, ^ref, "BODY2"}]} = Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
@@ -93,7 +92,7 @@ defmodule XHTTP.ConnTest do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
     {:ok, conn, ref} = Conn.request(conn, "HEAD", "/", [], nil)
 
-    assert {:ok, conn, [_status, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
 
     assert conn.buffer == "XXX"

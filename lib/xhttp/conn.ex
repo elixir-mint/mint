@@ -166,8 +166,10 @@ defmodule XHTTP.Conn do
 
     * `:status` - This response will always be returned and will be the first
       response returned for a request.
-    * `:headers` - Headers are optional and can be returned multiple times if
-      the headers were split over multiple messages or if trailing headers were sent.
+    * `:headers` - Headers will always be returned after the status and before
+      the body, the headers will only be returned when all headers have been
+      received. Trailing headers can optionally be returned after the body
+      and before done.
     * `:body` - The body is optional and can be returned in multiple parts.
     * `:done` - This is the last response for a request and indicates that the
       response is done streaming.
@@ -258,15 +260,13 @@ defmodule XHTTP.Conn do
   end
 
   defp decode(:headers, %{request: request} = conn, data, responses) do
-    decode_headers(conn, request, data, responses, [])
+    decode_headers(conn, request, data, responses, request.headers_buffer)
   end
 
   defp decode(:body, conn, data, responses) do
-    request_ref = conn.request.ref
     body = message_body(conn.request)
     conn = put_in(conn.request.body, body)
-
-    decode_body(body, conn, data, request_ref, responses)
+    decode_body(body, conn, data, conn.request.ref, responses)
   end
 
   defp decode_headers(conn, request, data, responses, headers) do
@@ -277,13 +277,13 @@ defmodule XHTTP.Conn do
         decode_headers(conn, request, rest, responses, headers)
 
       {:ok, :eof, rest} ->
-        responses = add_headers(headers, request.ref, responses)
-        request = %{request | state: :body}
+        responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
+        request = %{request | state: :body, headers_buffer: []}
         conn = put_in(conn.request, request)
         decode(:body, conn, rest, responses)
 
       :more ->
-        responses = add_headers(headers, request.ref, responses)
+        request = %{request | headers_buffer: headers}
         conn = %{conn | buffer: data, request: request}
         {:ok, conn, responses}
 
@@ -395,15 +395,17 @@ defmodule XHTTP.Conn do
         decode_trailer_headers(conn, rest, responses, headers)
 
       {:ok, :eof, rest} ->
-        responses = add_headers(headers, conn.request.ref, responses)
-        responses = [{:done, conn.request.ref} | responses]
+        responses = [
+          {:done, conn.request.ref}
+          | add_trailing_headers(headers, conn.request.ref, responses)
+        ]
+
         conn = request_done(conn)
         next_request(conn, rest, responses)
 
       :more ->
-        responses = add_headers(headers, conn.request.ref, responses)
-        conn = put_in(conn.buffer, data)
-        conn = put_in(conn.request.body, {:chunked, :trailer})
+        request = %{conn.request | body: {:chunked, :trailer}, headers_buffer: headers}
+        conn = %{conn | buffer: data, request: request}
         {:ok, conn, responses}
 
       :error ->
@@ -421,9 +423,9 @@ defmodule XHTTP.Conn do
     decode(:status, %{conn | state: :status}, data, responses)
   end
 
-  defp add_headers([], _request_ref, responses), do: responses
+  defp add_trailing_headers([], _request_ref, responses), do: responses
 
-  defp add_headers(headers, request_ref, responses),
+  defp add_trailing_headers(headers, request_ref, responses),
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
   defp add_body("", _request_ref, responses), do: responses
@@ -532,6 +534,7 @@ defmodule XHTTP.Conn do
       method: method,
       version: nil,
       status: nil,
+      headers_buffer: [],
       content_length: nil,
       connection: [],
       transfer_encoding: [],
