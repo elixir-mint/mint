@@ -68,7 +68,7 @@ defmodule XHTTP.Conn do
         {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, {:connect, reason}}
     end
   end
 
@@ -130,7 +130,7 @@ defmodule XHTTP.Conn do
         end
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, {:send, reason}}
     end
   end
 
@@ -154,7 +154,7 @@ defmodule XHTTP.Conn do
       ) do
     case transport.send(socket, body) do
       :ok -> {:ok, conn}
-      {:error, reason} -> {:error, reason}
+      {:error, reason} -> {:error, {:send, reason}}
     end
   end
 
@@ -255,7 +255,7 @@ defmodule XHTTP.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_response}
+        {:error, :invalid_status_line}
     end
   end
 
@@ -288,7 +288,7 @@ defmodule XHTTP.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_response}
+        {:error, :invalid_header}
     end
   end
 
@@ -339,7 +339,7 @@ defmodule XHTTP.Conn do
         decode_body({:chunked, :metadata, size + 2}, conn, rest, request_ref, responses)
 
       _other ->
-        {:error, :invalid_response}
+        {:error, :invalid_chunk_size}
     end
   end
 
@@ -383,7 +383,7 @@ defmodule XHTTP.Conn do
             {:ok, conn, responses}
 
           :error ->
-            throw({:xhttp, :invalid_response})
+            {:error, :invalid_chunk}
         end
     end
   end
@@ -409,7 +409,7 @@ defmodule XHTTP.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_response}
+        {:error, :invalid_trailer_header}
     end
   end
 

@@ -40,11 +40,11 @@ defmodule XHTTP.Parse do
   defp lower_char(?Z), do: ?z
   defp lower_char(char), do: char
 
-  def lower(string), do: for <<char <- string>>, do: <<lower_char(char)>>, into: ""
+  def lower(string), do: for(<<char <- string>>, do: <<lower_char(char)>>, into: "")
 
   def strip_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
   def strip_crlf(binary) when byte_size(binary) < 2, do: :more
-  def strip_crlf(_other), do: :error
+  def strip_crlf(_other), do: {:error, :missing_crlf}
 
   def ignore_until_crlf(<<>>), do: :more
   def ignore_until_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
@@ -56,7 +56,7 @@ defmodule XHTTP.Parse do
         length
 
       _other ->
-        throw({:xhttp, :invalid_response})
+        throw({:xhttp, :invalid_content_length_header})
     end
   end
 
@@ -76,15 +76,16 @@ defmodule XHTTP.Parse do
 
   defp token_list_downcase(<<>>, acc), do: :lists.reverse(acc)
 
-  defp token_list_downcase(<<char, rest::binary>>, acc) when is_whitespace(char) or is_comma(char),
-    do: token_list_downcase(rest, acc)
+  defp token_list_downcase(<<char, rest::binary>>, acc)
+       when is_whitespace(char) or is_comma(char),
+       do: token_list_downcase(rest, acc)
 
   defp token_list_downcase(rest, acc), do: token_downcase(rest, <<>>, acc)
 
   defp token_downcase(<<char, rest::binary>>, token, acc) when is_tchar(char),
     do: token_downcase(rest, <<token::binary, lower_char(char)>>, acc)
 
-  # defp token_downcase(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
+  # defp token_downcase(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_token})
 
   defp token_downcase(rest, token, acc), do: token_list_sep_downcase(rest, [token | acc])
 
@@ -95,7 +96,7 @@ defmodule XHTTP.Parse do
 
   defp token_list_sep_downcase(<<?,, rest::binary>>, acc), do: token_list_downcase(rest, acc)
 
-  defp token_list_sep_downcase(_rest, _acc), do: throw({:xhttp, :invalid_response})
+  defp token_list_sep_downcase(_rest, _acc), do: throw({:xhttp, :invalid_token_list})
 
   def token_list(string), do: token_list(string, [])
 
@@ -109,7 +110,7 @@ defmodule XHTTP.Parse do
   defp token(<<char, rest::binary>>, token, acc) when is_tchar(char),
     do: token(rest, <<token::binary, char>>, acc)
 
-  # defp token(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_response})
+  # defp token(_rest, <<>>, _acc), do: throw({:xhttp, :invalid_token})
 
   defp token(rest, token, acc), do: token_list_sep(rest, [token | acc])
 
@@ -120,9 +121,9 @@ defmodule XHTTP.Parse do
 
   defp token_list_sep(<<?,, rest::binary>>, acc), do: token_list(rest, acc)
 
-  defp token_list_sep(_rest, _acc), do: throw({:xhttp, :invalid_response})
+  defp token_list_sep(_rest, _acc), do: throw({:xhttp, :invalid_token_list})
 
-  defp not_empty!([]), do: throw({:xhttp, :invalid_response})
+  defp not_empty!([]), do: throw({:xhttp, :empty_token_list})
 
   defp not_empty!(list), do: list
 end
