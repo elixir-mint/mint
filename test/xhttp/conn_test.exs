@@ -254,6 +254,25 @@ defmodule XHTTP.ConnTest do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
+
+    assert {:ok, conn, [status, headers, body, done]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert body == {:body, ref, "0123"}
+    assert done == {:done, ref}
+
+    assert conn.buffer == "XXX"
+  end
+
+  test "body with chunked transfer-encoding with metadata and trailers" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
         "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
 
     assert {:ok, conn, [status, headers, body, trailers, done]} =
@@ -290,6 +309,22 @@ defmodule XHTTP.ConnTest do
     assert merge_body(rest, ref) == {"0123", [{"trailer", "value"}]}
 
     assert conn.buffer == "XXX"
+  end
+
+  test "do not chunk if unknown transfer-encoding" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: custom, chunked\r\n\r\n" <>
+        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
+
+    assert {:ok, _conn, [status, headers, body]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert headers == {:headers, ref, [{"transfer-encoding", "custom, chunked"}]}
+    assert body == {:body, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
   end
 
   defmodule TCPMock do

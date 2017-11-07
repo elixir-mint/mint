@@ -510,8 +510,7 @@ defmodule XHTTP.Conn do
 
       # method == "CONNECT" and status in 200..299 -> nil
 
-      # TODO: What do we do about transfer encodings we don't know about?
-      "chunked" in request.transfer_encoding ->
+      "chunked" == List.first(request.transfer_encoding) ->
         {:chunked, nil}
 
       request.content_length ->
