@@ -339,7 +339,7 @@ defmodule XHTTP.Conn do
         decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
 
       {size, rest} when size > 0 ->
-        decode_body({:chunked, :metadata, size + 2}, conn, rest, request_ref, responses)
+        decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
       _other ->
         {:error, :invalid_chunk_size}
@@ -359,7 +359,22 @@ defmodule XHTTP.Conn do
   end
 
   defp decode_body({:chunked, :trailer}, conn, data, _request_ref, responses) do
-    decode_trailer_headers(conn, data, responses, [])
+    decode_trailer_headers(conn, data, responses, conn.request.headers_buffer)
+  end
+
+  defp decode_body({:chunked, :crlf}, conn, data, request_ref, responses) do
+    case data do
+      <<"\r\n", rest::binary>> ->
+        conn = put_in(conn.request.body, {:chunked, nil})
+        decode_body({:chunked, nil}, conn, rest, request_ref, responses)
+
+      _other when byte_size(data) < 2 ->
+        conn = put_in(conn.buffer, data)
+        {:ok, conn, responses}
+
+      _other ->
+        {:error, :missing_crlf_after_chunk}
+    end
   end
 
   defp decode_body({:chunked, length}, conn, data, request_ref, responses) do
@@ -371,23 +386,10 @@ defmodule XHTTP.Conn do
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
-        length = length - 2
         <<body::binary-size(length), rest::binary>> = data
-
-        case Parse.strip_crlf(rest) do
-          {:ok, rest} ->
-            responses = add_body(body, request_ref, responses)
-            conn = put_in(conn.request.body, {:chunked, nil})
-            decode_body({:chunked, nil}, conn, rest, request_ref, responses)
-
-          :more ->
-            conn = put_in(conn.request.body, {:chunked, length})
-            conn = put_in(conn.buffer, data)
-            {:ok, conn, responses}
-
-          :error ->
-            {:error, :invalid_chunk}
-        end
+        responses = add_body(body, request_ref, responses)
+        conn = put_in(conn.request.body, {:chunked, :crlf})
+        decode_body({:chunked, :crlf}, conn, rest, request_ref, responses)
     end
   end
 

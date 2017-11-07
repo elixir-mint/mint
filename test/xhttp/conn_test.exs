@@ -107,7 +107,6 @@ defmodule XHTTP.ConnTest do
     assert merge_body(rest, ref) == "0123456789"
 
     assert conn.buffer == "XXX"
-    assert Conn.open?(conn)
   end
 
   test "no body with HEAD request" do
@@ -118,7 +117,6 @@ defmodule XHTTP.ConnTest do
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
 
     assert conn.buffer == "XXX"
-    assert Conn.open?(conn)
   end
 
   test "status, headers, and body" do
@@ -248,6 +246,50 @@ defmodule XHTTP.ConnTest do
              {:body, ^ref4, "XXXXX"},
              {:done, ^ref4}
            ] = responses
+  end
+
+  test "body with chunked transfer-encoding" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
+
+    assert {:ok, conn, [status, headers, body, trailers, done]} =
+             Conn.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert body == {:body, ref, "0123"}
+    assert trailers == {:headers, ref, [{"trailer", "value"}]}
+    assert done == {:done, ref}
+
+    assert conn.buffer == "XXX"
+  end
+
+  test "body with chunked transfer-encoding split on every byte" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
+
+    bytes = :binary.bin_to_list(response)
+
+    {conn, responses} =
+      Enum.reduce(bytes, {conn, []}, fn byte, {conn, responses} ->
+        assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, <<byte>>})
+        {conn, responses ++ new_responses}
+      end)
+
+    assert [status, headers | rest] = responses
+    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^ref, [{"transfer-encoding", "chunked"}]} = headers
+    assert merge_body(rest, ref) == {"0123", [{"trailer", "value"}]}
+
+    assert conn.buffer == "XXX"
   end
 
   defmodule TCPMock do

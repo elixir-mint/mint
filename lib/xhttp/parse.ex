@@ -43,10 +43,6 @@ defmodule XHTTP.Parse do
 
   def lower(string), do: for(<<char <- string>>, do: <<lower_char(char)>>, into: "")
 
-  def strip_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
-  def strip_crlf(binary) when byte_size(binary) < 2, do: :more
-  def strip_crlf(_other), do: {:error, :missing_crlf}
-
   def ignore_until_crlf(<<>>), do: :more
   def ignore_until_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
   def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
