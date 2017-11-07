@@ -2,7 +2,7 @@ defmodule XHTTP.ConnTest do
   use ExUnit.Case, async: true
   import XHTTP.TestHelpers
   alias XHTTP.Conn
-  alias XHTTP.ConnTest.TCPMock
+  alias XHTTP.TestHelpers.TCPMock
 
   test "unknown message" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
@@ -87,26 +87,6 @@ defmodule XHTTP.ConnTest do
 
     assert conn.buffer == "XXX"
     assert Conn.open?(conn)
-  end
-
-  test "body with content-length split on every byte" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
-    response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789XXX"
-    bytes = :binary.bin_to_list(response)
-
-    {conn, responses} =
-      Enum.reduce(bytes, {conn, []}, fn byte, {conn, responses} ->
-        assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, <<byte>>})
-        {conn, responses ++ new_responses}
-      end)
-
-    assert [status, headers | rest] = responses
-    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^ref, [{"content-length", "10"}]} = headers
-    assert merge_body(rest, ref) == "0123456789"
-
-    assert conn.buffer == "XXX"
   end
 
   test "no body with HEAD request" do
@@ -287,30 +267,6 @@ defmodule XHTTP.ConnTest do
     assert conn.buffer == "XXX"
   end
 
-  test "body with chunked transfer-encoding split on every byte" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
-
-    response =
-      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
-
-    bytes = :binary.bin_to_list(response)
-
-    {conn, responses} =
-      Enum.reduce(bytes, {conn, []}, fn byte, {conn, responses} ->
-        assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, <<byte>>})
-        {conn, responses ++ new_responses}
-      end)
-
-    assert [status, headers | rest] = responses
-    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
-    assert {:headers, ^ref, [{"transfer-encoding", "chunked"}]} = headers
-    assert merge_body(rest, ref) == {"0123", [{"trailer", "value"}]}
-
-    assert conn.buffer == "XXX"
-  end
-
   test "do not chunk if unknown transfer-encoding" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
@@ -325,32 +281,5 @@ defmodule XHTTP.ConnTest do
     assert status == {:status, ref, {{1, 1}, 200, "OK"}}
     assert headers == {:headers, ref, [{"transfer-encoding", "custom, chunked"}]}
     assert body == {:body, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
-  end
-
-  defmodule TCPMock do
-    def connect(hostname, port, opts \\ []) do
-      Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
-      {:ok, make_ref()}
-    end
-
-    def close(socket) do
-      Kernel.send(self(), {:tcp_mock, :close, [socket]})
-      :ok
-    end
-
-    def getopts(socket, list) do
-      Kernel.send(self(), {:tcp_mock, :getopts, [socket, list]})
-      {:ok, Enum.map(list, &{&1, 0})}
-    end
-
-    def setopts(socket, opts) do
-      Kernel.send(self(), {:tcp_mock, :setopts, [socket, opts]})
-      :ok
-    end
-
-    def send(socket, data, opts \\ []) do
-      Kernel.send(self(), {:tcp_mock, :send, [socket, data, opts]})
-      :ok
-    end
   end
 end
