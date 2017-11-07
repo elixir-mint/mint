@@ -63,27 +63,35 @@ defmodule XHTTP.Request do
   defp encode_body(body), do: body
 
   defp validate_target!(target) do
-    _ = for <<char <- target>> do
-      unless URI.char_unescaped?(char) do
-        throw {:xhttp, :invalid_request_target}
+    _ =
+      for <<char <- target>> do
+        unless URI.char_unescaped?(char) do
+          throw({:xhttp, :invalid_request_target})
+        end
       end
-    end
+
     :ok
   end
 
   defp validate_header_name!(name) do
-    for <<char <- name>> do
-      unless is_tchar(char) do
-        throw {:xhttp, {:invalid_header_name, name}}
+    _ =
+      for <<char <- name>> do
+        unless is_tchar(char) do
+          throw({:xhttp, {:invalid_header_name, name}})
+        end
       end
-    end
+
+    :ok
   end
 
   defp validate_header_value!(name, value) do
-    for <<char <- value>> do
-      unless is_vchar(char) or char in '\s\t' do
-        throw {:xhttp, {:invalid_header_value, name, value}}
+    _ =
+      for <<char <- value>> do
+        unless is_vchar(char) or char in '\s\t' do
+          throw({:xhttp, {:invalid_header_value, name, value}})
+        end
       end
-    end
+
+    :ok
   end
 end

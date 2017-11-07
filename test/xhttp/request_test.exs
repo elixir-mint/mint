@@ -8,13 +8,14 @@ defmodule XHTTP.RequestTest do
         Request.encode("GET", "/", "example.com", [{"foo", "bar"}], nil)
         |> IO.iodata_to_binary()
 
-      assert request == request_string("""
-      GET / HTTP/1.1
-      host: example.com
-      user-agent: xhttp/0.1.0
-      foo: bar
+      assert request ==
+               request_string("""
+               GET / HTTP/1.1
+               host: example.com
+               user-agent: xhttp/0.1.0
+               foo: bar
 
-      """)
+               """)
     end
 
     test "with body" do
@@ -22,14 +23,15 @@ defmodule XHTTP.RequestTest do
         Request.encode("GET", "/", "example.com", [], "BODY")
         |> IO.iodata_to_binary()
 
-      assert request == request_string("""
-      GET / HTTP/1.1
-      host: example.com
-      user-agent: xhttp/0.1.0
-      content-length: 4
+      assert request ==
+               request_string("""
+               GET / HTTP/1.1
+               host: example.com
+               user-agent: xhttp/0.1.0
+               content-length: 4
 
-      BODY\
-      """)
+               BODY\
+               """)
     end
 
     test "with overridden content-length" do
@@ -37,26 +39,30 @@ defmodule XHTTP.RequestTest do
         Request.encode("GET", "/", "example.com", [{"content-length", "10"}], "BODY")
         |> IO.iodata_to_binary()
 
-      assert request == request_string("""
-      GET / HTTP/1.1
-      host: example.com
-      user-agent: xhttp/0.1.0
-      content-length: 10
+      assert request ==
+               request_string("""
+               GET / HTTP/1.1
+               host: example.com
+               user-agent: xhttp/0.1.0
+               content-length: 10
 
-      BODY\
-      """)
+               BODY\
+               """)
     end
 
     test "invalid request target" do
-      assert catch_throw(Request.encode("GET", "/ /", "example.com", [], nil)) == {:xhttp, :invalid_request_target}
+      assert catch_throw(Request.encode("GET", "/ /", "example.com", [], nil)) ==
+               {:xhttp, :invalid_request_target}
     end
 
     test "invalid header name" do
-      assert catch_throw(Request.encode("GET", "/", "example.com", [{"f oo", "bar"}], nil)) == {:xhttp, {:invalid_header_name, "f oo"}}
+      assert catch_throw(Request.encode("GET", "/", "example.com", [{"f oo", "bar"}], nil)) ==
+               {:xhttp, {:invalid_header_name, "f oo"}}
     end
 
     test "invalid header value" do
-      assert catch_throw(Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil)) == {:xhttp, {:invalid_header_value, "foo", "bar\r\n"}}
+      assert catch_throw(Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil)) ==
+               {:xhttp, {:invalid_header_value, "foo", "bar\r\n"}}
     end
   end
 
