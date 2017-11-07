@@ -249,7 +249,7 @@ defmodule XHTTP.Conn do
     case Response.decode_status_line(data) do
       {:ok, {version, status, _reason} = status_line, rest} ->
         request = %{request | version: version, status: status, state: :headers}
-        conn = put_in(conn.request, request)
+        conn = %{conn | request: request}
         responses = [{:status, request.ref, status_line} | responses]
         decode(:headers, conn, rest, responses)
 
@@ -282,7 +282,7 @@ defmodule XHTTP.Conn do
       {:ok, :eof, rest} ->
         responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
         request = %{request | state: :body, headers_buffer: []}
-        conn = put_in(conn.request, request)
+        conn = %{conn | buffer: "", request: request}
         decode(:body, conn, rest, responses)
 
       :more ->
@@ -485,7 +485,7 @@ defmodule XHTTP.Conn do
 
   defp close(conn) do
     if conn.buffer != "" do
-      Logger.debug("Connection closed with data left on the socket: ", inspect(conn.buffer))
+      Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
     :ok = conn.transport.close(conn.socket)

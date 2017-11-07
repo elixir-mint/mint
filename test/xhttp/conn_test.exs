@@ -89,6 +89,27 @@ defmodule XHTTP.ConnTest do
     assert Conn.open?(conn)
   end
 
+  test "body with content-length split on every byte" do
+    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789XXX"
+    bytes = :binary.bin_to_list(response)
+
+    {conn, responses} =
+      Enum.reduce(bytes, {conn, []}, fn byte, {conn, responses} ->
+        assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, <<byte>>})
+        {conn, responses ++ new_responses}
+      end)
+
+    assert [status, headers | rest] = responses
+    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+    assert {:headers, ^ref, [{"content-length", "10"}]} = headers
+    assert merge_body(rest, ref) == "0123456789"
+
+    assert conn.buffer == "XXX"
+    assert Conn.open?(conn)
+  end
+
   test "no body with HEAD request" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
     {:ok, conn, ref} = Conn.request(conn, "HEAD", "/", [], nil)

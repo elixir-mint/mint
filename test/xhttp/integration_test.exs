@@ -1,5 +1,6 @@
 defmodule XHTTP.IntegrationTest do
   use ExUnit.Case, async: true
+  import XHTTP.TestHelpers
   alias XHTTP.Conn
 
   @moduletag :integration
@@ -140,14 +141,6 @@ defmodule XHTTP.IntegrationTest do
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
-  end
-
-  defp merge_body([{:body, request, body} | responses], request) do
-    body <> merge_body(responses, request)
-  end
-
-  defp merge_body([{:done, request}], request) do
-    ""
   end
 
   defp receive_stream(conn) do
