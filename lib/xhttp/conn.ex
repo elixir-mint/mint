@@ -132,6 +132,9 @@ defmodule XHTTP.Conn do
       {:error, reason} ->
         {:error, {:send, reason}}
     end
+  catch
+    :throw, {:xhttp, reason} ->
+      {:error, reason}
   end
 
   @doc """

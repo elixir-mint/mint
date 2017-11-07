@@ -1,12 +1,13 @@
 defmodule XHTTP.Parse do
   @moduledoc false
 
-  defmacrop is_digit(char), do: quote(do: unquote(char) in ?0..?9)
-  defmacrop is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
-  defmacrop is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
-  defmacrop is_comma(char), do: quote(do: unquote(char) == ?,)
+  defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
+  defmacro is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
+  defmacro is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
+  defmacro is_comma(char), do: quote(do: unquote(char) == ?,)
+  defmacro is_vchar(char), do: quote(do: unquote(char) in 33..126)
 
-  defmacrop is_tchar(char) do
+  defmacro is_tchar(char) do
     quote do
       unquote(char) in '!#$%&\'*+-.^_`|~' or is_digit(unquote(char)) or is_alpha(unquote(char))
     end

@@ -1,22 +1,24 @@
 defmodule XHTTP.Request do
   @moduledoc false
 
+  import XHTTP.Parse
+
   @user_agent "xhttp/0.1.0"
 
-  def encode(method, path, host, headers, body) do
+  def encode(method, target, host, headers, body) do
     headers = add_default_headers(headers, host, body)
 
     [
-      encode_request_line(method, path),
+      encode_request_line(method, target),
       encode_headers(headers),
       "\r\n",
       encode_body(body)
     ]
   end
 
-  defp encode_request_line(method, path) do
-    # TODO: URI.encode/1 the path?
-    [method, ?\s, path, " HTTP/1.1\r\n"]
+  defp encode_request_line(method, target) do
+    validate_target!(target)
+    [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 
   defp add_default_headers(headers, host, body) do
@@ -50,6 +52,8 @@ defmodule XHTTP.Request do
   defp encode_headers(headers) do
     # TODO: Consider validating header names and values, CRLF not allowed unless before LWS
     Enum.reduce(headers, "", fn {name, value}, acc ->
+      validate_header_name!(name)
+      validate_header_value!(name, value)
       [acc, name, ": ", value, "\r\n"]
     end)
   end
@@ -57,4 +61,29 @@ defmodule XHTTP.Request do
   defp encode_body(nil), do: ""
   defp encode_body(:stream), do: ""
   defp encode_body(body), do: body
+
+  defp validate_target!(target) do
+    _ = for <<char <- target>> do
+      unless URI.char_unescaped?(char) do
+        throw {:xhttp, :invalid_request_target}
+      end
+    end
+    :ok
+  end
+
+  defp validate_header_name!(name) do
+    for <<char <- name>> do
+      unless is_tchar(char) do
+        throw {:xhttp, {:invalid_header_name, name}}
+      end
+    end
+  end
+
+  defp validate_header_value!(name, value) do
+    for <<char <- value>> do
+      unless is_vchar(char) or char in '\s\t' do
+        throw {:xhttp, {:invalid_header_value, name, value}}
+      end
+    end
+  end
 end
