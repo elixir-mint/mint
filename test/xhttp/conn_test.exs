@@ -1,6 +1,5 @@
 defmodule XHTTP.ConnTest do
   use ExUnit.Case, async: true
-  import XHTTP.TestHelpers
   alias XHTTP.Conn
   alias XHTTP.TestHelpers.TCPMock
 
