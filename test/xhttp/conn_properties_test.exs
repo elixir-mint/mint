@@ -1,4 +1,4 @@
-defmodule XHTTP.ConnTest do
+defmodule XHTTP.ConnPropertiesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
   import XHTTP.TestHelpers
