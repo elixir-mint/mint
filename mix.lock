@@ -1,3 +1,3 @@
 %{
-  "stream_data": {:hex, :stream_data, "0.3.0", "cbfc8e3212f64683615657ea27804126a42ded634adfdfee258bf087ee605d46", [], [], "hexpm"},
+  "stream_data": {:hex, :stream_data, "0.4.0", "128c01bfd0fae0108d169eee1772aeed6958604f8782abc2d6e11da4e52468b0", [:mix], [], "hexpm"},
 }
