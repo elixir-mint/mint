@@ -1,5 +1,6 @@
 defmodule XHTTP2.HPACKTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias XHTTP2.HPACK
 
@@ -19,5 +20,33 @@ defmodule XHTTP2.HPACKTest do
 
     assert {headers, %HPACK.Table{}} = HPACK.decode(dump, table)
     assert headers == [{"custom-key", "custom-header"}]
+  end
+
+  property "encoding then decoding headers is circular" do
+    table = HPACK.new(500)
+
+    check all headers <- list_of(header()) do
+      assert {encoded, table} = HPACK.encode(headers, table)
+      assert {decoded, _table} = HPACK.decode(encoded, table)
+      assert decoded == headers
+    end
+  end
+
+  @static_table HPACK.Table.static_table()
+
+  defp header() do
+    header_from_static_table =
+      @static_table
+      |> Map.values()
+      |> member_of()
+      |> bind(fn
+           {name, nil} -> {constant(name), binary()}
+           header -> constant(header)
+         end)
+
+    frequency([
+      {1, header_from_static_table},
+      {2, {binary(min_length: 1), binary()}}
+    ])
   end
 end

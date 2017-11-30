@@ -76,6 +76,10 @@ defmodule XHTTP2.HPACK.Table do
 
   @static_table_size map_size(@static_table)
 
+  def static_table() do
+    @static_table
+  end
+
   @spec new(non_neg_integer()) :: t()
   def new(max_table_size) do
     %__MODULE__{max_table_size: max_table_size}
