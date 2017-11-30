@@ -1,159 +1,213 @@
 defmodule HPACK.Table do
+  @moduledoc false
+
   defstruct [
     :max_table_size,
-    dynamic_table: {%{}, 0}
+    table: [],
+    table_size: 0
   ]
 
-  @type header() :: {binary(), binary()}
   @type t() :: %__MODULE__{
           max_table_size: non_neg_integer(),
-          dynamic_table: {%{optional(non_neg_integer()) => header()}, non_neg_integer()}
+          table: [{binary(), binary() | nil}],
+          table_size: non_neg_integer()
         }
 
-  @static_table %{
-    1 => {":authority", nil},
-    2 => {":method", "GET"},
-    3 => {":method", "POST"},
-    4 => {":path", "/"},
-    5 => {":path", "/index.html"},
-    6 => {":scheme", "http"},
-    7 => {":scheme", "https"},
-    8 => {":status", "200"},
-    9 => {":status", "204"},
-    10 => {":status", "206"},
-    11 => {":status", "304"},
-    12 => {":status", "400"},
-    13 => {":status", "404"},
-    14 => {":status", "500"},
-    15 => {"accept-charset", nil},
-    16 => {"accept-encoding", "gzip, deflate"},
-    17 => {"accept-language", nil},
-    18 => {"accept-ranges", nil},
-    19 => {"accept", nil},
-    20 => {"access-control-allow-origin", nil},
-    21 => {"age", nil},
-    22 => {"allow", nil},
-    23 => {"authorization", nil},
-    24 => {"cache-control", nil},
-    25 => {"content-disposition", nil},
-    26 => {"content-encoding", nil},
-    27 => {"content-language", nil},
-    28 => {"content-length", nil},
-    29 => {"content-location", nil},
-    30 => {"content-range", nil},
-    31 => {"content-type", nil},
-    32 => {"cookie", nil},
-    33 => {"date", nil},
-    34 => {"etag", nil},
-    35 => {"expect", nil},
-    36 => {"expires", nil},
-    37 => {"from", nil},
-    38 => {"host", nil},
-    39 => {"if-match", nil},
-    40 => {"if-modified-since", nil},
-    41 => {"if-none-match", nil},
-    42 => {"if-range", nil},
-    43 => {"if-unmodified-since", nil},
-    44 => {"last-modified", nil},
-    45 => {"link", nil},
-    46 => {"location", nil},
-    47 => {"max-forwards", nil},
-    48 => {"proxy-authenticate", nil},
-    49 => {"proxy-authorization", nil},
-    50 => {"range", nil},
-    51 => {"referer", nil},
-    52 => {"refresh", nil},
-    53 => {"retry-after", nil},
-    54 => {"server", nil},
-    55 => {"set-cookie", nil},
-    56 => {"strict-transport-security", nil},
-    57 => {"transfer-encoding", nil},
-    58 => {"user-agent", nil},
-    59 => {"vary", nil},
-    60 => {"via", nil},
-    61 => {"www-authenticate", nil}
-  }
+  @static_table [
+    {":authority", nil},
+    {":method", "GET"},
+    {":method", "POST"},
+    {":path", "/"},
+    {":path", "/index.html"},
+    {":scheme", "http"},
+    {":scheme", "https"},
+    {":status", "200"},
+    {":status", "204"},
+    {":status", "206"},
+    {":status", "304"},
+    {":status", "400"},
+    {":status", "404"},
+    {":status", "500"},
+    {"accept-charset", nil},
+    {"accept-encoding", "gzip, deflate"},
+    {"accept-language", nil},
+    {"accept-ranges", nil},
+    {"accept", nil},
+    {"access-control-allow-origin", nil},
+    {"age", nil},
+    {"allow", nil},
+    {"authorization", nil},
+    {"cache-control", nil},
+    {"content-disposition", nil},
+    {"content-encoding", nil},
+    {"content-language", nil},
+    {"content-length", nil},
+    {"content-location", nil},
+    {"content-range", nil},
+    {"content-type", nil},
+    {"cookie", nil},
+    {"date", nil},
+    {"etag", nil},
+    {"expect", nil},
+    {"expires", nil},
+    {"from", nil},
+    {"host", nil},
+    {"if-match", nil},
+    {"if-modified-since", nil},
+    {"if-none-match", nil},
+    {"if-range", nil},
+    {"if-unmodified-since", nil},
+    {"last-modified", nil},
+    {"link", nil},
+    {"location", nil},
+    {"max-forwards", nil},
+    {"proxy-authenticate", nil},
+    {"proxy-authorization", nil},
+    {"range", nil},
+    {"referer", nil},
+    {"refresh", nil},
+    {"retry-after", nil},
+    {"server", nil},
+    {"set-cookie", nil},
+    {"strict-transport-security", nil},
+    {"transfer-encoding", nil},
+    {"user-agent", nil},
+    {"vary", nil},
+    {"via", nil},
+    {"www-authenticate", nil}
+  ]
 
-  @static_table_size map_size(@static_table)
+  @static_table_size length(@static_table)
 
   def static_table() do
     @static_table
   end
 
-  @spec new(non_neg_integer()) :: t()
+  @doc "TODO"
   def new(max_table_size) do
     %__MODULE__{max_table_size: max_table_size}
   end
 
-  @spec add(t(), header()) :: t()
-  def add(%__MODULE__{} = table, {_name, _value} = header) do
-    %__MODULE__{
-      dynamic_table: {_, dynamic_table_size} = dynamic_table,
-      max_table_size: max_table_size
-    } = table
-
-    entry_size = entry_size(header)
+  @doc "TODO"
+  def add(%__MODULE__{} = table, {name, value}) do
+    entry_size = entry_size(name, value)
 
     cond do
       # An attempt to add an entry larger than the maximum size causes the table to be emptied of
       # all existing entries and results in an empty table.
-      entry_size > max_table_size ->
-        %{table | dynamic_table: {%{}, 0}}
+      entry_size > table.max_table_size ->
+        %{table | table: [], table_size: 0}
 
-      dynamic_table_size + entry_size > max_table_size ->
-        dynamic_table =
-          dynamic_table
-          |> evict_towards_size(max_table_size - entry_size)
-          |> append_to_dynamic_table(header)
-
-        %{table | dynamic_table: dynamic_table}
+      table.table_size + entry_size > table.max_table_size ->
+        table
+        |> shrink(table.max_table_size - entry_size)
+        |> add_header(name, value)
 
       true ->
-        dynamic_table = append_to_dynamic_table(dynamic_table, header)
-        %{table | dynamic_table: dynamic_table}
+        add_header(table, name, value)
     end
   end
 
-  @spec fetch(t(), pos_integer()) :: header()
-  def fetch(table, index)
-
-  def fetch(%__MODULE__{}, index) when index in 1..@static_table_size do
-    Map.fetch(@static_table, index)
+  defp add_header(%__MODULE__{} = table, name, value) do
+    %{
+      table
+      | table: [{name, value} | table.table],
+        table_size: table.table_size + entry_size(name, value)
+    }
   end
 
-  def fetch(%__MODULE__{dynamic_table: {table, size}}, index)
-      when (index - @static_table_size) in 1..size do
-    Map.fetch(table, index - @static_table_size)
+  @doc "TODO"
+  @spec lookup_by_index(t(), pos_integer()) :: {:ok, {binary(), binary() | nil}} | :error
+  def lookup_by_index(table, index)
+
+  # Static table
+  for {header, index} <- Enum.with_index(@static_table, 1) do
+    def lookup_by_index(%__MODULE__{}, unquote(index)), do: {:ok, unquote(header)}
   end
 
-  def fetch(%__MODULE__{}, _index) do
+  def lookup_by_index(%__MODULE__{table: table}, index)
+      when (index - @static_table_size) in 1..length(table) do
+    {:ok, Enum.at(table, index - @static_table_size - 1)}
+  end
+
+  def lookup_by_index(%__MODULE__{}, _index) do
     :error
   end
 
-  @spec shrink(t(), non_neg_integer()) :: t()
-  def shrink(%__MODULE__{dynamic_table: dynamic_table} = table, new_size) do
-    new_dynamic_table = evict_towards_size(dynamic_table, new_size)
-    %{table | dynamic_table: new_dynamic_table, max_table_size: new_size}
-  end
+  @doc "TODO"
+  def lookup_by_header(table, header)
 
-  defp append_to_dynamic_table({table, table_size}, header) do
-    next_index = map_size(table) + 1
-    {Map.put(table, next_index, header), table_size + entry_size(header)}
-  end
+  def lookup_by_header(%__MODULE__{table: table}, {name, value}) do
+    case static_lookup_by_header({name, value}) do
+      {:full, index} ->
+        {index, {name, value}}
 
-  defp evict_towards_size({table, size}, max_target_size) do
-    last_index = map_size(table)
-    {last_entry, table} = Map.pop(table, last_index)
-    new_size = size - entry_size(last_entry)
+      {:name, index} ->
+        dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil) ||
+          {index, {name, nil}}
 
-    if new_size <= max_target_size do
-      {table, new_size}
-    else
-      evict_towards_size({table, new_size}, max_target_size)
+      nil ->
+        dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil)
     end
   end
 
-  defp entry_size({name, value}) do
+  for {{name, value}, index} <- Enum.with_index(@static_table, 1) do
+    defp static_lookup_by_header({unquote(name), unquote(value)}) do
+      {:full, unquote(index)}
+    end
+
+    defp static_lookup_by_header({unquote(name), _value}) do
+      {:name, unquote(index)}
+    end
+  end
+
+  defp static_lookup_by_header(_other) do
+    nil
+  end
+
+  defp dynamic_lookup_by_header([{name, value} | _rest], name, value, index, _best_index_so_far) do
+    {index, {name, value}}
+  end
+
+  defp dynamic_lookup_by_header([{name, _} | rest], name, value, index, _best_index_so_far) do
+    dynamic_lookup_by_header(rest, name, value, index + 1, index)
+  end
+
+  defp dynamic_lookup_by_header([_other | rest], name, value, index, best_index_so_far) do
+    dynamic_lookup_by_header(rest, name, value, index + 1, best_index_so_far)
+  end
+
+  defp dynamic_lookup_by_header([], name, value, _index, best_index_so_far) do
+    if best_index_so_far do
+      {best_index_so_far, {name, value}}
+    else
+      nil
+    end
+  end
+
+  @doc "TODO"
+  def shrink(%__MODULE__{} = table, new_size) do
+    {new_table_reversed, new_size} =
+      evict_towards_size(Enum.reverse(table.table), table.table_size, new_size)
+
+    %{table | table: Enum.reverse(new_table_reversed), table_size: new_size}
+  end
+
+  defp evict_towards_size([{name, value} | rest], size, max_target_size) do
+    new_size = size - entry_size(name, value)
+
+    if new_size <= max_target_size do
+      {rest, size}
+    else
+      evict_towards_size(rest, new_size, max_target_size)
+    end
+  end
+
+  defp evict_towards_size([], 0, _max_target_size) do
+    {[], 0}
+  end
+
+  defp entry_size(name, value) do
     byte_size(name) + byte_size(value) + 32
   end
 end

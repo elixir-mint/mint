@@ -16,13 +16,15 @@ defmodule HPACK do
   end
 
   # Indexed header field
+  # http://httpwg.org/specs/rfc7541.html#rfc.section.6.1
   defp decode_headers(<<0b1::1, rest::bitstring>>, table, acc) do
     {index, rest} = Types.decode_integer(rest, 7)
-    {:ok, {_name, _value} = header} = Table.fetch(table, index)
+    {:ok, {_name, _value} = header} = Table.lookup_by_index(table, index)
     decode_headers(rest, table, [header | acc])
   end
 
   # Literal header field with incremental indexing
+  # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.1
   defp decode_headers(<<0b01::2, rest::bitstring>>, table, acc) do
     {header, rest} =
       case rest do
@@ -36,7 +38,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 6)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.fetch(table, index)
+          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
           {{name, value}, rest}
       end
 
@@ -44,6 +46,7 @@ defmodule HPACK do
   end
 
   # Literal header field without indexing
+  # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.2
   defp decode_headers(<<0b0000::4, rest::bitstring>>, table, acc) do
     {header, rest} =
       case rest do
@@ -55,7 +58,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.fetch(table, index)
+          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
           {{name, value}, rest}
       end
 
@@ -63,6 +66,7 @@ defmodule HPACK do
   end
 
   # Literal header field never indexed
+  # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.3
   defp decode_headers(<<0b0001::4, rest::bitstring>>, table, acc) do
     {header, rest} =
       case rest do
@@ -74,7 +78,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.fetch(table, index)
+          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
           {{name, value}, rest}
       end
 
@@ -103,30 +107,29 @@ defmodule HPACK do
     encode_headers(rest, table, <<acc::binary, encoded::binary>>)
   end
 
-  for {index, {name, value}} <- Table.static_table() do
-    defp encode_header(unquote(name), unquote(value), table) do
-      {<<0b1::1, Types.encode_integer(unquote(index), 7)::bitstring>>, table}
-    end
-
-    defp encode_header(unquote(name), value, table) do
-      encoded = <<
-        0b0000::4,
-        Types.encode_integer(unquote(index), 4)::bitstring,
-        Types.encode_binary(value, false)::binary
-      >>
-
-      {encoded, table}
-    end
-  end
-
   defp encode_header(name, value, table) do
-    encoded = <<
-      0b0000::4,
-      0::4,
-      Types.encode_binary(name, false)::binary,
-      Types.encode_binary(value, false)::binary
-    >>
+    case Table.lookup_by_header(table, {name, value}) do
+      {index, {^name, ^value}} ->
+        {<<1::1, Types.encode_integer(index, 7)::bitstring>>, table}
 
-    {encoded, table}
+      {index, {^name, nil}} ->
+        encoded = <<
+          0b0000::4,
+          Types.encode_integer(index, 4)::bitstring,
+          Types.encode_binary(value, false)::binary
+        >>
+
+        {encoded, table}
+
+      nil ->
+        encoded = <<
+          0b0000::4,
+          0::4,
+          Types.encode_binary(name, false)::binary,
+          Types.encode_binary(value, false)::binary
+        >>
+
+        {encoded, table}
+    end
   end
 end

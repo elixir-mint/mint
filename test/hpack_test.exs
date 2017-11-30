@@ -35,7 +35,6 @@ defmodule XHTTP2.HPACKTest do
   defp header() do
     header_from_static_table =
       @static_table
-      |> Map.values()
       |> member_of()
       |> bind(fn
            {name, nil} -> {constant(name), binary()}
