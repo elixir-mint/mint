@@ -2,8 +2,6 @@ defmodule XHTTP2.HPACKTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias XHTTP2.HPACK
-
   test "new/1" do
     assert %HPACK.Table{} = HPACK.new(100)
   end

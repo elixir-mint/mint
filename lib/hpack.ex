@@ -1,5 +1,5 @@
-defmodule XHTTP2.HPACK do
-  alias XHTTP2.HPACK.{Table, Types}
+defmodule HPACK do
+  alias HPACK.{Table, Types}
 
   @spec new(non_neg_integer()) :: Table.t()
   def new(max_table_size) when is_integer(max_table_size) and max_table_size >= 0 do

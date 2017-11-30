@@ -1,4 +1,4 @@
-defmodule XHTTP2.HPACK.Table do
+defmodule HPACK.Table do
   defstruct [
     :max_table_size,
     dynamic_table: {%{}, 0}

@@ -1,4 +1,4 @@
-defmodule XHTTP2.HPACK.Types do
+defmodule HPACK.Types do
   @moduledoc false
 
   use Bitwise

@@ -1,8 +1,8 @@
-defmodule XHTTP2.HPACK.TypesTest do
+defmodule HPACK.TypesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  import XHTTP2.HPACK.Types
+  import HPACK.Types
 
   test "encode_integer/2 with examples from the spec" do
     assert encode_integer(10, _prefix = 5) == <<0b01010::5>>
