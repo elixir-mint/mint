@@ -6,7 +6,9 @@ defmodule HPACK.HuffmanTest do
 
   property "encoding and then decoding is circular" do
     check all binary <- binary() do
-      assert binary |> Huffman.encode() |> Huffman.decode() == binary
+      encoded = Huffman.encode(binary)
+      assert is_binary(encoded)
+      assert Huffman.decode(encoded) == binary
     end
   end
 end
