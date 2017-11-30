@@ -3,6 +3,8 @@ defmodule HPACK.Types do
 
   use Bitwise
 
+  alias HPACK.Huffman
+
   defmacrop power_of_two(n) do
     quote do
       1 <<< unquote(n)
@@ -33,7 +35,7 @@ defmodule HPACK.Types do
 
   @spec encode_binary(binary(), boolean()) :: binary()
   def encode_binary(binary, huffman?) do
-    binary = if huffman?, do: encode_huffman(binary), else: binary
+    binary = if huffman?, do: Huffman.encode(binary), else: binary
     huffman_bit = if huffman?, do: 1, else: 0
     binary_size = encode_integer(byte_size(binary), 7)
     <<huffman_bit::1, binary_size::bitstring, binary::binary>>
@@ -64,12 +66,12 @@ defmodule HPACK.Types do
     {length, rest} = decode_integer(rest, 7)
     <<contents::binary-size(length), rest::binary>> = rest
 
-    contents = if huffman_bit, do: decode_huffman(contents), else: contents
+    contents =
+      case huffman_bit do
+        0 -> contents
+        1 -> Huffman.decode(contents)
+      end
 
     {contents, rest}
   end
-
-  # TODO: Huffman encoding
-  defp encode_huffman(binary), do: binary
-  defp decode_huffman(binary), do: binary
 end

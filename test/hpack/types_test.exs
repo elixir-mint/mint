@@ -27,8 +27,9 @@ defmodule HPACK.TypesTest do
 
   property "encoding and then decoding strings is circular" do
     check all string <- binary(),
-              cruft <- binary() do
-      encoded = encode_binary(string, _huffman? = false)
+              cruft <- binary(),
+              huffman? <- boolean() do
+      encoded = encode_binary(string, huffman?)
       assert decode_binary(<<encoded::binary, cruft::binary>>) == {string, cruft}
     end
   end
