@@ -109,10 +109,10 @@ defmodule HPACK do
 
   defp encode_header(name, value, table) do
     case Table.lookup_by_header(table, {name, value}) do
-      {index, {^name, ^value}} ->
+      {:full, index} ->
         {<<1::1, Types.encode_integer(index, 7)::bitstring>>, table}
 
-      {index, {^name, nil}} ->
+      {:name, index} ->
         encoded = <<
           0b0000::4,
           Types.encode_integer(index, 4)::bitstring,
@@ -121,7 +121,7 @@ defmodule HPACK do
 
         {encoded, table}
 
-      nil ->
+      :not_found ->
         encoded = <<
           0b0000::4,
           0::4,

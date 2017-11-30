@@ -135,18 +135,26 @@ defmodule HPACK.Table do
   end
 
   @doc "TODO"
+  @spec lookup_by_header(t(), {binary(), binary() | nil}) ::
+          {:full, pos_integer()} | {:name, pos_integer()} | :not_found
   def lookup_by_header(table, header)
 
   def lookup_by_header(%__MODULE__{table: table}, {name, value}) do
     case static_lookup_by_header({name, value}) do
-      {:full, index} ->
-        {index, {name, value}}
+      {:full, index} when is_nil(value) ->
+        {:name, index}
+
+      {:full, _index} = result ->
+        result
 
       {:name, index} ->
-        dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil) ||
-          {index, {name, nil}}
+        case dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil) do
+          {:full, index} when is_nil(value) -> {:name, index}
+          {:full, _index} = result -> result
+          _other -> {:name, index}
+        end
 
-      nil ->
+      :not_found ->
         dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil)
     end
   end
@@ -162,11 +170,11 @@ defmodule HPACK.Table do
   end
 
   defp static_lookup_by_header(_other) do
-    nil
+    :not_found
   end
 
   defp dynamic_lookup_by_header([{name, value} | _rest], name, value, index, _best_index_so_far) do
-    {index, {name, value}}
+    {:full, index}
   end
 
   defp dynamic_lookup_by_header([{name, _} | rest], name, value, index, _best_index_so_far) do
@@ -177,11 +185,11 @@ defmodule HPACK.Table do
     dynamic_lookup_by_header(rest, name, value, index + 1, best_index_so_far)
   end
 
-  defp dynamic_lookup_by_header([], name, value, _index, best_index_so_far) do
+  defp dynamic_lookup_by_header([], _name, _value, _index, best_index_so_far) do
     if best_index_so_far do
-      {best_index_so_far, {name, value}}
+      {:name, best_index_so_far}
     else
-      nil
+      :not_found
     end
   end
 
