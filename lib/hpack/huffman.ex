@@ -10,6 +10,12 @@ defmodule HPACK.Huffman do
 
   @eos 256
 
+  defmacrop take_significant_bits(value, bit_count, bits_to_take) do
+    quote do
+      unquote(value) >>> (unquote(bit_count) - unquote(bits_to_take))
+    end
+  end
+
   def encode(binary) do
     encode(binary, _acc = <<>>)
   end
@@ -55,7 +61,8 @@ defmodule HPACK.Huffman do
         <<>>
       end
 
-      def decode(padding) when bit_size(padding) in 1..7 do
+      # Use binary syntax for single match context optimization.
+      def decode(<<padding::bitstring>>) when bit_size(padding) in 1..7 do
         padding_size = bit_size(padding)
         <<padding::size(padding_size)>> = padding
 
@@ -74,9 +81,5 @@ defmodule HPACK.Huffman do
         <<unquote(byte_value), decode(rest)::binary>>
       end
     end
-  end
-
-  defp take_significant_bits(value, bit_count, bits_to_take) do
-    value >>> (bit_count - bits_to_take)
   end
 end
