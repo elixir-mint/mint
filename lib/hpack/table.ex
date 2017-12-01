@@ -3,16 +3,16 @@ defmodule HPACK.Table do
 
   defstruct [
     :max_table_size,
-    table: [],
-    table_size: 0,
-    table_length: 0
+    entries: [],
+    size: 0,
+    length: 0
   ]
 
   @type t() :: %__MODULE__{
           max_table_size: non_neg_integer(),
-          table: [{binary(), binary() | nil}],
-          table_size: non_neg_integer(),
-          table_length: non_neg_integer()
+          entries: [{binary(), binary()}],
+          size: non_neg_integer(),
+          length: non_neg_integer()
         }
 
   @static_table [
@@ -93,17 +93,18 @@ defmodule HPACK.Table do
 
   @doc "TODO"
   def add(%__MODULE__{} = table, {name, value}) do
+    %{max_table_size: max_table_size, size: size} = table
     entry_size = entry_size(name, value)
 
     cond do
       # An attempt to add an entry larger than the maximum size causes the table to be emptied of
       # all existing entries and results in an empty table.
-      entry_size > table.max_table_size ->
-        %{table | table: [], table_size: 0, table_length: 0}
+      entry_size > max_table_size ->
+        %{table | entries: [], size: 0, length: 0}
 
-      table.table_size + entry_size > table.max_table_size ->
+      size + entry_size > max_table_size ->
         table
-        |> shrink(table.max_table_size - entry_size)
+        |> shrink(max_table_size - entry_size)
         |> add_header(name, value, entry_size)
 
       true ->
@@ -112,12 +113,8 @@ defmodule HPACK.Table do
   end
 
   defp add_header(%__MODULE__{} = table, name, value, entry_size) do
-    %{
-      table
-      | table: [{name, value} | table.table],
-        table_size: table.table_size + entry_size,
-        table_length: table.table_length + 1
-    }
+    %{entries: entries, size: size, length: length} = table
+    %{table | entries: [{name, value} | entries], size: size + entry_size, length: length + 1}
   end
 
   @doc "TODO"
@@ -129,9 +126,9 @@ defmodule HPACK.Table do
     def lookup_by_index(%__MODULE__{}, unquote(index)), do: {:ok, unquote(header)}
   end
 
-  def lookup_by_index(%__MODULE__{table: table, table_length: table_length}, index)
-      when index in @dynamic_table_start..table_length do
-    {:ok, Enum.at(table, index - @dynamic_table_start)}
+  def lookup_by_index(%__MODULE__{entries: entries, length: length}, index)
+      when index in @dynamic_table_start..length do
+    {:ok, Enum.at(entries, index - @dynamic_table_start)}
   end
 
   def lookup_by_index(%__MODULE__{}, _index) do
@@ -143,20 +140,20 @@ defmodule HPACK.Table do
           {:full, pos_integer()} | {:name, pos_integer()} | :not_found
   def lookup_by_header(table, header)
 
-  def lookup_by_header(%__MODULE__{table: table}, {name, value}) do
+  def lookup_by_header(%__MODULE__{entries: entries}, {name, value}) do
     case static_lookup_by_header({name, value}) do
       {:full, _index} = result ->
         result
 
       {:name, index} ->
         # Check if we get full match in the dynamic tabble
-        case dynamic_lookup_by_header(table, name, value, @dynamic_table_start, nil) do
+        case dynamic_lookup_by_header(entries, name, value, @dynamic_table_start, nil) do
           {:full, _index} = result -> result
           _other -> {:name, index}
         end
 
       :not_found ->
-        dynamic_lookup_by_header(table, name, value, @dynamic_table_start, nil)
+        dynamic_lookup_by_header(entries, name, value, @dynamic_table_start, nil)
     end
   end
 
@@ -199,15 +196,14 @@ defmodule HPACK.Table do
   end
 
   @doc "TODO"
-  def shrink(%__MODULE__{} = table, new_size) do
-    {new_table_reversed, new_size} =
-      evict_towards_size(Enum.reverse(table.table), table.table_size, new_size)
+  def shrink(%__MODULE__{entries: entries, size: size} = table, new_size) do
+    {new_entries_reversed, new_size} = evict_towards_size(Enum.reverse(entries), size, new_size)
 
     %{
       table
-      | table: Enum.reverse(new_table_reversed),
-        table_size: new_size,
-        table_length: length(new_table_reversed)
+      | entries: Enum.reverse(new_entries_reversed),
+        size: new_size,
+        length: length(new_entries_reversed)
     }
   end
 
