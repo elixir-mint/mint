@@ -160,11 +160,9 @@ defmodule HPACK.Table do
     end
   end
 
-  for {{name, value}, index} <- Enum.with_index(@static_table, 1) do
-    if value != nil do
-      defp static_lookup_by_header({unquote(name), unquote(value)}) do
-        {:full, unquote(index)}
-      end
+  for {{name, value}, index} when is_binary(value) <- Enum.with_index(@static_table, 1) do
+    defp static_lookup_by_header({unquote(name), unquote(value)}) do
+      {:full, unquote(index)}
     end
   end
 
