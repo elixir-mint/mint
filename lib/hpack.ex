@@ -103,33 +103,36 @@ defmodule HPACK do
 
   defp encode_headers([{name, value} | rest], table, acc)
        when is_binary(name) and is_binary(value) do
-    {encoded, table} = encode_header(name, value, table)
+    encoded = encode_header(name, value, table)
     encode_headers(rest, table, <<acc::binary, encoded::binary>>)
   end
 
   defp encode_header(name, value, table) do
     case Table.lookup_by_header(table, {name, value}) do
-      {:full, index} ->
-        {<<1::1, Types.encode_integer(index, 7)::bitstring>>, table}
-
-      {:name, index} ->
-        encoded = <<
-          0b0000::4,
-          Types.encode_integer(index, 4)::bitstring,
-          Types.encode_binary(value, false)::binary
-        >>
-
-        {encoded, table}
-
-      :not_found ->
-        encoded = <<
-          0b0000::4,
-          0::4,
-          Types.encode_binary(name, false)::binary,
-          Types.encode_binary(value, false)::binary
-        >>
-
-        {encoded, table}
+      {:full, index} -> encode_indexed_header(index)
+      {:name, index} -> encode_literal_header_without_indexing(index, value)
+      :not_found -> encode_literal_header_without_indexing(name, value)
     end
+  end
+
+  defp encode_indexed_header(index) do
+    <<1::1, Types.encode_integer(index, 7)::bitstring>>
+  end
+
+  defp encode_literal_header_without_indexing(index, value) when is_integer(index) do
+    <<
+      0b0000::4,
+      Types.encode_integer(index, 4)::bitstring,
+      Types.encode_binary(value, false)::binary
+    >>
+  end
+
+  defp encode_literal_header_without_indexing(name, value) when is_binary(name) do
+    <<
+      0b0000::4,
+      0::4,
+      Types.encode_binary(name, false)::binary,
+      Types.encode_binary(value, false)::binary
+    >>
   end
 end
