@@ -141,9 +141,6 @@ defmodule HPACK.Table do
 
   def lookup_by_header(%__MODULE__{table: table}, {name, value}) do
     case static_lookup_by_header({name, value}) do
-      {:full, index} when is_nil(value) ->
-        {:name, index}
-
       {:full, _index} = result ->
         result
 
@@ -160,10 +157,20 @@ defmodule HPACK.Table do
   end
 
   for {{name, value}, index} <- Enum.with_index(@static_table, 1) do
-    defp static_lookup_by_header({unquote(name), unquote(value)}) do
-      {:full, unquote(index)}
+    if value != nil do
+      defp static_lookup_by_header({unquote(name), unquote(value)}) do
+        {:full, unquote(index)}
+      end
     end
+  end
 
+  static_table_names =
+    @static_table
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.with_index(1)
+    |> Enum.uniq_by(&elem(&1, 0))
+
+  for {name, index} <- static_table_names do
     defp static_lookup_by_header({unquote(name), _value}) do
       {:name, unquote(index)}
     end
