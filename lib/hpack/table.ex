@@ -182,24 +182,20 @@ defmodule HPACK.Table do
     :not_found
   end
 
-  defp dynamic_lookup_by_header([{name, value} | _rest], name, value, index, _best_index_so_far) do
+  defp dynamic_lookup_by_header([{name, value} | _rest], name, value, index, _name_index) do
     {:full, index}
   end
 
-  defp dynamic_lookup_by_header([{name, _} | rest], name, value, index, _best_index_so_far) do
+  defp dynamic_lookup_by_header([{name, _} | rest], name, value, index, _name_index) do
     dynamic_lookup_by_header(rest, name, value, index + 1, index)
   end
 
-  defp dynamic_lookup_by_header([_other | rest], name, value, index, best_index_so_far) do
-    dynamic_lookup_by_header(rest, name, value, index + 1, best_index_so_far)
+  defp dynamic_lookup_by_header([_other | rest], name, value, index, name_index) do
+    dynamic_lookup_by_header(rest, name, value, index + 1, name_index)
   end
 
-  defp dynamic_lookup_by_header([], _name, _value, _index, best_index_so_far) do
-    if best_index_so_far do
-      {:name, best_index_so_far}
-    else
-      :not_found
-    end
+  defp dynamic_lookup_by_header([], _name, _value, _index, name_index) do
+    if name_index, do: {:name, name_index}, else: :not_found
   end
 
   @doc "TODO"
