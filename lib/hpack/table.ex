@@ -146,8 +146,8 @@ defmodule HPACK.Table do
         result
 
       {:name, index} ->
+        # Check if we get full match in the dynamic tabble
         case dynamic_lookup_by_header(table, name, value, @dynamic_table_start, nil) do
-          {:full, index} when is_nil(value) -> {:name, index}
           {:full, _index} = result -> result
           _other -> {:name, index}
         end
