@@ -4,13 +4,15 @@ defmodule HPACK.Table do
   defstruct [
     :max_table_size,
     table: [],
-    table_size: 0
+    table_size: 0,
+    table_length: 0
   ]
 
   @type t() :: %__MODULE__{
           max_table_size: non_neg_integer(),
           table: [{binary(), binary() | nil}],
-          table_size: non_neg_integer()
+          table_size: non_neg_integer(),
+          table_length: non_neg_integer()
         }
 
   @static_table [
@@ -97,7 +99,7 @@ defmodule HPACK.Table do
       # An attempt to add an entry larger than the maximum size causes the table to be emptied of
       # all existing entries and results in an empty table.
       entry_size > table.max_table_size ->
-        %{table | table: [], table_size: 0}
+        %{table | table: [], table_size: 0, table_length: 0}
 
       table.table_size + entry_size > table.max_table_size ->
         table
@@ -113,7 +115,8 @@ defmodule HPACK.Table do
     %{
       table
       | table: [{name, value} | table.table],
-        table_size: table.table_size + entry_size
+        table_size: table.table_size + entry_size,
+        table_length: table.table_length + 1
     }
   end
 
@@ -126,8 +129,8 @@ defmodule HPACK.Table do
     def lookup_by_index(%__MODULE__{}, unquote(index)), do: {:ok, unquote(header)}
   end
 
-  def lookup_by_index(%__MODULE__{table: table}, index)
-      when index in @dynamic_table_start..length(table) do
+  def lookup_by_index(%__MODULE__{table: table, table_length: table_length}, index)
+      when index in @dynamic_table_start..table_length do
     {:ok, Enum.at(table, index - @dynamic_table_start)}
   end
 
@@ -206,7 +209,12 @@ defmodule HPACK.Table do
     {new_table_reversed, new_size} =
       evict_towards_size(Enum.reverse(table.table), table.table_size, new_size)
 
-    %{table | table: Enum.reverse(new_table_reversed), table_size: new_size}
+    %{
+      table
+      | table: Enum.reverse(new_table_reversed),
+        table_size: new_size,
+        table_length: length(new_table_reversed)
+    }
   end
 
   defp evict_towards_size([{name, value} | rest], size, max_target_size) do
