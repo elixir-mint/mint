@@ -1,6 +1,20 @@
 defmodule HPACK do
+  @moduledoc """
+  Support for the HPACK header compression algorithm.
+
+  This module provides support for the HPACK header compression algorithm used mainly in HTTP/2.
+  The HPACK algorithm requires an encoding context on the encoder side and a decoding context on
+  the decoder side. These contexts are semantically different but structurally the same and they
+  can both be created through `new/1`.
+  """
+
   alias HPACK.{Table, Types}
 
+  @doc """
+  Create a new context.
+
+  `max_table_size` is the maximum table size (in bytes) for the newly created context.
+  """
   @spec new(non_neg_integer()) :: Table.t()
   def new(max_table_size) when is_integer(max_table_size) and max_table_size >= 0 do
     Table.new(max_table_size)
@@ -8,6 +22,21 @@ defmodule HPACK do
 
   ## Decoding
 
+  @doc """
+  Decodes a header block fragment (HBF) through a given context.
+
+  If decoding is successful, this function returns a `{:ok, headers, updated_context}` tuple where
+  `headers` is a list of decoded headers, and `updated_context` is the updated context. If there's
+  an error in decoding, this function returns `{:error, reason}`.
+
+  ## Examples
+
+      context = HPACK.new(1000)
+      hbf = get_hbf_from_somewhere()
+      HPACK.decode(hbf, context)
+      #=> {:ok, [{":method", "GET"}], updated_context}
+
+  """
   @spec decode(binary(), Table.t()) :: {:ok, [{binary(), binary()}], Table.t()} | {:error, term()}
   def decode(block, %Table{} = table) when is_binary(block) do
     decode_headers(block, table, _acc = [])
@@ -104,6 +133,20 @@ defmodule HPACK do
 
   ## Encoding
 
+  @doc """
+  Encodes a list of headers through the given context.
+
+  Returns a two-element tuple where the first element is a binary representing the encoded headers
+  and the second element is an updated context.
+
+  ## Examples
+
+      headers = [{":authority", "https://example.com"}]
+      context = HPACK.new(1000)
+      HPACK.encode(headers, context)
+      #=> {<<...>>, updated_context}
+
+  """
   @spec encode([{binary(), binary()}], Table.t()) :: {binary(), Table.t()}
   def encode(headers, %Table{} = table) when is_list(headers) do
     encode_headers(headers, table, _acc = [])
