@@ -16,7 +16,7 @@ defmodule XHTTP2.HPACKTest do
         <<0x0D, 0x63, 0x75, 0x73>> <>
         <<0x74, 0x6F, 0x6D, 0x2D>> <> <<0x68, 0x65, 0x61, 0x64>> <> <<0x65, 0x72>>
 
-    assert {headers, %HPACK.Table{}} = HPACK.decode(dump, table)
+    assert {:ok, headers, %HPACK.Table{}} = HPACK.decode(dump, table)
     assert headers == [{"custom-key", "custom-header"}]
   end
 
@@ -25,7 +25,7 @@ defmodule XHTTP2.HPACKTest do
 
     check all headers <- list_of(header()) do
       assert {encoded, table} = HPACK.encode(headers, table)
-      assert {decoded, _table} = HPACK.decode(encoded, table)
+      assert {:ok, decoded, _table} = HPACK.decode(encoded, table)
       assert decoded == headers
     end
   end

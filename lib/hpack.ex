@@ -6,21 +6,24 @@ defmodule HPACK do
     Table.new(max_table_size)
   end
 
-  @spec decode(binary(), Table.t()) :: {[{binary(), binary()}], Table.t()}
+  ## Decoding
+
+  @spec decode(binary(), Table.t()) :: {:ok, [{binary(), binary()}], Table.t()} | {:error, term()}
   def decode(block, %Table{} = table) when is_binary(block) do
     decode_headers(block, table, _acc = [])
+  catch
+    :throw, error -> {:error, error}
   end
 
   defp decode_headers(<<>>, table, acc) do
-    {Enum.reverse(acc), table}
+    {:ok, Enum.reverse(acc), table}
   end
 
   # Indexed header field
   # http://httpwg.org/specs/rfc7541.html#rfc.section.6.1
   defp decode_headers(<<0b1::1, rest::bitstring>>, table, acc) do
     {index, rest} = Types.decode_integer(rest, 7)
-    {:ok, {_name, _value} = header} = Table.lookup_by_index(table, index)
-    decode_headers(rest, table, [header | acc])
+    decode_headers(rest, table, [lookup_by_index!(table, index) | acc])
   end
 
   # Literal header field with incremental indexing
@@ -38,7 +41,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 6)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
+          {name, _value} = lookup_by_index!(table, index)
           {{name, value}, rest}
       end
 
@@ -58,7 +61,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
+          {name, _value} = lookup_by_index!(table, index)
           {{name, value}, rest}
       end
 
@@ -78,7 +81,7 @@ defmodule HPACK do
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
-          {:ok, {name, _value}} = Table.lookup_by_index(table, index)
+          {name, _value} = lookup_by_index!(table, index)
           {{name, value}, rest}
       end
 
@@ -91,6 +94,15 @@ defmodule HPACK do
     {new_size, rest} = Types.decode_integer(rest, 5)
     decode_headers(rest, Table.shrink(table, new_size), acc)
   end
+
+  defp lookup_by_index!(table, index) do
+    case Table.lookup_by_index(table, index) do
+      {:ok, header} -> header
+      :error -> throw({:index_not_found, index})
+    end
+  end
+
+  ## Encoding
 
   @spec encode([{binary(), binary()}], Table.t()) :: {binary(), Table.t()}
   def encode(headers, %Table{} = table) when is_list(headers) do
