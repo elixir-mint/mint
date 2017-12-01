@@ -30,12 +30,6 @@ defmodule HPACK.Huffman do
   {regular_entries, [eos_entry]} = Enum.split(entries, -1)
   {_eos_byte_value, eos_bits, eos_bit_count} = eos_entry
 
-  defmacrop take_significant_bits(value, bit_count, bits_to_take) do
-    quote do
-      unquote(value) >>> (unquote(bit_count) - unquote(bits_to_take))
-    end
-  end
-
   ## Encoding
 
   def encode(binary) do
@@ -85,5 +79,12 @@ defmodule HPACK.Huffman do
     else
       raise "decoding error"
     end
+  end
+
+  ## Helpers
+
+  @compile {:inline, take_significant_bits: 3}
+  defp take_significant_bits(value, bit_count, bits_to_take) do
+    value >>> (bit_count - bits_to_take)
   end
 end
