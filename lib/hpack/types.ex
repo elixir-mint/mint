@@ -5,10 +5,10 @@ defmodule HPACK.Types do
 
   alias HPACK.Huffman
 
+  # This is used as a macro and not an inlined function because we want to be able to use it in
+  # guards.
   defmacrop power_of_two(n) do
-    quote do
-      1 <<< unquote(n)
-    end
+    quote do: 1 <<< unquote(n)
   end
 
   @spec encode_integer(non_neg_integer(), 1..8) :: bitstring()
