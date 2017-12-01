@@ -101,18 +101,18 @@ defmodule HPACK.Table do
       table.table_size + entry_size > table.max_table_size ->
         table
         |> shrink(table.max_table_size - entry_size)
-        |> add_header(name, value)
+        |> add_header(name, value, entry_size)
 
       true ->
-        add_header(table, name, value)
+        add_header(table, name, value, entry_size)
     end
   end
 
-  defp add_header(%__MODULE__{} = table, name, value) do
+  defp add_header(%__MODULE__{} = table, name, value, entry_size) do
     %{
       table
       | table: [{name, value} | table.table],
-        table_size: table.table_size + entry_size(name, value)
+        table_size: table.table_size + entry_size
     }
   end
 
