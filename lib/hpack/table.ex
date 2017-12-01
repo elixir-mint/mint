@@ -78,6 +78,7 @@ defmodule HPACK.Table do
   ]
 
   @static_table_size length(@static_table)
+  @dynamic_table_start @static_table_size + 1
 
   def static_table() do
     @static_table
@@ -126,8 +127,8 @@ defmodule HPACK.Table do
   end
 
   def lookup_by_index(%__MODULE__{table: table}, index)
-      when (index - @static_table_size) in 1..length(table) do
-    {:ok, Enum.at(table, index - @static_table_size - 1)}
+      when index in @dynamic_table_start..length(table) do
+    {:ok, Enum.at(table, index - @dynamic_table_start)}
   end
 
   def lookup_by_index(%__MODULE__{}, _index) do
@@ -145,14 +146,14 @@ defmodule HPACK.Table do
         result
 
       {:name, index} ->
-        case dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil) do
+        case dynamic_lookup_by_header(table, name, value, @dynamic_table_start, nil) do
           {:full, index} when is_nil(value) -> {:name, index}
           {:full, _index} = result -> result
           _other -> {:name, index}
         end
 
       :not_found ->
-        dynamic_lookup_by_header(table, name, value, @static_table_size + 1, nil)
+        dynamic_lookup_by_header(table, name, value, @dynamic_table_start, nil)
     end
   end
 
