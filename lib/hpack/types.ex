@@ -33,12 +33,12 @@ defmodule HPACK.Types do
     <<remaining::8>>
   end
 
-  @spec encode_binary(binary(), boolean()) :: binary()
+  @spec encode_binary(binary(), boolean()) :: iodata()
   def encode_binary(binary, huffman?) do
     binary = if huffman?, do: Huffman.encode(binary), else: binary
     huffman_bit = if huffman?, do: 1, else: 0
     binary_size = encode_integer(byte_size(binary), 7)
-    <<huffman_bit::1, binary_size::bitstring, binary::binary>>
+    [<<huffman_bit::1, binary_size::bitstring>>, binary]
   end
 
   @spec decode_integer(bitstring, 1..8) :: {non_neg_integer(), binary()}

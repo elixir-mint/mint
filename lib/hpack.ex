@@ -94,17 +94,16 @@ defmodule HPACK do
 
   @spec encode([{binary(), binary()}], Table.t()) :: {binary(), Table.t()}
   def encode(headers, %Table{} = table) when is_list(headers) do
-    encode_headers(headers, table, _acc = <<>>)
+    encode_headers(headers, table, _acc = [])
   end
 
   defp encode_headers([], table, acc) do
-    {acc, table}
+    {IO.iodata_to_binary(acc), table}
   end
 
   defp encode_headers([{name, value} | rest], table, acc)
        when is_binary(name) and is_binary(value) do
-    encoded = encode_header(name, value, table)
-    encode_headers(rest, table, <<acc::binary, encoded::binary>>)
+    encode_headers(rest, table, [acc, encode_header(name, value, table)])
   end
 
   defp encode_header(name, value, table) do
@@ -120,19 +119,14 @@ defmodule HPACK do
   end
 
   defp encode_literal_header_without_indexing(index, value) when is_integer(index) do
-    <<
-      0b0000::4,
-      Types.encode_integer(index, 4)::bitstring,
-      Types.encode_binary(value, false)::binary
-    >>
+    [<<0::4, Types.encode_integer(index, 4)::bitstring>>, Types.encode_binary(value, false)]
   end
 
   defp encode_literal_header_without_indexing(name, value) when is_binary(name) do
-    <<
-      0b0000::4,
-      0::4,
-      Types.encode_binary(name, false)::binary,
-      Types.encode_binary(value, false)::binary
-    >>
+    [
+      <<0::4, 0::4>>,
+      Types.encode_binary(name, false),
+      Types.encode_binary(value, false)
+    ]
   end
 end

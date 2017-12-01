@@ -30,7 +30,7 @@ defmodule HPACK.TypesTest do
               cruft <- binary(),
               huffman? <- boolean() do
       encoded = encode_binary(string, huffman?)
-      assert decode_binary(<<encoded::binary, cruft::binary>>) == {string, cruft}
+      assert decode_binary(IO.iodata_to_binary([encoded, cruft])) == {string, cruft}
     end
   end
 end
