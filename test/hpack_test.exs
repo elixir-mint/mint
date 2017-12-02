@@ -38,7 +38,7 @@ defmodule XHTTP2.HPACKTest do
     assert {:ok, [{"b", "B"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"b", "B"}, {"a", "A"}]
 
-    {encoded, enc_table} = HPACK.encode([{:no_store, "c", "C"}], enc_table)
+    {encoded, _enc_table} = HPACK.encode([{:no_store, "c", "C"}], enc_table)
     assert {:ok, [{"c", "C"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"b", "B"}, {"a", "A"}]
   end
