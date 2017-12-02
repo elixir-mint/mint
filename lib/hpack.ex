@@ -10,6 +10,11 @@ defmodule HPACK do
 
   alias HPACK.{Table, Types}
 
+  @type header_name() :: binary()
+  @type header_value() :: binary()
+
+  @valid_header_actions [:store, :store_name, :no_store, :never_store]
+
   @doc """
   Create a new context.
 
@@ -147,7 +152,9 @@ defmodule HPACK do
       #=> {<<...>>, updated_context}
 
   """
-  @spec encode([{binary(), binary()}], Table.t()) :: {binary(), Table.t()}
+  @spec encode([header], Table.t()) :: {binary(), Table.t()}
+        when header: {action, header_name(), header_value()},
+             action: :store | :store_name | :no_store | :never_store
   def encode(headers, %Table{} = table) when is_list(headers) do
     encode_headers(headers, table, _acc = [])
   end
@@ -156,21 +163,45 @@ defmodule HPACK do
     {IO.iodata_to_binary(acc), table}
   end
 
-  defp encode_headers([{name, value} | rest], table, acc)
-       when is_binary(name) and is_binary(value) do
-    encode_headers(rest, table, [acc, encode_header(name, value, table)])
-  end
+  defp encode_headers([{action, name, value} | rest], table, acc)
+       when action in @valid_header_actions and is_binary(name) and is_binary(value) do
+    {encoded, table} =
+      case Table.lookup_by_header(table, {name, value}) do
+        {:full, index} ->
+          {encode_indexed_header(index), table}
 
-  defp encode_header(name, value, table) do
-    case Table.lookup_by_header(table, {name, value}) do
-      {:full, index} -> encode_indexed_header(index)
-      {:name, index} -> encode_literal_header_without_indexing(index, value)
-      :not_found -> encode_literal_header_without_indexing(name, value)
-    end
+        {:name, index} when action == :store ->
+          {encode_literal_header_with_indexing(index, value), Table.add(table, {name, value})}
+
+        {:name, index} when action in [:store_name, :no_store] ->
+          {encode_literal_header_without_indexing(index, value), table}
+
+        {:name, index} when action == :never_store ->
+          {encode_literal_header_never_indexed(index, value), table}
+
+        :not_found when action in [:store, :store_name] ->
+          {encode_literal_header_with_indexing(name, value), Table.add(table, {name, value})}
+
+        :not_found when action == :no_store ->
+          {encode_literal_header_without_indexing(name, value), table}
+
+        :not_found when action == :never_store ->
+          {encode_literal_header_never_indexed(name, value), table}
+      end
+
+    encode_headers(rest, table, [acc, encoded])
   end
 
   defp encode_indexed_header(index) do
     <<1::1, Types.encode_integer(index, 7)::bitstring>>
+  end
+
+  defp encode_literal_header_with_indexing(index, value) when is_integer(index) do
+    [<<1::2, Types.encode_integer(index, 6)::bitstring>>, Types.encode_binary(value, false)]
+  end
+
+  defp encode_literal_header_with_indexing(name, value) when is_binary(name) do
+    [<<1::2, 0::6>>, Types.encode_binary(name, false), Types.encode_binary(value, false)]
   end
 
   defp encode_literal_header_without_indexing(index, value) when is_integer(index) do
@@ -178,10 +209,14 @@ defmodule HPACK do
   end
 
   defp encode_literal_header_without_indexing(name, value) when is_binary(name) do
-    [
-      <<0::4, 0::4>>,
-      Types.encode_binary(name, false),
-      Types.encode_binary(value, false)
-    ]
+    [<<0::4, 0::4>>, Types.encode_binary(name, false), Types.encode_binary(value, false)]
+  end
+
+  defp encode_literal_header_never_indexed(index, value) when is_integer(index) do
+    [<<1::4, Types.encode_integer(index, 4)::bitstring>>, Types.encode_binary(value, false)]
+  end
+
+  defp encode_literal_header_never_indexed(name, value) when is_binary(name) do
+    [<<1::4, 0::4>>, Types.encode_binary(name, false), Types.encode_binary(value, false)]
   end
 end
