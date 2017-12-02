@@ -211,7 +211,7 @@ defmodule HPACK.Table do
     new_size = size - entry_size(name, value)
 
     if new_size <= max_target_size do
-      {rest, size}
+      {rest, new_size}
     else
       evict_towards_size(rest, new_size, max_target_size)
     end
