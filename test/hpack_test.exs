@@ -59,13 +59,12 @@ defmodule XHTTP2.HPACKTest do
     end
   end
 
-  @static_table HPACK.Table.static_table()
-
+  # Header generator.
   defp header() do
     action = member_of([:store, :store_name, :no_store, :never_store])
 
     header_from_static_table =
-      bind(member_of(@static_table), fn
+      bind(member_of(HPACK.Table.__static_table__()), fn
         {name, nil} -> {action, constant(name), binary()}
         {name, value} -> {action, constant(name), constant(value)}
       end)

@@ -39,7 +39,7 @@ defmodule HPACK.TableTest do
       table = Table.new(100)
       table = Table.add(table, "my-header", "my-value")
 
-      assert Table.lookup_by_index(table, length(Table.static_table()) + 1) ==
+      assert Table.lookup_by_index(table, length(Table.__static_table__()) + 1) ==
                {:ok, {"my-header", "my-value"}}
     end
   end

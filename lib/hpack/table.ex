@@ -82,16 +82,21 @@ defmodule HPACK.Table do
   @static_table_size length(@static_table)
   @dynamic_table_start @static_table_size + 1
 
-  def static_table() do
-    @static_table
-  end
+  @doc """
+  Creates a new HPACK table with the given maximum size.
 
-  @doc "TODO"
+  The maximum size is not the maximum number of entries but rather the maximum size as defined in
+  http://httpwg.org/specs/rfc7541.html#maximum.table.size.
+  """
+  @spec new(non_neg_integer()) :: t()
   def new(max_table_size) do
     %__MODULE__{max_table_size: max_table_size}
   end
 
-  @doc "TODO"
+  @doc """
+  Adds the given header to the given table.
+  """
+  @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
     %{max_table_size: max_table_size, size: size} = table
     entry_size = entry_size(name, value)
@@ -117,7 +122,13 @@ defmodule HPACK.Table do
     %{table | entries: [{name, value} | entries], size: size + entry_size, length: length + 1}
   end
 
-  @doc "TODO"
+  @doc """
+  Looks up a header by index `index` in the given `table`.
+
+  Returns `{:ok, {name, value}}` if a header is found at the given `index`, otherwise returns
+  `:error`. `value` can be a binary in case both the header name and value are present in the
+  table, or `nil` if only the name is present (this can only happen in the static table).
+  """
   @spec lookup_by_index(t(), pos_integer()) :: {:ok, {binary(), binary() | nil}} | :error
   def lookup_by_index(table, index)
 
@@ -135,7 +146,18 @@ defmodule HPACK.Table do
     :error
   end
 
-  @doc "TODO"
+  @doc """
+  Looks up the index of a header by its name and value.
+
+  It returns:
+
+    * `{:full, index}` if the full header (name and value) are present in the table at `index`
+
+    * `{:name, index}` if `name` is present in the table but with a different value than `value`
+
+    * `:not_found` if the header name is not in the table at all
+
+  """
   @spec lookup_by_header(t(), binary(), binary() | nil) ::
           {:full, pos_integer()} | {:name, pos_integer()} | :not_found
   def lookup_by_header(table, name, value)
@@ -223,5 +245,11 @@ defmodule HPACK.Table do
 
   defp entry_size(name, value) do
     byte_size(name) + byte_size(value) + 32
+  end
+
+  # Made public to be used in tests.
+  @doc false
+  def __static_table__() do
+    @static_table
   end
 end

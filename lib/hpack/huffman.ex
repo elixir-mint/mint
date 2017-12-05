@@ -32,6 +32,7 @@ defmodule HPACK.Huffman do
 
   ## Encoding
 
+  @spec encode(binary()) :: binary()
   def encode(binary) do
     encode(binary, _acc = <<>>)
   end
@@ -58,6 +59,9 @@ defmodule HPACK.Huffman do
   end
 
   ## Decoding
+
+  @spec decode(binary()) :: binary()
+  def decode(binary)
 
   for {byte_value, bits, bit_count} <- regular_entries do
     def decode(<<unquote(bits)::size(unquote(bit_count)), rest::bitstring>>) do
