@@ -46,7 +46,7 @@ defmodule HPACK do
   def decode(block, %Table{} = table) when is_binary(block) do
     decode_headers(block, table, _acc = [])
   catch
-    :throw, error -> {:error, error}
+    :throw, {:xhttp, error} -> {:error, error}
   end
 
   defp decode_headers(<<>>, table, acc) do
@@ -119,7 +119,7 @@ defmodule HPACK do
           {{name, value}, rest}
       end
 
-    # TODO: don't let others put this in the table.
+    # TODO: enforce the "never indexed" part somehow.
     decode_headers(rest, table, [header | acc])
   end
 
@@ -129,10 +129,14 @@ defmodule HPACK do
     decode_headers(rest, Table.shrink(table, new_size), acc)
   end
 
+  defp decode_headers(_other, _table, _acc) do
+    throw({:xhttp, :protocol_error})
+  end
+
   defp lookup_by_index!(table, index) do
     case Table.lookup_by_index(table, index) do
       {:ok, header} -> header
-      :error -> throw({:index_not_found, index})
+      :error -> throw({:xhttp, {:index_not_found, index}})
     end
   end
 
