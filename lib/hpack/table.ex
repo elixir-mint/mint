@@ -92,7 +92,7 @@ defmodule HPACK.Table do
   end
 
   @doc "TODO"
-  def add(%__MODULE__{} = table, {name, value}) do
+  def add(%__MODULE__{} = table, name, value) do
     %{max_table_size: max_table_size, size: size} = table
     entry_size = entry_size(name, value)
 
@@ -136,12 +136,12 @@ defmodule HPACK.Table do
   end
 
   @doc "TODO"
-  @spec lookup_by_header(t(), {binary(), binary() | nil}) ::
+  @spec lookup_by_header(t(), binary(), binary() | nil) ::
           {:full, pos_integer()} | {:name, pos_integer()} | :not_found
-  def lookup_by_header(table, header)
+  def lookup_by_header(table, name, value)
 
-  def lookup_by_header(%__MODULE__{entries: entries}, {name, value}) do
-    case static_lookup_by_header({name, value}) do
+  def lookup_by_header(%__MODULE__{entries: entries}, name, value) do
+    case static_lookup_by_header(name, value) do
       {:full, _index} = result ->
         result
 
@@ -158,7 +158,7 @@ defmodule HPACK.Table do
   end
 
   for {{name, value}, index} when is_binary(value) <- Enum.with_index(@static_table, 1) do
-    defp static_lookup_by_header({unquote(name), unquote(value)}) do
+    defp static_lookup_by_header(unquote(name), unquote(value)) do
       {:full, unquote(index)}
     end
   end
@@ -170,12 +170,12 @@ defmodule HPACK.Table do
     |> Enum.uniq_by(&elem(&1, 0))
 
   for {name, index} <- static_table_names do
-    defp static_lookup_by_header({unquote(name), _value}) do
+    defp static_lookup_by_header(unquote(name), _value) do
       {:name, unquote(index)}
     end
   end
 
-  defp static_lookup_by_header(_other) do
+  defp static_lookup_by_header(_name, _value) do
     :not_found
   end
 

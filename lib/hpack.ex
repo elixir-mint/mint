@@ -63,64 +63,64 @@ defmodule HPACK do
   # Literal header field with incremental indexing
   # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.1
   defp decode_headers(<<0b01::2, rest::bitstring>>, table, acc) do
-    {header, rest} =
+    {name, value, rest} =
       case rest do
         # The header name is a string.
         <<0::6, rest::binary>> ->
           {name, rest} = Types.decode_binary(rest)
           {value, rest} = Types.decode_binary(rest)
-          {{name, value}, rest}
+          {name, value, rest}
 
         # The header name is an index to be looked up in the table.
         _other ->
           {index, rest} = Types.decode_integer(rest, 6)
           {value, rest} = Types.decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
-          {{name, value}, rest}
+          {name, value, rest}
       end
 
-    decode_headers(rest, Table.add(table, header), [header | acc])
+    decode_headers(rest, Table.add(table, name, value), [{name, value} | acc])
   end
 
   # Literal header field without indexing
   # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.2
   defp decode_headers(<<0b0000::4, rest::bitstring>>, table, acc) do
-    {header, rest} =
+    {name, value, rest} =
       case rest do
         <<0::4, rest::binary>> ->
           {name, rest} = Types.decode_binary(rest)
           {value, rest} = Types.decode_binary(rest)
-          {{name, value}, rest}
+          {name, value, rest}
 
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
-          {{name, value}, rest}
+          {name, value, rest}
       end
 
-    decode_headers(rest, table, [header | acc])
+    decode_headers(rest, table, [{name, value} | acc])
   end
 
   # Literal header field never indexed
   # http://httpwg.org/specs/rfc7541.html#rfc.section.6.2.3
   defp decode_headers(<<0b0001::4, rest::bitstring>>, table, acc) do
-    {header, rest} =
+    {name, value, rest} =
       case rest do
         <<0::4, rest::binary>> ->
           {name, rest} = Types.decode_binary(rest)
           {value, rest} = Types.decode_binary(rest)
-          {{name, value}, rest}
+          {name, value, rest}
 
         _other ->
           {index, rest} = Types.decode_integer(rest, 4)
           {value, rest} = Types.decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
-          {{name, value}, rest}
+          {name, value, rest}
       end
 
     # TODO: enforce the "never indexed" part somehow.
-    decode_headers(rest, table, [header | acc])
+    decode_headers(rest, table, [{name, value} | acc])
   end
 
   # Dynamic table size update
@@ -170,12 +170,12 @@ defmodule HPACK do
   defp encode_headers([{action, name, value} | rest], table, acc)
        when action in @valid_header_actions and is_binary(name) and is_binary(value) do
     {encoded, table} =
-      case Table.lookup_by_header(table, {name, value}) do
+      case Table.lookup_by_header(table, name, value) do
         {:full, index} ->
           {encode_indexed_header(index), table}
 
         {:name, index} when action == :store ->
-          {encode_literal_header_with_indexing(index, value), Table.add(table, {name, value})}
+          {encode_literal_header_with_indexing(index, value), Table.add(table, name, value)}
 
         {:name, index} when action in [:store_name, :no_store] ->
           {encode_literal_header_without_indexing(index, value), table}
@@ -184,7 +184,7 @@ defmodule HPACK do
           {encode_literal_header_never_indexed(index, value), table}
 
         :not_found when action in [:store, :store_name] ->
-          {encode_literal_header_with_indexing(name, value), Table.add(table, {name, value})}
+          {encode_literal_header_with_indexing(name, value), Table.add(table, name, value)}
 
         :not_found when action == :no_store ->
           {encode_literal_header_without_indexing(name, value), table}

@@ -12,18 +12,18 @@ defmodule HPACK.TableTest do
     table = Table.new(10_000)
 
     # These are in the static table.
-    assert {:full, _} = Table.lookup_by_header(table, {":status", "200"})
-    assert {:name, _} = Table.lookup_by_header(table, {":authority", nil})
-    assert {:name, _} = Table.lookup_by_header(table, {":authority", "https://example.com"})
+    assert {:full, _} = Table.lookup_by_header(table, ":status", "200")
+    assert {:name, _} = Table.lookup_by_header(table, ":authority", nil)
+    assert {:name, _} = Table.lookup_by_header(table, ":authority", "https://example.com")
 
-    assert Table.lookup_by_header(table, {"my-nonexistent-header", nil}) == :not_found
-    assert Table.lookup_by_header(table, {"my-nonexistent-header", "my-value"}) == :not_found
+    assert Table.lookup_by_header(table, "my-nonexistent-header", nil) == :not_found
+    assert Table.lookup_by_header(table, "my-nonexistent-header", "my-value") == :not_found
 
-    table = Table.add(table, {":my-header", "my-value"})
+    table = Table.add(table, ":my-header", "my-value")
 
-    assert {:full, _} = Table.lookup_by_header(table, {":my-header", "my-value"})
-    assert {:name, _} = Table.lookup_by_header(table, {":my-header", "other-value"})
-    assert {:name, _} = Table.lookup_by_header(table, {":my-header", nil})
+    assert {:full, _} = Table.lookup_by_header(table, ":my-header", "my-value")
+    assert {:name, _} = Table.lookup_by_header(table, ":my-header", "other-value")
+    assert {:name, _} = Table.lookup_by_header(table, ":my-header", nil)
   end
 
   describe "looking headers up by index" do
@@ -37,7 +37,7 @@ defmodule HPACK.TableTest do
 
     test "with an index in the dynamic table" do
       table = Table.new(100)
-      table = Table.add(table, {"my-header", "my-value"})
+      table = Table.add(table, "my-header", "my-value")
 
       assert Table.lookup_by_index(table, length(Table.static_table()) + 1) ==
                {:ok, {"my-header", "my-value"}}
@@ -47,8 +47,8 @@ defmodule HPACK.TableTest do
   property "adding a header and then looking it up always returns the index of that header" do
     check all {name, value} <- {binary(min_length: 1), binary()} do
       assert %Table{} = table = Table.new(10_000)
-      assert %Table{} = table = Table.add(table, {name, value})
-      assert {:full, 62} = Table.lookup_by_header(table, {name, value})
+      assert %Table{} = table = Table.add(table, name, value)
+      assert {:full, 62} = Table.lookup_by_header(table, name, value)
     end
   end
 end
