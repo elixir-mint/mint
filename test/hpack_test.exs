@@ -27,18 +27,22 @@ defmodule XHTTP2.HPACKTest do
     dec_table = HPACK.new(1000)
 
     {encoded, enc_table} = HPACK.encode([{:store, "a", "A"}], enc_table)
+    encoded = IO.iodata_to_binary(encoded)
     assert {:ok, [{"a", "A"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"a", "A"}]
 
     {encoded, enc_table} = HPACK.encode([{:store_name, "a", "other"}], enc_table)
+    encoded = IO.iodata_to_binary(encoded)
     assert {:ok, [{"a", "other"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"a", "A"}]
 
     {encoded, enc_table} = HPACK.encode([{:store_name, "b", "B"}], enc_table)
+    encoded = IO.iodata_to_binary(encoded)
     assert {:ok, [{"b", "B"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"b", "B"}, {"a", "A"}]
 
     {encoded, _enc_table} = HPACK.encode([{:no_store, "c", "C"}], enc_table)
+    encoded = IO.iodata_to_binary(encoded)
     assert {:ok, [{"c", "C"}], dec_table} = HPACK.decode(encoded, dec_table)
     assert dec_table.entries == [{"b", "B"}, {"a", "A"}]
   end
@@ -49,6 +53,7 @@ defmodule XHTTP2.HPACKTest do
     check all headers_to_encode <- list_of(header()),
               headers = for({_action, name, value} <- headers_to_encode, do: {name, value}) do
       assert {encoded, table} = HPACK.encode(headers_to_encode, table)
+      encoded = IO.iodata_to_binary(encoded)
       assert {:ok, decoded, _table} = HPACK.decode(encoded, table)
       assert decoded == headers
     end

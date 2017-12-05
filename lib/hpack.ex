@@ -156,7 +156,7 @@ defmodule HPACK do
       #=> {<<...>>, updated_context}
 
   """
-  @spec encode([header], Table.t()) :: {binary(), Table.t()}
+  @spec encode([header], Table.t()) :: {iodata(), Table.t()}
         when header: {action, header_name(), header_value()},
              action: :store | :store_name | :no_store | :never_store
   def encode(headers, %Table{} = table) when is_list(headers) do
@@ -164,7 +164,7 @@ defmodule HPACK do
   end
 
   defp encode_headers([], table, acc) do
-    {IO.iodata_to_binary(acc), table}
+    {acc, table}
   end
 
   defp encode_headers([{action, name, value} | rest], table, acc)
