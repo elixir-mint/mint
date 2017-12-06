@@ -22,7 +22,7 @@ defmodule XHTTP.MixProject do
   defp deps do
     [
       {:stream_data, "~> 0.4.0", only: :test},
-      {:hpack_erl, ">= 0.0.0", app: false, only: :test}
+      {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test}
     ]
   end
 end
