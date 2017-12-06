@@ -50,7 +50,7 @@ defmodule XHTTP2.HPACKTest do
   property "encoding then decoding headers is circular" do
     table = HPACK.new(500)
 
-    check all headers_to_encode <- list_of(header()),
+    check all headers_to_encode <- list_of(header_with_action()),
               headers = for({_action, name, value} <- headers_to_encode, do: {name, value}) do
       assert {encoded, table} = HPACK.encode(headers_to_encode, table)
       encoded = IO.iodata_to_binary(encoded)
@@ -59,17 +59,47 @@ defmodule XHTTP2.HPACKTest do
     end
   end
 
-  # Header generator.
-  defp header() do
-    action = member_of([:store, :store_name, :no_store, :never_store])
+  describe "interacting with joedevivo/hpack" do
+    property "encoding through joedevivo/hpack and decoding through HPACK" do
+      encode_table = :hpack.new_context(10_000)
+      decode_table = HPACK.new(10_000)
 
+      header_with_no_empty_value = filter(header(), fn {_name, value} -> value != "" end)
+
+      check all headers <- list_of(header_with_no_empty_value) do
+        {:ok, {encoded, _encode_table}} = :hpack.encode(headers, encode_table)
+        assert {:ok, ^headers, _} = HPACK.decode(encoded, decode_table)
+      end
+    end
+
+    property "encoding through HPACK and decoding through joedevivo/hpack" do
+      encode_table = HPACK.new(10_000)
+      decode_table = :hpack.new_context(10_000)
+
+      check all headers_with_action <- list_of(header_with_action(), min_length: 1),
+                headers = for({_action, name, value} <- headers_with_action, do: {name, value}) do
+        {encoded, _encode_table} = HPACK.encode(headers_with_action, encode_table)
+
+        assert {:ok, {^headers, _decode_table}} =
+                 :hpack.decode(IO.iodata_to_binary(encoded), decode_table)
+      end
+    end
+  end
+
+  # Header generator.
+  defp header_with_action() do
+    action = member_of([:store, :store_name, :no_store, :never_store])
+    bind(header(), fn {name, value} -> {action, constant(name), constant(value)} end)
+  end
+
+  defp header() do
     header_from_static_table =
       bind(member_of(HPACK.Table.__static_table__()), fn
-        {name, nil} -> {action, constant(name), binary()}
-        {name, value} -> {action, constant(name), constant(value)}
+        {name, nil} -> {constant(name), binary()}
+        {name, value} -> constant({name, value})
       end)
 
-    random_header = {action, binary(min_length: 1), binary()}
+    random_header = {binary(min_length: 1), binary()}
 
     frequency([
       {1, header_from_static_table},
