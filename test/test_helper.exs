@@ -1,7 +1,7 @@
 ExUnit.start()
 Application.ensure_all_started(:ssl)
 
-defmodule XHTTP.TestHelpers do
+defmodule XHTTP1.TestHelpers do
   def merge_body(responses, request) do
     merge_body(responses, request, "")
   end
@@ -39,7 +39,7 @@ defmodule XHTTP.TestHelpers do
   end
 end
 
-defmodule XHTTP.TestHelpers.TCPMock do
+defmodule XHTTP1.TestHelpers.TCPMock do
   def connect(hostname, port, opts \\ []) do
     Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
     {:ok, make_ref()}

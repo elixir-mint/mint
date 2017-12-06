@@ -1,4 +1,4 @@
-defmodule HPACK.Huffman do
+defmodule XHTTP2.HPACK.Huffman do
   @moduledoc false
 
   use Bitwise

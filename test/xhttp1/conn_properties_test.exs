@@ -1,9 +1,9 @@
-defmodule XHTTP.ConnPropertiesTest do
+defmodule XHTTP1.ConnPropertiesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
-  import XHTTP.TestHelpers
-  alias XHTTP.Conn
-  alias XHTTP.TestHelpers.TCPMock
+  import XHTTP1.TestHelpers
+  alias XHTTP1.Conn
+  alias XHTTP1.TestHelpers.TCPMock
 
   property "body with content-length" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)

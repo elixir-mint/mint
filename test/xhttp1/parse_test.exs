@@ -1,6 +1,6 @@
-defmodule XHTTP.ParseTest do
+defmodule XHTTP1.ParseTest do
   use ExUnit.Case, async: true
-  import XHTTP.Parse
+  import XHTTP1.Parse
 
   test "content_length_header/1" do
     assert content_length_header("0") == 0

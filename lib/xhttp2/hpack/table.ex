@@ -1,4 +1,4 @@
-defmodule HPACK.Table do
+defmodule XHTTP2.HPACK.Table do
   @moduledoc false
 
   defstruct [

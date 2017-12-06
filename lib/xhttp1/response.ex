@@ -1,7 +1,7 @@
-defmodule XHTTP.Response do
+defmodule XHTTP1.Response do
   @moduledoc false
 
-  alias XHTTP.Parse
+  alias XHTTP1.Parse
 
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do

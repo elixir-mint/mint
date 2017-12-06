@@ -1,7 +1,7 @@
-defmodule XHTTP.IntegrationTest do
+defmodule XHTTP1.IntegrationTest do
   use ExUnit.Case, async: true
-  import XHTTP.TestHelpers
-  alias XHTTP.Conn
+  import XHTTP1.TestHelpers
+  alias XHTTP1.Conn
 
   @moduletag :integration
 

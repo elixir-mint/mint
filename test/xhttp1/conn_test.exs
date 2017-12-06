@@ -1,7 +1,7 @@
-defmodule XHTTP.ConnTest do
+defmodule XHTTP1.ConnTest do
   use ExUnit.Case, async: true
-  alias XHTTP.Conn
-  alias XHTTP.TestHelpers.TCPMock
+  alias XHTTP1.Conn
+  alias XHTTP1.TestHelpers.TCPMock
 
   test "unknown message" do
     {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)

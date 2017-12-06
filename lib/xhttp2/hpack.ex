@@ -1,4 +1,4 @@
-defmodule HPACK do
+defmodule XHTTP2.HPACK do
   @moduledoc """
   Support for the HPACK header compression algorithm.
 
@@ -8,7 +8,7 @@ defmodule HPACK do
   can both be created through `new/1`.
   """
 
-  alias HPACK.{Table, Types}
+  alias XHTTP2.HPACK.{Table, Types}
 
   @type header_name() :: binary()
   @type header_value() :: binary()

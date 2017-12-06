@@ -1,4 +1,4 @@
-defmodule XHTTP.Parse do
+defmodule XHTTP1.Parse do
   @moduledoc false
 
   defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
