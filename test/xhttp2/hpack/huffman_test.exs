@@ -2,7 +2,7 @@ defmodule HPACK.HuffmanTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias HPACK.Huffman
+  alias XHTTP2.HPACK.Huffman
 
   property "encoding and then decoding is circular" do
     check all binary <- binary() do

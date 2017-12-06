@@ -1,4 +1,4 @@
-defmodule XHTTP.Conn do
+defmodule XHTTP1.Conn do
   @moduledoc """
   Streaming API for HTTP connections.
 
@@ -16,7 +16,7 @@ defmodule XHTTP.Conn do
   to always store the returned `%Conn{}` struct from functions.
   """
 
-  alias XHTTP.{Conn, Parse, Request, Response}
+  alias XHTTP1.{Conn, Parse, Request, Response}
 
   require Logger
 
@@ -218,6 +218,7 @@ defmodule XHTTP.Conn do
 
     if request.body == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
+      # TODO: Notify that we are closed
     else
       {:error, conn, :closed}
     end

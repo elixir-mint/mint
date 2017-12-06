@@ -1,9 +1,9 @@
-defmodule HPACK.Types do
+defmodule XHTTP2.HPACK.Types do
   @moduledoc false
 
   use Bitwise
 
-  alias HPACK.Huffman
+  alias XHTTP2.HPACK.Huffman
 
   # This is used as a macro and not an inlined function because we want to be able to use it in
   # guards.

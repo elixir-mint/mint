@@ -1,7 +1,7 @@
-defmodule XHTTP.Request do
+defmodule XHTTP1.Request do
   @moduledoc false
 
-  import XHTTP.Parse
+  import XHTTP1.Parse
 
   @user_agent "xhttp/0.1.0"
 

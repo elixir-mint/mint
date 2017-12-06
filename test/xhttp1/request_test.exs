@@ -1,6 +1,6 @@
-defmodule XHTTP.RequestTest do
+defmodule XHTTP1.RequestTest do
   use ExUnit.Case, async: true
-  alias XHTTP.Request
+  alias XHTTP1.Request
 
   describe "encode/5" do
     test "with header" do
