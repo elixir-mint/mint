@@ -11,4 +11,12 @@ defmodule HPACK.HuffmanTest do
       assert Huffman.decode(encoded) == binary
     end
   end
+
+  property "encoding and decoding match joedevivo/hpack's :huffman" do
+    check all binary <- string(:ascii) do
+      encoded = Huffman.encode(binary)
+      assert encoded == :huffman.encode(binary)
+      assert Huffman.decode(encoded) == :huffman.decode(encoded)
+    end
+  end
 end
