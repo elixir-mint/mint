@@ -109,7 +109,7 @@ defmodule HPACK.Table do
 
       size + entry_size > max_table_size ->
         table
-        |> shrink(max_table_size - entry_size)
+        |> resize(max_table_size - entry_size)
         |> add_header(name, value, entry_size)
 
       true ->
@@ -222,7 +222,7 @@ defmodule HPACK.Table do
   end
 
   @doc "TODO"
-  def shrink(%__MODULE__{entries: entries, size: size} = table, new_size) do
+  def resize(%__MODULE__{entries: entries, size: size} = table, new_size) do
     {new_entries_reversed, new_size} = evict_towards_size(Enum.reverse(entries), size, new_size)
 
     %{

@@ -26,6 +26,28 @@ defmodule HPACK.TableTest do
     assert {:name, _} = Table.lookup_by_header(table, ":my-header", nil)
   end
 
+  test "resizing" do
+    dynamic_table_start = length(Table.__static_table__()) + 1
+
+    # This fits two headers that have name and value of 4 bytes (4 + 4 + 32, twice).
+    table = Table.new(80)
+
+    table = Table.add(table, "aaaa", "AAAA")
+    table = Table.add(table, "bbbb", "BBBB")
+    assert Table.lookup_by_index(table, dynamic_table_start + 1) == {:ok, {"aaaa", "AAAA"}}
+    assert Table.lookup_by_index(table, dynamic_table_start) == {:ok, {"bbbb", "BBBB"}}
+
+    # We need to remove one now.
+    table = Table.add(table, "cccc", "CCCC")
+    assert Table.lookup_by_index(table, dynamic_table_start) == {:ok, {"cccc", "CCCC"}}
+    assert Table.lookup_by_index(table, dynamic_table_start + 1) == {:ok, {"bbbb", "BBBB"}}
+    assert Table.lookup_by_index(table, dynamic_table_start + 2) == :error
+
+    # If we resize so that no headers fit, all headers are removed.
+    table = Table.resize(table, 30)
+    assert Table.lookup_by_index(table, dynamic_table_start) == :error
+  end
+
   describe "looking headers up by index" do
     test "with an index out of bounds" do
       assert Table.lookup_by_index(Table.new(100), 1000) == :error

@@ -126,7 +126,7 @@ defmodule HPACK do
   # Dynamic table size update
   defp decode_headers(<<0b001::3, rest::bitstring>>, table, acc) do
     {new_size, rest} = Types.decode_integer(rest, 5)
-    decode_headers(rest, Table.shrink(table, new_size), acc)
+    decode_headers(rest, Table.resize(table, new_size), acc)
   end
 
   defp decode_headers(_other, _table, _acc) do
