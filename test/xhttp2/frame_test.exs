@@ -231,21 +231,20 @@ defmodule XHTTP2.FrameTest do
   end
 
   describe "GOAWAY" do
-    @describetag skip: "packing not implemented yet"
-
     test "regular" do
-      # assert_round_trip(%Frame.Goaway{
-      #   stream_id: 0,
-      #   flags: 0x00,
-      #   last_stream_id: 1000,
-      #   error_code: :enhance_your_calm,
-      #   debug_data: "some debug data"
-      # })
+      assert_round_trip frame_goaway(
+                          stream_id: 0,
+                          flags: 0x00,
+                          last_stream_id: 1000,
+                          error_code: :enhance_your_calm,
+                          debug_data: "some debug data"
+                        )
     end
 
     test "with bad stream id" do
-      # assert Frame.parse_next(Frame.pack_raw(0x07, 0x00, 3, "")) ==
-      #          {:error, %ProtocolError{frame: 0x07, reason: :frame_only_allowed_on_stream_0}}
+      # TODO: use :frame_goaway not 0x07
+      assert Frame.parse_next(pack_raw(0x07, 0x00, 3, "")) ==
+               {:error, {:frame_only_allowed_on_stream_0, 0x07}}
     end
   end
 
@@ -278,21 +277,23 @@ defmodule XHTTP2.FrameTest do
   end
 
   describe "CONTINUATION" do
-    @describetag skip: "packing not implemented yet"
-
     test "regular" do
-      # {:ok, {hbf, _context}} = :hpack.encode(@headers, :hpack.new_context())
-      #
-      # assert_round_trip(%Frame.Continuation{
-      #   flags: 0x00,
-      #   stream_id: 3,
-      #   header_block_fragment: hbf
-      # })
+      {encoded_headers, _} =
+        @headers
+        |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
+        |> HPACK.encode(HPACK.new(100_000))
+
+      assert_round_trip frame_continuation(
+                          stream_id: 3,
+                          flags: 0x00,
+                          hbf: IO.iodata_to_binary(encoded_headers)
+                        )
     end
 
     test "with bad stream id" do
-      # assert Frame.parse_next(Frame.pack_raw(0x09, 0x00, 0, "")) ==
-      #          {:error, %ProtocolError{frame: 0x06, reason: :frame_not_allowed_on_stream_0}}
+      # TODO: use :frame_continuation not 0x09
+      assert Frame.parse_next(pack_raw(0x09, 0x00, 0, "")) ==
+               {:error, {:frame_not_allowed_on_stream_0, 0x09}}
     end
   end
 

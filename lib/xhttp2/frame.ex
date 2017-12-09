@@ -308,9 +308,26 @@ defmodule XHTTP2.Frame do
     pack_raw(@types[:frame_ping], flags, 0, opaque_data)
   end
 
+  def pack(frame_goaway() = frame) do
+    frame_goaway(
+      stream_id: 0,
+      flags: flags,
+      last_stream_id: last_stream_id,
+      error_code: error_code,
+      debug_data: debug_data
+    ) = frame
+
+    payload = [<<0::1, last_stream_id::31, dehumanize_error_code(error_code)::32>>, debug_data]
+    pack_raw(@types[:frame_goaway], flags, 0, payload)
+  end
+
   def pack(frame_window_update(stream_id: stream_id, flags: flags, window_size_increment: wsi)) do
     payload = <<0::1, wsi::31>>
     pack_raw(@types[:frame_window_update], flags, stream_id, payload)
+  end
+
+  def pack(frame_continuation(stream_id: stream_id, flags: flags, hbf: hbf)) do
+    pack_raw(@types[:frame_continuation], flags, stream_id, _payload = hbf)
   end
 
   def pack_raw(type, flags, stream_id, payload) do
