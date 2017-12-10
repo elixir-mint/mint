@@ -60,30 +60,30 @@ defmodule XHTTP2.Frame do
   end
 
   not_allowed_on_stream_0 = [
-    @types[:frame_data],
-    @types[:frame_headers],
-    @types[:frame_priority],
-    @types[:frame_rst_stream],
-    @types[:frame_push_promise],
-    @types[:frame_continuation]
+    :frame_data,
+    :frame_headers,
+    :frame_priority,
+    :frame_rst_stream,
+    :frame_push_promise,
+    :frame_continuation
   ]
 
-  defp parse_contents(type, _flags, _stream_id = 0, _payload)
-       when type in unquote(not_allowed_on_stream_0) do
-    # TODO: use human-readable type
-    throw({:xhttp, {:frame_not_allowed_on_stream_0, type}})
+  for {frame, type} <- Map.take(@types, not_allowed_on_stream_0) do
+    defp parse_contents(unquote(type), _flags, _stream_id = 0, _payload) do
+      throw({:xhttp, {:frame_not_allowed_on_stream_0, unquote(frame)}})
+    end
   end
 
   only_allowed_on_stream_0 = [
-    @types[:frame_settings],
-    @types[:frame_ping],
-    @types[:frame_goaway]
+    :frame_settings,
+    :frame_ping,
+    :frame_goaway
   ]
 
-  defp parse_contents(type, _flags, stream_id, _payload)
-       when type in unquote(only_allowed_on_stream_0) and stream_id != 0 do
-    # TODO: use human-readable type
-    throw({:xhttp, {:frame_only_allowed_on_stream_0, type}})
+  for {frame, type} <- Map.take(@types, only_allowed_on_stream_0) do
+    defp parse_contents(unquote(type), _flags, stream_id, _payload) when stream_id != 0 do
+      throw({:xhttp, {:frame_only_allowed_on_stream_0, unquote(frame)}})
+    end
   end
 
   for {frame, type} <- @types do
@@ -257,23 +257,48 @@ defmodule XHTTP2.Frame do
 
   def pack(frame)
 
-  # TODO: implement padding
   def pack(frame_data(stream_id: stream_id, flags: flags, data: data, padding: nil)) do
     pack_raw(@types[:frame_data], flags, stream_id, data)
   end
 
-  def pack(
-        frame_headers(
-          flags: flags,
-          stream_id: stream_id,
-          exclusive?: exclusive?,
-          stream_dependency: stream_dependency,
-          weight: weight,
-          hbf: hbf,
-          padding: nil
-        )
-      ) do
-    pack_raw(@types[:frame_headers], flags, stream_id, hbf)
+  def pack(frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
+    flags = bor(flags, 0x08)
+    payload = [byte_size(padding), data, padding]
+    pack_raw(@types[:frame_data], flags, stream_id, payload)
+  end
+
+  def pack(frame_headers() = frame) do
+    frame_headers(
+      flags: flags,
+      stream_id: stream_id,
+      exclusive?: exclusive?,
+      stream_dependency: stream_dependency,
+      weight: weight,
+      hbf: hbf,
+      padding: padding
+    ) = frame
+
+    payload = hbf
+
+    {payload, flags} =
+      if stream_dependency && weight && is_boolean(exclusive?) do
+        # 0x20 is the PRIORITY flag
+        {
+          [<<if(exclusive?, do: 1, else: 0)::1, stream_dependency::31>>, weight - 1, payload],
+          bor(flags, 0x20)
+        }
+      else
+        {payload, flags}
+      end
+
+    {payload, flags} =
+      if padding do
+        {[byte_size(padding), payload, padding], bor(flags, 0x08)}
+      else
+        {payload, flags}
+      end
+
+    pack_raw(@types[:frame_headers], flags, stream_id, payload)
   end
 
   def pack(frame_priority() = frame) do
@@ -298,10 +323,39 @@ defmodule XHTTP2.Frame do
     pack_raw(@types[:frame_rst_stream], flags, stream_id, payload)
   end
 
-  # TODO: pack actual settings
-  def pack(frame_settings(stream_id: stream_id, flags: flags, params: [])) do
-    payload = <<>>
+  def pack(frame_settings(stream_id: stream_id, flags: flags, params: params)) do
+    payload =
+      Enum.map(params, fn
+        {:header_table_size, value} -> <<0x01::16, value::32>>
+        {:enable_push, value} -> <<0x02::16, if(value, do: 1, else: 0)::32>>
+        {:max_concurrent_streams, value} -> <<0x03::16, value::32>>
+        {:initial_window_size, value} -> <<0x04::16, value::32>>
+        {:max_frame_size, value} -> <<0x05::16, value::32>>
+        {:max_header_list_size, value} -> <<0x06::16, value::32>>
+      end)
+
     pack_raw(@types[:frame_settings], flags, stream_id, payload)
+  end
+
+  def pack(frame_push_promise() = frame) do
+    frame_push_promise(
+      stream_id: stream_id,
+      flags: flags,
+      promised_stream_id: promised_stream_id,
+      hbf: hbf,
+      padding: padding
+    ) = frame
+
+    payload = [<<0::1, promised_stream_id::31>>, hbf]
+
+    {payload, flags} =
+      if padding do
+        {[byte_size(padding), payload, padding], bor(flags, 0x08)}
+      else
+        {payload, flags}
+      end
+
+    pack_raw(@types[:frame_push_promise], flags, stream_id, payload)
   end
 
   def pack(frame_ping(stream_id: 0, flags: flags, opaque_data: opaque_data)) do

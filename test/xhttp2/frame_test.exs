@@ -22,7 +22,6 @@ defmodule XHTTP2.FrameTest do
                         )
     end
 
-    @tag skip: "packing not implemented"
     test "with padding" do
       assert_round_trip frame_data(
                           stream_id: 3,
@@ -41,14 +40,13 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_data not 0
       assert Frame.parse_next(pack_raw(0x00, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, 0}}
+               {:error, {:frame_not_allowed_on_stream_0, :frame_data}}
     end
   end
 
   describe "HEADERS" do
-    test "without padding" do
+    test "with meaningful hbf" do
       {encoded_headers, _} =
         @headers
         |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
@@ -60,45 +58,45 @@ defmodule XHTTP2.FrameTest do
       assert {:ok, @headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
     end
 
-    test "with padding" do
-      {encoded_headers, _} =
-        @headers
-        |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
-        |> HPACK.encode(HPACK.new(100_000))
+    test "without padding and without priority" do
+      assert_round_trip frame_headers(
+                          stream_id: 3,
+                          flags: 0x00,
+                          exclusive?: nil,
+                          stream_dependency: nil,
+                          weight: nil,
+                          hbf: "hbf",
+                          padding: nil
+                        )
+    end
 
-      assert frame_headers(stream_id: 3, flags: 0x08, hbf: hbf, padding: "pad") =
-               parse_next(pack_raw(0x01, 0x08, 3, [3, encoded_headers, "pad"]))
-
-      assert {:ok, @headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
+    test "without padding and with priority" do
+      assert_round_trip frame_headers(
+                          stream_id: 3,
+                          flags: 0x20,
+                          exclusive?: true,
+                          stream_dependency: 19,
+                          weight: 10,
+                          hbf: "hbf",
+                          padding: nil
+                        )
     end
 
     test "with padding and priority" do
-      {encoded_headers, _} =
-        @headers
-        |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
-        |> HPACK.encode(HPACK.new(100_000))
-
-      flags = bor(0x08, 0x20)
-
-      payload = [3, <<1::1, 8::31>>, 0, encoded_headers, "pad"]
-
-      assert frame_headers(
-               stream_id: 3,
-               flags: ^flags,
-               hbf: hbf,
-               padding: "pad",
-               exclusive?: true,
-               stream_dependency: 8,
-               weight: 1
-             ) = parse_next(pack_raw(0x01, flags, 3, payload))
-
-      assert {:ok, @headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
+      assert_round_trip frame_headers(
+                          stream_id: 3,
+                          flags: bor(0x08, 0x20),
+                          exclusive?: true,
+                          stream_dependency: 19,
+                          weight: 10,
+                          hbf: "hbf",
+                          padding: "some padding"
+                        )
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_headers not 0x01
       assert Frame.parse_next(pack_raw(0x01, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, 0x01}}
+               {:error, {:frame_not_allowed_on_stream_0, :frame_headers}}
     end
   end
 
@@ -119,9 +117,8 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_priority not 0x02
       assert Frame.parse_next(pack_raw(0x02, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, 0x02}}
+               {:error, {:frame_not_allowed_on_stream_0, :frame_priority}}
     end
   end
 
@@ -135,9 +132,8 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_rst_stream not 0x03
       assert Frame.parse_next(pack_raw(0x03, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, 0x03}}
+               {:error, {:frame_not_allowed_on_stream_0, :frame_rst_stream}}
     end
 
     test "with bad length" do
@@ -155,23 +151,26 @@ defmodule XHTTP2.FrameTest do
                         )
     end
 
-    @tag skip: "multiple parameters not supported yet in encoding"
     test "with parameters" do
+      params = [
+        header_table_size: 10,
+        enable_push: false,
+        max_concurrent_streams: 250,
+        initial_window_size: 10,
+        max_frame_size: 65536,
+        max_header_list_size: 100_000
+      ]
+
       assert_round_trip frame_settings(
                           stream_id: 0,
                           flags: 0x01,
-                          params: [
-                            header_table_size: 10,
-                            enable_push: false,
-                            max_concurrent_streams: 250
-                          ]
+                          params: params
                         )
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_settings not 0x03
       assert Frame.parse_next(pack_raw(0x04, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, 0x04}}
+               {:error, {:frame_only_allowed_on_stream_0, :frame_settings}}
     end
 
     test "with bad length" do
@@ -181,31 +180,29 @@ defmodule XHTTP2.FrameTest do
   end
 
   describe "PUSH_PROMISE" do
-    @describetag skip: "packing not implemented yet"
-
     test "without padding" do
-      # assert_round_trip(%Frame.PushPromise{
-      #   stream_id: 3,
-      #   flags: 0x00,
-      #   promised_stream_id: 5,
-      #   header_block_fragment: "some header block fragment",
-      #   padding: nil
-      # })
+      assert_round_trip frame_push_promise(
+                          stream_id: 3,
+                          flags: 0x00,
+                          promised_stream_id: 5,
+                          hbf: "some header block fragment",
+                          padding: nil
+                        )
     end
 
     test "with padding" do
-      # assert_round_trip(%Frame.PushPromise{
-      #   stream_id: 3,
-      #   flags: 0x00,
-      #   promised_stream_id: 5,
-      #   header_block_fragment: "some header block fragment",
-      #   padding: "some padding"
-      # })
+      assert_round_trip frame_push_promise(
+                          stream_id: 3,
+                          flags: 0x08,
+                          promised_stream_id: 5,
+                          hbf: "some header block fragment",
+                          padding: "some padding"
+                        )
     end
 
     test "with bad stream id" do
-      # assert Frame.parse_next(Frame.pack_raw(0x05, 0x00, 0, "")) ==
-      #          {:error, %ProtocolError{frame: 0x05, reason: :frame_not_allowed_on_stream_0}}
+      assert Frame.parse_next(pack_raw(0x05, 0x00, 0, "")) ==
+               {:error, {:frame_not_allowed_on_stream_0, :frame_push_promise}}
     end
   end
 
@@ -219,9 +216,8 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_ping not 0x06
       assert Frame.parse_next(pack_raw(0x06, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, 0x06}}
+               {:error, {:frame_only_allowed_on_stream_0, :frame_ping}}
     end
 
     test "with bad length" do
@@ -242,9 +238,8 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_goaway not 0x07
       assert Frame.parse_next(pack_raw(0x07, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, 0x07}}
+               {:error, {:frame_only_allowed_on_stream_0, :frame_goaway}}
     end
   end
 
@@ -291,9 +286,8 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      # TODO: use :frame_continuation not 0x09
       assert Frame.parse_next(pack_raw(0x09, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, 0x09}}
+               {:error, {:frame_not_allowed_on_stream_0, :frame_continuation}}
     end
   end
 
