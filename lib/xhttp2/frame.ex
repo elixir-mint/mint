@@ -36,14 +36,14 @@ defmodule XHTTP2.Frame do
 
   ## Parsing
 
-  def parse_next(bin) when is_binary(bin) do
-    {{type, flags, stream_id, payload}, rest} = parse_next_raw(bin)
-    {:ok, parse_contents(type, flags, stream_id, payload), rest}
+  def decode_next(bin) when is_binary(bin) do
+    {{type, flags, stream_id, payload}, rest} = decode_next_raw(bin)
+    {:ok, decode_contents(type, flags, stream_id, payload), rest}
   catch
     :throw, {:xhttp, reason} -> {:error, reason}
   end
 
-  defp parse_next_raw(<<
+  defp decode_next_raw(<<
          length::24,
          type,
          flags,
@@ -55,7 +55,7 @@ defmodule XHTTP2.Frame do
     {{type, flags, stream_id, payload}, rest}
   end
 
-  defp parse_next_raw(other) do
+  defp decode_next_raw(other) do
     throw({:xhttp, {:malformed_frame, other}})
   end
 
@@ -69,7 +69,7 @@ defmodule XHTTP2.Frame do
   ]
 
   for {frame, type} <- Map.take(@types, not_allowed_on_stream_0) do
-    defp parse_contents(unquote(type), _flags, _stream_id = 0, _payload) do
+    defp decode_contents(unquote(type), _flags, _stream_id = 0, _payload) do
       throw({:xhttp, {:frame_not_allowed_on_stream_0, unquote(frame)}})
     end
   end
@@ -81,29 +81,29 @@ defmodule XHTTP2.Frame do
   ]
 
   for {frame, type} <- Map.take(@types, only_allowed_on_stream_0) do
-    defp parse_contents(unquote(type), _flags, stream_id, _payload) when stream_id != 0 do
+    defp decode_contents(unquote(type), _flags, stream_id, _payload) when stream_id != 0 do
       throw({:xhttp, {:frame_only_allowed_on_stream_0, unquote(frame)}})
     end
   end
 
   for {frame, type} <- @types do
-    function = :"parse_#{frame}"
+    function = :"decode_#{frame}"
 
-    defp parse_contents(unquote(type), flags, stream_id, payload) do
+    defp decode_contents(unquote(type), flags, stream_id, payload) do
       unquote(function)(flags, stream_id, payload)
     end
   end
 
   # Parsing of specific frames
 
-  defp parse_frame_data(flags, stream_id, payload) do
-    {data, padding} = parse_padding(:frame_data, flags, payload)
+  defp decode_frame_data(flags, stream_id, payload) do
+    {data, padding} = decode_padding(:frame_data, flags, payload)
     frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.2
-  defp parse_frame_headers(flags, stream_id, payload) do
-    {data, padding} = parse_padding(:frame_headers, flags, payload)
+  defp decode_frame_headers(flags, stream_id, payload) do
+    {data, padding} = decode_padding(:frame_headers, flags, payload)
 
     {exclusive?, stream_dependency, weight, data} =
       if is_flag_set(flags, _priority = 0x20) do
@@ -125,11 +125,11 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.3
-  defp parse_frame_priority(_flags, _stream_id, payload) when byte_size(payload) != 5 do
+  defp decode_frame_priority(_flags, _stream_id, payload) when byte_size(payload) != 5 do
     throw({:xhttp, {:bad_size, :frame_priority, byte_size(payload)}})
   end
 
-  defp parse_frame_priority(flags, stream_id, payload) do
+  defp decode_frame_priority(flags, stream_id, payload) do
     <<exclusive::1, stream_dependency::31, weight::8>> = payload
 
     frame_priority(
@@ -142,11 +142,11 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.4
-  defp parse_frame_rst_stream(_flags, _stream_id, payload) when byte_size(payload) != 4 do
+  defp decode_frame_rst_stream(_flags, _stream_id, payload) when byte_size(payload) != 4 do
     throw({:xhttp, {:bad_size, :frame_rst_stream, byte_size(payload)}})
   end
 
-  defp parse_frame_rst_stream(flags, stream_id, <<error_code::32>>) do
+  defp decode_frame_rst_stream(flags, stream_id, <<error_code::32>>) do
     frame_rst_stream(
       stream_id: stream_id,
       flags: flags,
@@ -155,17 +155,17 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
-  defp parse_frame_settings(_flags, _stream_id, payload) when rem(byte_size(payload), 6) != 0 do
+  defp decode_frame_settings(_flags, _stream_id, payload) when rem(byte_size(payload), 6) != 0 do
     throw({:xhttp, {:bad_size, :frame_settings, byte_size(payload)}})
   end
 
-  defp parse_frame_settings(flags, _stream_id = 0, payload) do
-    frame_settings(stream_id: 0, flags: flags, params: parse_settings_params(payload))
+  defp decode_frame_settings(flags, _stream_id = 0, payload) do
+    frame_settings(stream_id: 0, flags: flags, params: decode_settings_params(payload))
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.6
-  defp parse_frame_push_promise(flags, stream_id, payload) do
-    {data, padding} = parse_padding(:frame_push_promise, flags, payload)
+  defp decode_frame_push_promise(flags, stream_id, payload) do
+    {data, padding} = decode_padding(:frame_push_promise, flags, payload)
     <<_reserved::1, promised_stream_id::31, header_block_fragment::binary>> = data
 
     frame_push_promise(
@@ -178,16 +178,16 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.7
-  defp parse_frame_ping(_flags, _stream_id, payload) when byte_size(payload) != 8 do
+  defp decode_frame_ping(_flags, _stream_id, payload) when byte_size(payload) != 8 do
     throw({:xhttp, {:bad_size, :frame_ping, byte_size(payload)}})
   end
 
-  defp parse_frame_ping(flags, 0, payload) do
+  defp decode_frame_ping(flags, 0, payload) do
     frame_ping(stream_id: 0, flags: flags, opaque_data: payload)
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.8
-  defp parse_frame_goaway(flags, stream_id, payload) do
+  defp decode_frame_goaway(flags, stream_id, payload) do
     <<_reserved::1, last_stream_id::31, error_code::32, debug_data::binary>> = payload
 
     frame_goaway(
@@ -200,15 +200,15 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.9
-  defp parse_frame_window_update(_flags, _stream_id, payload) when byte_size(payload) != 4 do
+  defp decode_frame_window_update(_flags, _stream_id, payload) when byte_size(payload) != 4 do
     throw({:xhttp, {:bad_size, :frame_window_update, byte_size(payload)}})
   end
 
-  defp parse_frame_window_update(_flags, _stream_id, <<_reserved::1, 0::31>>) do
+  defp decode_frame_window_update(_flags, _stream_id, <<_reserved::1, 0::31>>) do
     throw({:xhttp, {:bad_window_size_increment, :frame_window_update, 0}})
   end
 
-  defp parse_frame_window_update(flags, stream_id, <<_reserved::1, window_size_increment::31>>) do
+  defp decode_frame_window_update(flags, stream_id, <<_reserved::1, window_size_increment::31>>) do
     frame_window_update(
       stream_id: stream_id,
       flags: flags,
@@ -217,11 +217,11 @@ defmodule XHTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.10
-  defp parse_frame_continuation(flags, stream_id, payload) do
+  defp decode_frame_continuation(flags, stream_id, payload) do
     frame_continuation(stream_id: stream_id, flags: flags, hbf: payload)
   end
 
-  defp parse_padding(frame, flags, <<pad_length, rest::binary>> = payload)
+  defp decode_padding(frame, flags, <<pad_length, rest::binary>> = payload)
        when is_flag_set(flags, 0x08) do
     if pad_length >= byte_size(payload) do
       throw({:xhttp, {:pad_length_bigger_than_payload_length, frame}})
@@ -233,41 +233,41 @@ defmodule XHTTP2.Frame do
     end
   end
 
-  defp parse_padding(_frame, _flags, payload) do
+  defp decode_padding(_frame, _flags, payload) do
     {payload, nil}
   end
 
-  defp parse_settings_params(payload) do
-    parse_settings_params(payload, _acc = [])
+  defp decode_settings_params(payload) do
+    decode_settings_params(payload, _acc = [])
   end
 
-  defp parse_settings_params(<<>>, acc), do: Enum.reverse(acc)
+  defp decode_settings_params(<<>>, acc), do: Enum.reverse(acc)
 
-  defp parse_settings_params(<<identifier::16, value::32, rest::binary>>, acc),
-    do: parse_settings_params(rest, [parse_settings_param(identifier, value) | acc])
+  defp decode_settings_params(<<identifier::16, value::32, rest::binary>>, acc),
+    do: decode_settings_params(rest, [decode_settings_param(identifier, value) | acc])
 
-  defp parse_settings_param(0x01, value), do: {:header_table_size, value}
-  defp parse_settings_param(0x02, value), do: {:enable_push, value == 1}
-  defp parse_settings_param(0x03, value), do: {:max_concurrent_streams, value}
-  defp parse_settings_param(0x04, value), do: {:initial_window_size, value}
-  defp parse_settings_param(0x05, value), do: {:max_frame_size, value}
-  defp parse_settings_param(0x06, value), do: {:max_header_list_size, value}
+  defp decode_settings_param(0x01, value), do: {:header_table_size, value}
+  defp decode_settings_param(0x02, value), do: {:enable_push, value == 1}
+  defp decode_settings_param(0x03, value), do: {:max_concurrent_streams, value}
+  defp decode_settings_param(0x04, value), do: {:initial_window_size, value}
+  defp decode_settings_param(0x05, value), do: {:max_frame_size, value}
+  defp decode_settings_param(0x06, value), do: {:max_header_list_size, value}
 
   ## Encoding
 
-  def pack(frame)
+  def encode(frame)
 
-  def pack(frame_data(stream_id: stream_id, flags: flags, data: data, padding: nil)) do
-    pack_raw(@types[:frame_data], flags, stream_id, data)
+  def encode(frame_data(stream_id: stream_id, flags: flags, data: data, padding: nil)) do
+    encode_raw(@types[:frame_data], flags, stream_id, data)
   end
 
-  def pack(frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
+  def encode(frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
     flags = bor(flags, 0x08)
     payload = [byte_size(padding), data, padding]
-    pack_raw(@types[:frame_data], flags, stream_id, payload)
+    encode_raw(@types[:frame_data], flags, stream_id, payload)
   end
 
-  def pack(frame_headers() = frame) do
+  def encode(frame_headers() = frame) do
     frame_headers(
       flags: flags,
       stream_id: stream_id,
@@ -298,10 +298,10 @@ defmodule XHTTP2.Frame do
         {payload, flags}
       end
 
-    pack_raw(@types[:frame_headers], flags, stream_id, payload)
+    encode_raw(@types[:frame_headers], flags, stream_id, payload)
   end
 
-  def pack(frame_priority() = frame) do
+  def encode(frame_priority() = frame) do
     frame_priority(
       stream_id: stream_id,
       flags: flags,
@@ -315,15 +315,15 @@ defmodule XHTTP2.Frame do
       weight - 1
     ]
 
-    pack_raw(@types[:frame_priority], flags, stream_id, payload)
+    encode_raw(@types[:frame_priority], flags, stream_id, payload)
   end
 
-  def pack(frame_rst_stream(stream_id: stream_id, flags: flags, error_code: error_code)) do
+  def encode(frame_rst_stream(stream_id: stream_id, flags: flags, error_code: error_code)) do
     payload = <<dehumanize_error_code(error_code)::32>>
-    pack_raw(@types[:frame_rst_stream], flags, stream_id, payload)
+    encode_raw(@types[:frame_rst_stream], flags, stream_id, payload)
   end
 
-  def pack(frame_settings(stream_id: stream_id, flags: flags, params: params)) do
+  def encode(frame_settings(stream_id: stream_id, flags: flags, params: params)) do
     payload =
       Enum.map(params, fn
         {:header_table_size, value} -> <<0x01::16, value::32>>
@@ -334,10 +334,10 @@ defmodule XHTTP2.Frame do
         {:max_header_list_size, value} -> <<0x06::16, value::32>>
       end)
 
-    pack_raw(@types[:frame_settings], flags, stream_id, payload)
+    encode_raw(@types[:frame_settings], flags, stream_id, payload)
   end
 
-  def pack(frame_push_promise() = frame) do
+  def encode(frame_push_promise() = frame) do
     frame_push_promise(
       stream_id: stream_id,
       flags: flags,
@@ -355,14 +355,14 @@ defmodule XHTTP2.Frame do
         {payload, flags}
       end
 
-    pack_raw(@types[:frame_push_promise], flags, stream_id, payload)
+    encode_raw(@types[:frame_push_promise], flags, stream_id, payload)
   end
 
-  def pack(frame_ping(stream_id: 0, flags: flags, opaque_data: opaque_data)) do
-    pack_raw(@types[:frame_ping], flags, 0, opaque_data)
+  def encode(frame_ping(stream_id: 0, flags: flags, opaque_data: opaque_data)) do
+    encode_raw(@types[:frame_ping], flags, 0, opaque_data)
   end
 
-  def pack(frame_goaway() = frame) do
+  def encode(frame_goaway() = frame) do
     frame_goaway(
       stream_id: 0,
       flags: flags,
@@ -372,19 +372,19 @@ defmodule XHTTP2.Frame do
     ) = frame
 
     payload = [<<0::1, last_stream_id::31, dehumanize_error_code(error_code)::32>>, debug_data]
-    pack_raw(@types[:frame_goaway], flags, 0, payload)
+    encode_raw(@types[:frame_goaway], flags, 0, payload)
   end
 
-  def pack(frame_window_update(stream_id: stream_id, flags: flags, window_size_increment: wsi)) do
+  def encode(frame_window_update(stream_id: stream_id, flags: flags, window_size_increment: wsi)) do
     payload = <<0::1, wsi::31>>
-    pack_raw(@types[:frame_window_update], flags, stream_id, payload)
+    encode_raw(@types[:frame_window_update], flags, stream_id, payload)
   end
 
-  def pack(frame_continuation(stream_id: stream_id, flags: flags, hbf: hbf)) do
-    pack_raw(@types[:frame_continuation], flags, stream_id, _payload = hbf)
+  def encode(frame_continuation(stream_id: stream_id, flags: flags, hbf: hbf)) do
+    encode_raw(@types[:frame_continuation], flags, stream_id, _payload = hbf)
   end
 
-  def pack_raw(type, flags, stream_id, payload) do
+  def encode_raw(type, flags, stream_id, payload) do
     [<<IO.iodata_length(payload)::24>>, type, flags, <<0::1, stream_id::31>>, payload]
   end
 

@@ -3,14 +3,12 @@ defmodule XHTTP2.FrameTest do
 
   use Bitwise, skip_operators: true
 
-  import XHTTP2.Frame, except: [parse_next: 1, pack_raw: 4]
+  import XHTTP2.Frame, except: [decode_next: 1, encode_raw: 4]
 
   alias XHTTP2.{
     Frame,
     HPACK
   }
-
-  @headers [{"foo", "bar"}, {"baz", "bong"}, {"foo", "badung"}]
 
   describe "DATA" do
     test "without padding" do
@@ -35,27 +33,29 @@ defmodule XHTTP2.FrameTest do
       # "payload" is 4 bytes, the pad length is >= 5 bytes
       payload = <<5::8, "data">>
 
-      assert Frame.parse_next(pack_raw(0x00, 0x08, 3, payload)) ==
+      assert Frame.decode_next(encode_raw(0x00, 0x08, 3, payload)) ==
                {:error, {:pad_length_bigger_than_payload_length, :frame_data}}
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x00, 0x00, 0, "")) ==
+      assert Frame.decode_next(encode_raw(0x00, 0x00, 0, "")) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_data}}
     end
   end
 
   describe "HEADERS" do
     test "with meaningful hbf" do
+      headers = [{"foo", "bar"}, {"baz", "bong"}, {"foo", "badung"}]
+
       {encoded_headers, _} =
-        @headers
+        headers
         |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
         |> HPACK.encode(HPACK.new(100_000))
 
-      assert frame_headers(stream_id: 3, flags: 0x00, hbf: hbf, padding: nil) =
-               parse_next(pack_raw(0x01, 0x00, 3, encoded_headers))
+      assert {:ok, frame_headers(stream_id: 3, flags: 0x00, hbf: hbf, padding: nil), "rest"} =
+               Frame.decode_next(encode_raw(0x01, 0x00, 3, encoded_headers) <> "rest")
 
-      assert {:ok, @headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
+      assert {:ok, ^headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
     end
 
     test "without padding and without priority" do
@@ -95,7 +95,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x01, 0x00, 0, "")) ==
+      assert Frame.decode_next(encode_raw(0x01, 0x00, 0, "")) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_headers}}
     end
   end
@@ -112,12 +112,12 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad length" do
-      assert Frame.parse_next(pack_raw(0x02, 0x00, 3, "")) ==
+      assert Frame.decode_next(encode_raw(0x02, 0x00, 3, "")) ==
                {:error, {:bad_size, :frame_priority, 0}}
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x02, 0x00, 0, <<_5_bytes = 0::40>>)) ==
+      assert Frame.decode_next(encode_raw(0x02, 0x00, 0, <<_5_bytes = 0::40>>)) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_priority}}
     end
   end
@@ -132,12 +132,12 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x03, 0x00, 0, <<_5_bytes = 0::40>>)) ==
+      assert Frame.decode_next(encode_raw(0x03, 0x00, 0, <<_5_bytes = 0::40>>)) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_rst_stream}}
     end
 
     test "with bad length" do
-      assert Frame.parse_next(pack_raw(0x03, 0x00, 3, <<3::8>>)) ==
+      assert Frame.decode_next(encode_raw(0x03, 0x00, 3, <<3::8>>)) ==
                {:error, {:bad_size, :frame_rst_stream, 1}}
     end
   end
@@ -169,12 +169,12 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x04, 0x00, 3, "")) ==
+      assert Frame.decode_next(encode_raw(0x04, 0x00, 3, "")) ==
                {:error, {:frame_only_allowed_on_stream_0, :frame_settings}}
     end
 
     test "with bad length" do
-      assert Frame.parse_next(pack_raw(0x04, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
+      assert Frame.decode_next(encode_raw(0x04, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
                {:error, {:bad_size, :frame_settings, 1}}
     end
   end
@@ -201,7 +201,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x05, 0x00, 0, "")) ==
+      assert Frame.decode_next(encode_raw(0x05, 0x00, 0, "")) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_push_promise}}
     end
   end
@@ -216,12 +216,12 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x06, 0x00, 3, "")) ==
+      assert Frame.decode_next(encode_raw(0x06, 0x00, 3, "")) ==
                {:error, {:frame_only_allowed_on_stream_0, :frame_ping}}
     end
 
     test "with bad length" do
-      assert Frame.parse_next(pack_raw(0x06, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
+      assert Frame.decode_next(encode_raw(0x06, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
                {:error, {:bad_size, :frame_ping, 1}}
     end
   end
@@ -238,7 +238,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x07, 0x00, 3, "")) ==
+      assert Frame.decode_next(encode_raw(0x07, 0x00, 3, "")) ==
                {:error, {:frame_only_allowed_on_stream_0, :frame_goaway}}
     end
   end
@@ -261,46 +261,37 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "invalid window size increment" do
-      assert Frame.parse_next(pack_raw(0x08, 0x00, 0, <<0::1, 0::31>>)) ==
+      assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<0::1, 0::31>>)) ==
                {:error, {:bad_window_size_increment, :frame_window_update, 0}}
     end
 
     test "with bad length" do
-      assert Frame.parse_next(pack_raw(0x08, 0x00, 0, <<>>)) ==
+      assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<>>)) ==
                {:error, {:bad_size, :frame_window_update, 0}}
     end
   end
 
   describe "CONTINUATION" do
     test "regular" do
-      {encoded_headers, _} =
-        @headers
-        |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
-        |> HPACK.encode(HPACK.new(100_000))
-
       assert_round_trip frame_continuation(
                           stream_id: 3,
                           flags: 0x00,
-                          hbf: IO.iodata_to_binary(encoded_headers)
+                          hbf: "hbf"
                         )
     end
 
     test "with bad stream id" do
-      assert Frame.parse_next(pack_raw(0x09, 0x00, 0, "")) ==
+      assert Frame.decode_next(encode_raw(0x09, 0x00, 0, "")) ==
                {:error, {:frame_not_allowed_on_stream_0, :frame_continuation}}
     end
   end
 
   defp assert_round_trip(frame) do
-    assert frame |> Frame.pack() |> IO.iodata_to_binary() |> parse_next() == frame
+    encoded = frame |> Frame.encode() |> IO.iodata_to_binary()
+    assert Frame.decode_next(encoded <> "rest") == {:ok, frame, "rest"}
   end
 
-  defp pack_raw(type, flags, stream_id, payload) do
-    IO.iodata_to_binary(Frame.pack_raw(type, flags, stream_id, payload))
-  end
-
-  defp parse_next(frame) do
-    {:ok, parsed_frame, "rest"} = Frame.parse_next(frame <> "rest")
-    parsed_frame
+  defp encode_raw(type, flags, stream_id, payload) do
+    IO.iodata_to_binary(Frame.encode_raw(type, flags, stream_id, payload))
   end
 end
