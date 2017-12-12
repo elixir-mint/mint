@@ -3,7 +3,7 @@ defmodule XHTTP2.Frame do
 
   import Record
 
-  shared = [:stream_id, :flags]
+  shared = [:stream_id, {:flags, 0x00}]
   defrecord :frame_data, shared ++ [:data, :padding]
   defrecord :frame_headers, shared ++ [:exclusive?, :stream_dependency, :weight, :hbf, :padding]
   defrecord :frame_priority, shared ++ [:exclusive?, :stream_dependency, :weight]
@@ -14,12 +14,6 @@ defmodule XHTTP2.Frame do
   defrecord :frame_goaway, shared ++ [:last_stream_id, :error_code, :debug_data]
   defrecord :frame_window_update, shared ++ [:window_size_increment]
   defrecord :frame_continuation, shared ++ [:hbf]
-
-  defmacrop is_flag_set(flags, flag) do
-    quote do
-      band(unquote(flags), unquote(flag)) == unquote(flag)
-    end
-  end
 
   @types %{
     frame_data: 0x00,
@@ -33,6 +27,27 @@ defmodule XHTTP2.Frame do
     frame_window_update: 0x08,
     frame_continuation: 0x09
   }
+
+  ## Flag handling
+
+  @flags %{
+    frame_data: [end_stream: 0x01, padded: 0x08],
+    frame_headers: [end_stream: 0x01, end_headers: 0x04, padded: 0x08, priority: 0x20],
+    frame_settings: [ack: 0x01],
+    frame_push_promise: [end_headers: 0x04, padded: 0x08],
+    frame_ping: [ack: 0x01],
+    frame_continuation: [end_headers: 0x04]
+  }
+
+  def set_flag(flags, flag) do
+    bor(flags, flag)
+  end
+
+  defmacrop is_flag_set(flags, flag) do
+    quote do
+      band(unquote(flags), unquote(flag)) == unquote(flag)
+    end
+  end
 
   ## Parsing
 
@@ -106,7 +121,7 @@ defmodule XHTTP2.Frame do
     {data, padding} = decode_padding(:frame_headers, flags, payload)
 
     {exclusive?, stream_dependency, weight, data} =
-      if is_flag_set(flags, _priority = 0x20) do
+      if is_flag_set(flags, @flags[:frame_headers][:priority]) do
         <<exclusive::1, stream_dependency::31, weight::8, rest::binary>> = data
         {exclusive == 1, stream_dependency, weight + 1, rest}
       else
@@ -222,7 +237,7 @@ defmodule XHTTP2.Frame do
   end
 
   defp decode_padding(frame, flags, <<pad_length, rest::binary>> = payload)
-       when is_flag_set(flags, 0x08) do
+       when is_flag_set(flags, unquote(@flags[:frame_data][:padded])) do
     if pad_length >= byte_size(payload) do
       throw({:xhttp, {:pad_length_bigger_than_payload_length, frame}})
     else
@@ -262,7 +277,7 @@ defmodule XHTTP2.Frame do
   end
 
   def encode(frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
-    flags = bor(flags, 0x08)
+    flags = set_flag(flags, @flags[:frame_data][:padded])
     payload = [byte_size(padding), data, padding]
     encode_raw(@types[:frame_data], flags, stream_id, payload)
   end
@@ -282,10 +297,9 @@ defmodule XHTTP2.Frame do
 
     {payload, flags} =
       if stream_dependency && weight && is_boolean(exclusive?) do
-        # 0x20 is the PRIORITY flag
         {
           [<<if(exclusive?, do: 1, else: 0)::1, stream_dependency::31>>, weight - 1, payload],
-          bor(flags, 0x20)
+          set_flag(flags, @flags[:frame_headers][:priority])
         }
       else
         {payload, flags}
@@ -293,7 +307,7 @@ defmodule XHTTP2.Frame do
 
     {payload, flags} =
       if padding do
-        {[byte_size(padding), payload, padding], bor(flags, 0x08)}
+        {[byte_size(padding), payload, padding], set_flag(flags, @flags[:frame_headers][:padded])}
       else
         {payload, flags}
       end
@@ -350,7 +364,10 @@ defmodule XHTTP2.Frame do
 
     {payload, flags} =
       if padding do
-        {[byte_size(padding), payload, padding], bor(flags, 0x08)}
+        {
+          [byte_size(padding), payload, padding],
+          set_flag(flags, @flags[:frame_push_promise][:padded])
+        }
       else
         {payload, flags}
       end
