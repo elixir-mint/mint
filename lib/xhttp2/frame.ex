@@ -39,8 +39,11 @@ defmodule XHTTP2.Frame do
     frame_continuation: [end_headers: 0x04]
   }
 
-  def set_flag(flags, flag) do
-    bor(flags, flag)
+  for {frame, flags} <- @flags,
+      {flag_name, flag_value} <- flags do
+    def set_flag(flags, unquote(frame), unquote(flag_name)) do
+      bor(flags, unquote(flag_value))
+    end
   end
 
   defmacrop is_flag_set(flags, flag) do
@@ -277,7 +280,7 @@ defmodule XHTTP2.Frame do
   end
 
   def encode(frame_data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
-    flags = set_flag(flags, @flags[:frame_data][:padded])
+    flags = set_flag(flags, :frame_data, :padded)
     payload = [byte_size(padding), data, padding]
     encode_raw(@types[:frame_data], flags, stream_id, payload)
   end
@@ -299,7 +302,7 @@ defmodule XHTTP2.Frame do
       if stream_dependency && weight && is_boolean(exclusive?) do
         {
           [<<if(exclusive?, do: 1, else: 0)::1, stream_dependency::31>>, weight - 1, payload],
-          set_flag(flags, @flags[:frame_headers][:priority])
+          set_flag(flags, :frame_headers, :priority)
         }
       else
         {payload, flags}
@@ -307,7 +310,7 @@ defmodule XHTTP2.Frame do
 
     {payload, flags} =
       if padding do
-        {[byte_size(padding), payload, padding], set_flag(flags, @flags[:frame_headers][:padded])}
+        {[byte_size(padding), payload, padding], set_flag(flags, :frame_headers, :padded)}
       else
         {payload, flags}
       end
@@ -366,7 +369,7 @@ defmodule XHTTP2.Frame do
       if padding do
         {
           [byte_size(padding), payload, padding],
-          set_flag(flags, @flags[:frame_push_promise][:padded])
+          set_flag(flags, :frame_push_promise, :padded)
         }
       else
         {payload, flags}
