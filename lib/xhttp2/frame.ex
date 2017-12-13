@@ -39,6 +39,25 @@ defmodule XHTTP2.Frame do
     frame_continuation: [end_headers: 0x04]
   }
 
+  @doc """
+  Sets the flag specified by `flag_name` on the given `flags`.
+
+  `flags` is an integer. `frame_name` should be the name of the frame
+  `flags` belong to (used for ensuring `flag_name`) belongs to that frame.
+  """
+  @spec set_flag(non_neg_integer(), :frame_data, :end_stream | :padded) :: non_neg_integer()
+  @spec set_flag(non_neg_integer(), :frame_settings, :ack) :: non_neg_integer()
+  @spec set_flag(non_neg_integer(), :frame_push_promise, :end_headers | :padded) ::
+          non_neg_integer()
+  @spec set_flag(non_neg_integer(), :frame_ping, :ack) :: non_neg_integer()
+  @spec set_flag(non_neg_integer(), :frame_continuation, :end_headers) :: non_neg_integer()
+  @spec set_flag(
+          non_neg_integer(),
+          :frame_headers,
+          :end_stream | :end_headers | :padded | :priority
+        ) :: non_neg_integer()
+  def set_flag(flags, frame_name, flag_name)
+
   for {frame, flags} <- @flags,
       {flag_name, flag_value} <- flags do
     def set_flag(flags, unquote(frame), unquote(flag_name)) do
@@ -54,6 +73,12 @@ defmodule XHTTP2.Frame do
 
   ## Parsing
 
+  @doc """
+  Decodes the next frame of the given binary.
+
+  Returns `{:ok, frame, rest}` if successful, `{:error, reason}` if not.
+  """
+  @spec decode_next(binary()) :: {:ok, tuple(), binary()} | {:error, term()}
   def decode_next(bin) when is_binary(bin) do
     {{type, flags, stream_id, payload}, rest} = decode_next_raw(bin)
     {:ok, decode_contents(type, flags, stream_id, payload), rest}
@@ -273,6 +298,10 @@ defmodule XHTTP2.Frame do
 
   ## Encoding
 
+  @doc """
+  Encodes the given `frame`.
+  """
+  @spec encode(tuple()) :: iodata()
   def encode(frame)
 
   def encode(frame_data(stream_id: stream_id, flags: flags, data: data, padding: nil)) do
