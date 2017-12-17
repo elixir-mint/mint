@@ -25,6 +25,12 @@ defmodule XHTTP2.HPACK do
     Table.new(max_table_size)
   end
 
+  @doc """
+  Resizes the given table to the given size.
+  """
+  @spec resize(Table.t(), non_neg_integer()) :: Table.t()
+  defdelegate resize(table, new_size), to: Table
+
   ## Decoding
 
   @doc """

@@ -14,15 +14,8 @@ defmodule XHTTP2.Conn do
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  @default_client_settings [
-    header_table_size: 4096,
-    enable_push: true,
-    max_concurrent_streams: 100,
-    initial_window_size: 65_535,
-    max_frame_size: 16_384
-  ]
-
   @default_window_size 65_535
+  @max_window_size 2_147_483_647
 
   @forced_transport_opts [
     packet: :raw,
@@ -37,7 +30,6 @@ defmodule XHTTP2.Conn do
     :transport,
     :socket,
     :state,
-    :server_settings,
     :client_settings,
     next_stream_id: 3,
     streams: %{},
@@ -46,21 +38,20 @@ defmodule XHTTP2.Conn do
     initial_window_size: @default_window_size,
     encode_table: HPACK.new(4096),
     decode_table: HPACK.new(4096),
-    buffer: ""
+    buffer: "",
+
+    # SETTINGS-related things.
+    enable_push: true,
+    server_max_concurrent_streams: 100,
+    initial_window_size: @default_window_size,
+    max_frame_size: 16_384
   ]
 
   ## Types
 
   @type settings() :: Keyword.t()
 
-  @opaque t() :: %__MODULE__{
-            transport: module(),
-            socket: term(),
-            state: :open | :closed,
-            server_settings: settings(),
-            client_settings: settings(),
-            buffer: binary()
-          }
+  @opaque t() :: %__MODULE__{}
 
   ## Public interface
 
@@ -93,14 +84,6 @@ defmodule XHTTP2.Conn do
   @doc """
   TODO
   """
-  @spec read_server_settings(t()) :: settings()
-  def read_server_settings(%__MODULE__{server_settings: server_settings}) do
-    server_settings
-  end
-
-  @doc """
-  TODO
-  """
   @spec request(t(), list()) :: {:ok, t(), request_ref :: term()} | {:error, term()}
   def request(%__MODULE__{} = conn, headers) when is_list(headers) do
     with {:ok, conn, stream_id} <- open_stream(conn),
@@ -119,7 +102,7 @@ defmodule XHTTP2.Conn do
   end
 
   defp open_stream(%__MODULE__{} = conn) do
-    max_concurrent_streams = conn.server_settings[:max_concurrent_streams]
+    max_concurrent_streams = conn.server_max_concurrent_streams
 
     if conn.open_streams >= max_concurrent_streams do
       {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
@@ -254,9 +237,7 @@ defmodule XHTTP2.Conn do
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   defp initiate_connection(transport, socket, opts) do
-    client_settings_params =
-      Keyword.merge(@default_client_settings, Keyword.get(opts, :client_settings, []))
-
+    client_settings_params = Keyword.get(opts, :client_settings, [])
     client_settings = frame_settings(stream_id: 0, params: client_settings_params)
 
     server_settings_ack =
@@ -269,13 +250,14 @@ defmodule XHTTP2.Conn do
     with :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
          {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)) do
-      conn = %__MODULE__{
-        state: :open,
-        transport: transport,
-        socket: socket,
-        buffer: buffer,
-        server_settings: frame_settings(server_settings, :params)
-      }
+      conn =
+        %__MODULE__{
+          state: :open,
+          transport: transport,
+          socket: socket,
+          buffer: buffer
+        }
+        |> apply_server_settings(frame_settings(server_settings, :params))
 
       with {:ok, conn} <- receive_client_settings_ack(conn, client_settings_params),
            :ok <- transport_to_inet(transport).setopts(socket, active: true),
@@ -351,6 +333,31 @@ defmodule XHTTP2.Conn do
       id: conn.next_stream_id,
       window_size: conn.initial_window_size
     }
+  end
+
+  defp apply_server_settings(conn, server_settings) do
+    Enum.reduce(server_settings, conn, fn
+      {:header_table_size, header_table_size}, conn ->
+        update_in(conn.encode_table, &HPACK.resize(&1, header_table_size))
+
+      {:enable_push, enable_push?}, conn ->
+        put_in(conn.enable_push, enable_push?)
+
+      {:max_concurrent_streams, max_concurrent_streams}, conn ->
+        put_in(conn.server_max_concurrent_streams, max_concurrent_streams)
+
+      {:initial_window_size, initial_window_size}, conn ->
+        # TODO: update open streams
+        # TODO: check that the iws is under the @max_window_size
+        put_in(conn.initial_window_size, initial_window_size)
+
+      {:max_frame_size, max_frame_size}, conn ->
+        put_in(conn.max_frame_size, max_frame_size)
+
+      {:max_header_list_size, max_header_list_size}, conn ->
+        # TODO: handle this
+        conn
+    end)
   end
 
   ## Frame handling
