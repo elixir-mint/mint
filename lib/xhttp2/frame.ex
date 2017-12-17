@@ -45,24 +45,27 @@ defmodule XHTTP2.Frame do
   `flags` is an integer. `frame_name` should be the name of the frame
   `flags` belong to (used for ensuring `flag_name`) belongs to that frame.
   """
-  @spec set_flag(non_neg_integer(), :frame_data, :end_stream | :padded) :: non_neg_integer()
-  @spec set_flag(non_neg_integer(), :frame_settings, :ack) :: non_neg_integer()
-  @spec set_flag(non_neg_integer(), :frame_push_promise, :end_headers | :padded) ::
-          non_neg_integer()
-  @spec set_flag(non_neg_integer(), :frame_ping, :ack) :: non_neg_integer()
-  @spec set_flag(non_neg_integer(), :frame_continuation, :end_headers) :: non_neg_integer()
-  @spec set_flag(
-          non_neg_integer(),
-          :frame_headers,
-          :end_stream | :end_headers | :padded | :priority
-        ) :: non_neg_integer()
+  @spec set_flag(byte(), :frame_data, :end_stream | :padded) :: byte()
+  @spec set_flag(byte(), :frame_settings, :ack) :: byte()
+  @spec set_flag(byte(), :frame_push_promise, :end_headers | :padded) :: byte()
+  @spec set_flag(byte(), :frame_ping, :ack) :: byte()
+  @spec set_flag(byte(), :frame_continuation, :end_headers) :: byte()
+  @spec set_flag(byte(), :frame_headers, :end_stream | :end_headers | :padded | :priority) ::
+          byte()
   def set_flag(flags, frame_name, flag_name)
+
+  @spec set_flag(:frame_data, :end_stream | :padded) :: byte()
+  @spec set_flag(:frame_settings, :ack) :: byte()
+  @spec set_flag(:frame_push_promise, :end_headers | :padded) :: byte()
+  @spec set_flag(:frame_ping, :ack) :: byte()
+  @spec set_flag(:frame_continuation, :end_headers) :: byte()
+  @spec set_flag(:frame_headers, :end_stream | :end_headers | :padded | :priority) :: byte()
+  def set_flag(frame_name, flag_name)
 
   for {frame, flags} <- @flags,
       {flag_name, flag_value} <- flags do
-    def set_flag(flags, unquote(frame), unquote(flag_name)) do
-      bor(flags, unquote(flag_value))
-    end
+    def set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
+    def set_flag(unquote(frame), unquote(flag_name)), do: unquote(flag_value)
   end
 
   defmacrop is_flag_set(flags, flag) do

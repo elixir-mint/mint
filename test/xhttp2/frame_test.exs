@@ -10,6 +10,17 @@ defmodule XHTTP2.FrameTest do
     HPACK
   }
 
+  test "set_flag/2" do
+    assert set_flag(:frame_ping, :ack) == 0x01
+    assert set_flag(:frame_data, :end_stream) == 0x01
+    assert_raise FunctionClauseError, fn -> set_flag(:frame_data, :ack) end
+  end
+
+  test "set_flag/3" do
+    assert set_flag(0x01, :frame_data, :padded) == bor(0x01, 0x08)
+    assert_raise FunctionClauseError, fn -> set_flag(0x00, :frame_data, :ack) end
+  end
+
   describe "DATA" do
     test "without padding" do
       assert_round_trip frame_data(

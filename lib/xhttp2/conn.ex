@@ -84,7 +84,7 @@ defmodule XHTTP2.Conn do
       frame_settings(
         stream_id: 0,
         params: [],
-        flags: set_flag(0, :frame_settings, :ack)
+        flags: set_flag(:frame_settings, :ack)
       )
 
     with :ok <- :ssl.send(socket, [@connection_preface, Frame.encode(client_settings)]),
