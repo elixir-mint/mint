@@ -11,25 +11,25 @@ defmodule XHTTP2.FrameTest do
   }
 
   test "set_flag/2" do
-    assert set_flag(:frame_ping, :ack) == 0x01
-    assert set_flag(:frame_data, :end_stream) == 0x01
-    assert_raise FunctionClauseError, fn -> set_flag(:frame_data, :ack) end
+    assert set_flag(:ping, :ack) == 0x01
+    assert set_flag(:data, :end_stream) == 0x01
+    assert_raise FunctionClauseError, fn -> set_flag(:data, :ack) end
   end
 
   test "set_flag/3" do
-    assert set_flag(0x01, :frame_data, :padded) == bor(0x01, 0x08)
-    assert_raise FunctionClauseError, fn -> set_flag(0x00, :frame_data, :ack) end
+    assert set_flag(0x01, :data, :padded) == bor(0x01, 0x08)
+    assert_raise FunctionClauseError, fn -> set_flag(0x00, :data, :ack) end
   end
 
   test "flag_set?/3" do
-    assert flag_set?(0x08, :frame_data, :padded) == true
-    assert flag_set?(0x00, :frame_data, :padded) == false
-    assert_raise FunctionClauseError, fn -> flag_set?(0x00, :frame_data, :ack) end
+    assert flag_set?(0x08, :data, :padded) == true
+    assert flag_set?(0x00, :data, :padded) == false
+    assert_raise FunctionClauseError, fn -> flag_set?(0x00, :data, :ack) end
   end
 
   describe "DATA" do
     test "without padding" do
-      assert_round_trip frame_data(
+      assert_round_trip data(
                           stream_id: 3,
                           flags: 0x00,
                           data: "foo",
@@ -38,7 +38,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with padding" do
-      assert_round_trip frame_data(
+      assert_round_trip data(
                           stream_id: 3,
                           flags: 0x08,
                           data: "foo",
@@ -51,12 +51,12 @@ defmodule XHTTP2.FrameTest do
       payload = <<5::8, "data">>
 
       assert Frame.decode_next(encode_raw(0x00, 0x08, 3, payload)) ==
-               {:error, {:pad_length_bigger_than_payload_length, :frame_data}}
+               {:error, {:pad_length_bigger_than_payload_length, :data}}
     end
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x00, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_data}}
+               {:error, {:frame_not_allowed_on_stream_0, :data}}
     end
   end
 
@@ -69,14 +69,14 @@ defmodule XHTTP2.FrameTest do
         |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
         |> HPACK.encode(HPACK.new(100_000))
 
-      assert {:ok, frame_headers(stream_id: 3, flags: 0x00, hbf: hbf, padding: nil), "rest"} =
+      assert {:ok, headers(stream_id: 3, flags: 0x00, hbf: hbf, padding: nil), "rest"} =
                Frame.decode_next(encode_raw(0x01, 0x00, 3, encoded_headers) <> "rest")
 
       assert {:ok, ^headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
     end
 
     test "without padding and without priority" do
-      assert_round_trip frame_headers(
+      assert_round_trip headers(
                           stream_id: 3,
                           flags: 0x00,
                           exclusive?: nil,
@@ -88,7 +88,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "without padding and with priority" do
-      assert_round_trip frame_headers(
+      assert_round_trip headers(
                           stream_id: 3,
                           flags: 0x20,
                           exclusive?: true,
@@ -100,7 +100,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with padding and priority" do
-      assert_round_trip frame_headers(
+      assert_round_trip headers(
                           stream_id: 3,
                           flags: bor(0x08, 0x20),
                           exclusive?: true,
@@ -113,13 +113,13 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x01, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_headers}}
+               {:error, {:frame_not_allowed_on_stream_0, :headers}}
     end
   end
 
   describe "PRIORITY" do
     test "regular" do
-      assert_round_trip frame_priority(
+      assert_round_trip priority(
                           stream_id: 3,
                           exclusive?: true,
                           stream_dependency: 5,
@@ -130,18 +130,18 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x02, 0x00, 3, "")) ==
-               {:error, {:bad_size, :frame_priority, 0}}
+               {:error, {:bad_size, :priority, 0}}
     end
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x02, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_priority}}
+               {:error, {:frame_not_allowed_on_stream_0, :priority}}
     end
   end
 
   describe "RST_STREAM" do
     test "regular" do
-      assert_round_trip frame_rst_stream(
+      assert_round_trip rst_stream(
                           stream_id: 3,
                           flags: 0x00,
                           error_code: :flow_control_error
@@ -150,18 +150,18 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x03, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_rst_stream}}
+               {:error, {:frame_not_allowed_on_stream_0, :rst_stream}}
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x03, 0x00, 3, <<3::8>>)) ==
-               {:error, {:bad_size, :frame_rst_stream, 1}}
+               {:error, {:bad_size, :rst_stream, 1}}
     end
   end
 
   describe "SETTINGS" do
     test "with empty settings" do
-      assert_round_trip frame_settings(
+      assert_round_trip settings(
                           stream_id: 0,
                           flags: 0x00,
                           params: []
@@ -178,7 +178,7 @@ defmodule XHTTP2.FrameTest do
         max_header_list_size: 100_000
       ]
 
-      assert_round_trip frame_settings(
+      assert_round_trip settings(
                           stream_id: 0,
                           flags: 0x01,
                           params: params
@@ -187,18 +187,18 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x04, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :frame_settings}}
+               {:error, {:frame_only_allowed_on_stream_0, :settings}}
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x04, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
-               {:error, {:bad_size, :frame_settings, 1}}
+               {:error, {:bad_size, :settings, 1}}
     end
   end
 
   describe "PUSH_PROMISE" do
     test "without padding" do
-      assert_round_trip frame_push_promise(
+      assert_round_trip push_promise(
                           stream_id: 3,
                           flags: 0x00,
                           promised_stream_id: 5,
@@ -208,7 +208,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "with padding" do
-      assert_round_trip frame_push_promise(
+      assert_round_trip push_promise(
                           stream_id: 3,
                           flags: 0x08,
                           promised_stream_id: 5,
@@ -219,13 +219,13 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x05, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_push_promise}}
+               {:error, {:frame_not_allowed_on_stream_0, :push_promise}}
     end
   end
 
   describe "PING" do
     test "regular" do
-      assert_round_trip frame_ping(
+      assert_round_trip ping(
                           stream_id: 0,
                           flags: 0x01,
                           opaque_data: "8 bytes!"
@@ -234,18 +234,18 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x06, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :frame_ping}}
+               {:error, {:frame_only_allowed_on_stream_0, :ping}}
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x06, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
-               {:error, {:bad_size, :frame_ping, 1}}
+               {:error, {:bad_size, :ping, 1}}
     end
   end
 
   describe "GOAWAY" do
     test "regular" do
-      assert_round_trip frame_goaway(
+      assert_round_trip goaway(
                           stream_id: 0,
                           flags: 0x00,
                           last_stream_id: 1000,
@@ -256,13 +256,13 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x07, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :frame_goaway}}
+               {:error, {:frame_only_allowed_on_stream_0, :goaway}}
     end
   end
 
   describe "WINDOW_UPDATE" do
     test "on connection-level (stream 0)" do
-      assert_round_trip frame_window_update(
+      assert_round_trip window_update(
                           stream_id: 0,
                           flags: 0x00,
                           window_size_increment: 10
@@ -270,7 +270,7 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "on stream-level (stream non-0)" do
-      assert_round_trip frame_window_update(
+      assert_round_trip window_update(
                           stream_id: 3,
                           flags: 0x00,
                           window_size_increment: 10
@@ -279,18 +279,18 @@ defmodule XHTTP2.FrameTest do
 
     test "invalid window size increment" do
       assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<0::1, 0::31>>)) ==
-               {:error, {:bad_window_size_increment, :frame_window_update, 0}}
+               {:error, {:bad_window_size_increment, :window_update, 0}}
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<>>)) ==
-               {:error, {:bad_size, :frame_window_update, 0}}
+               {:error, {:bad_size, :window_update, 0}}
     end
   end
 
   describe "CONTINUATION" do
     test "regular" do
-      assert_round_trip frame_continuation(
+      assert_round_trip continuation(
                           stream_id: 3,
                           flags: 0x00,
                           hbf: "hbf"
@@ -299,7 +299,7 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad stream id" do
       assert Frame.decode_next(encode_raw(0x09, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :frame_continuation}}
+               {:error, {:frame_not_allowed_on_stream_0, :continuation}}
     end
   end
 
