@@ -114,12 +114,19 @@ defmodule XHTTP2.Conn do
 
   defp receive_client_settings_ack(socket, buffer) do
     case recv_next_frame(socket, buffer) do
-      # TODO: have a better flag interface
-      {:ok, frame_settings(flags: flags), buffer} when band(flags, 0x01) == 0x01 ->
-        {:ok, buffer}
+      {:ok, frame_settings(flags: flags), buffer} ->
+        if flag_set?(flags, :frame_settings, :ack) do
+          {:ok, buffer}
+        else
+          {:error, :protocol_error}
+        end
 
-      {:ok, frame_window_update(), buffer} ->
+      {:ok, frame_window_update() = frame, buffer} ->
         # TODO: handle this frame.
+        Logger.warn(fn ->
+          "Received a WINDOW_UPDATE while waiting for client SETTINGS ack: #{inspect(frame)}"
+        end)
+
         receive_client_settings_ack(socket, buffer)
 
       {:ok, frame_goaway() = frame, _buffer} ->
