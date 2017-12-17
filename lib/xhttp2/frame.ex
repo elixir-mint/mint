@@ -62,10 +62,22 @@ defmodule XHTTP2.Frame do
   @spec set_flag(:frame_headers, :end_stream | :end_headers | :padded | :priority) :: byte()
   def set_flag(frame_name, flag_name)
 
+  @spec flag_set?(byte(), :frame_data, :end_stream | :padded) :: boolean()
+  @spec flag_set?(byte(), :frame_settings, :ack) :: boolean()
+  @spec flag_set?(byte(), :frame_push_promise, :end_headers | :padded) :: boolean()
+  @spec flag_set?(byte(), :frame_ping, :ack) :: boolean()
+  @spec flag_set?(byte(), :frame_continuation, :end_headers) :: boolean()
+  @spec flag_set?(byte(), :frame_headers, :end_stream | :end_headers | :padded | :priority) ::
+          boolean()
+  def flag_set?(flags, frame_name, flag_name)
+
   for {frame, flags} <- @flags,
       {flag_name, flag_value} <- flags do
     def set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
     def set_flag(unquote(frame), unquote(flag_name)), do: unquote(flag_value)
+
+    def flag_set?(flags, unquote(frame), unquote(flag_name)),
+      do: band(flags, unquote(flag_value)) == unquote(flag_value)
   end
 
   defmacrop is_flag_set(flags, flag) do
@@ -152,7 +164,7 @@ defmodule XHTTP2.Frame do
     {data, padding} = decode_padding(:frame_headers, flags, payload)
 
     {exclusive?, stream_dependency, weight, data} =
-      if is_flag_set(flags, @flags[:frame_headers][:priority]) do
+      if flag_set?(flags, :frame_headers, :priority) do
         <<exclusive::1, stream_dependency::31, weight::8, rest::binary>> = data
         {exclusive == 1, stream_dependency, weight + 1, rest}
       else

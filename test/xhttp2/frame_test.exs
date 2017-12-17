@@ -21,6 +21,12 @@ defmodule XHTTP2.FrameTest do
     assert_raise FunctionClauseError, fn -> set_flag(0x00, :frame_data, :ack) end
   end
 
+  test "flag_set?/3" do
+    assert flag_set?(0x08, :frame_data, :padded) == true
+    assert flag_set?(0x00, :frame_data, :padded) == false
+    assert_raise FunctionClauseError, fn -> flag_set?(0x00, :frame_data, :ack) end
+  end
+
   describe "DATA" do
     test "without padding" do
       assert_round_trip frame_data(
