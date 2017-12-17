@@ -25,19 +25,23 @@ defmodule XHTTP2.Conn do
     max_frame_size: 16_384
   ]
 
+  @forced_transport_opts [
+    packet: :raw,
+    mode: :binary,
+    active: false,
+    alpn_advertised_protocols: ["h2"]
+  ]
+
   ## Public interface
 
   def connect(hostname, port, opts \\ []) do
-    transport_opts = [
-      packet: :raw,
-      mode: :binary,
-      active: false,
-      alpn_advertised_protocols: ["h2"]
-    ]
+    transport_opts =
+      opts
+      |> Keyword.get(:transport_opts, [])
+      |> Keyword.merge(@forced_transport_opts)
 
     with {:ok, socket} <- connect_and_negotiate_protocol(hostname, port, transport_opts),
          :ok <- set_inet_opts(socket),
-         Logger.debug(fn -> "Socket connected to #{hostname}:#{port}" end),
          {:ok, conn} <- initiate_connection(socket, opts) do
       {:ok, conn}
     end
@@ -69,7 +73,7 @@ defmodule XHTTP2.Conn do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
-  # SETTINGS parameters are not negotiated
+  # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   defp initiate_connection(socket, opts) do
     client_settings_params =
       Keyword.merge(@default_client_settings, Keyword.get(opts, :client_settings, []))
@@ -83,14 +87,9 @@ defmodule XHTTP2.Conn do
         flags: set_flag(0, :frame_settings, :ack)
       )
 
-    with :ok <- :ssl.send(socket, @connection_preface),
-         :ok <- send_frame(socket, client_settings),
-         Logger.debug("Sent connection preface and first SETTINGS frame"),
+    with :ok <- :ssl.send(socket, [@connection_preface, Frame.encode(client_settings)]),
          {:ok, server_settings, buffer} <- receive_server_settings(socket),
-         Logger.debug(fn ->
-           "Got server connection preface with SETTINGS frame: #{inspect(server_settings)}"
-         end),
-         :ok <- send_frame(socket, server_settings_ack),
+         :ok <- :ssl.send(socket, Frame.encode(server_settings_ack)),
          {:ok, buffer} <- receive_client_settings_ack(socket, buffer),
          :ok <- :ssl.setopts(socket, active: true) do
       conn = %__MODULE__{
@@ -129,10 +128,6 @@ defmodule XHTTP2.Conn do
       {:error, _reason} = error ->
         error
     end
-  end
-
-  defp send_frame(socket, frame) do
-    :ssl.send(socket, Frame.encode(frame))
   end
 
   defp recv_next_frame(socket, buffer) do
