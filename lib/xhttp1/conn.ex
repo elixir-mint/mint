@@ -62,11 +62,10 @@ defmodule XHTTP1.Conn do
     transport = Keyword.get(opts, :transport, :gen_tcp)
     transport_opts = [packet: :raw, mode: :binary, active: true]
 
-    case transport.connect(String.to_charlist(hostname), port, transport_opts) do
-      {:ok, socket} ->
-        inet_opts(transport, socket)
-        {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
-
+    with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
+         :ok <- inet_opts(transport, socket) do
+      {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
+    else
       {:error, reason} ->
         {:error, {:connect, reason}}
     end
@@ -236,14 +235,15 @@ defmodule XHTTP1.Conn do
 
   defp inet_opts(transport, socket) do
     inet = transport_to_inet(transport)
-    {:ok, opts} = inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
 
-    buffer =
-      Keyword.fetch!(opts, :buffer)
-      |> max(Keyword.fetch!(opts, :sndbuf))
-      |> max(Keyword.fetch!(opts, :recbuf))
+    with {:ok, opts} <- inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
+      buffer =
+        Keyword.fetch!(opts, :buffer)
+        |> max(Keyword.fetch!(opts, :sndbuf))
+        |> max(Keyword.fetch!(opts, :recbuf))
 
-    :ok = inet.setopts(socket, buffer: buffer)
+      inet.setopts(socket, buffer: buffer)
+    end
   end
 
   defp decode(:status, %{request: request} = conn, data, responses) do
