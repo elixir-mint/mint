@@ -104,9 +104,17 @@ defmodule XHTTP2.Conn do
   @spec request(t(), list()) :: {:ok, t(), request_ref :: term()} | {:error, term()}
   def request(%__MODULE__{} = conn, headers) when is_list(headers) do
     with {:ok, conn, stream_id} <- open_stream(conn),
-         Logger.debug(fn -> "Opened stream #{stream_id}" end),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_stream, :end_headers]),
-         Logger.debug(fn -> "Sent headers: #{inspect(headers)}" end),
+         do: {:ok, conn, stream_id}
+  end
+
+  @doc """
+  TODO
+  """
+  def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
+    with {:ok, conn, stream_id} <- open_stream(conn),
+         {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
+         {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
          do: {:ok, conn, stream_id}
   end
 
@@ -116,11 +124,7 @@ defmodule XHTTP2.Conn do
     if conn.open_streams >= max_concurrent_streams do
       {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
     else
-      stream = %{
-        state: :idle,
-        id: conn.next_stream_id
-      }
-
+      stream = new_stream(conn)
       conn = put_in(conn.streams[stream.id], stream)
       conn = update_in(conn.next_stream_id, &(&1 + 2))
       {:ok, conn, stream.id}
@@ -133,14 +137,12 @@ defmodule XHTTP2.Conn do
         headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
         {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
 
-        frame = frame_headers(stream_id: stream_id, hbf: hbf)
-
-        flags =
-          Enum.reduce(enabled_flags, frame_headers(frame, :flags), fn flag_name, acc ->
-            set_flag(acc, :frame_headers, flag_name)
-          end)
-
-        frame = frame_headers(frame, flags: flags)
+        frame =
+          frame_headers(
+            stream_id: stream_id,
+            hbf: hbf,
+            flags: set_flags(:frame_headers, enabled_flags)
+          )
 
         # TODO: handle failure in sending.
         :ok = conn.transport.send(conn.socket, Frame.encode(frame))
@@ -153,6 +155,43 @@ defmodule XHTTP2.Conn do
 
       {:ok, %{state: state}} ->
         {:error, {:stream_not_in_idle_state, state}}
+
+      :error ->
+        {:error, :stream_not_found}
+    end
+  end
+
+  defp send_data(conn, stream_id, data, enabled_flags) do
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, %{state: :open} = stream} ->
+        data_size = byte_size(data)
+
+        cond do
+          data_size >= stream.window_size ->
+            {:error, {:exceeds_stream_window_size, stream.window_size}}
+
+          data_size >= conn.window_size ->
+            {:error, {:exceeds_connection_window_size, stream.window_size}}
+
+          true ->
+            frame =
+              frame_data(
+                stream_id: stream_id,
+                flags: set_flags(:frame_data, enabled_flags),
+                data: data
+              )
+
+            # TODO: handle failure in sending.
+            :ok = conn.transport.send(conn.socket, Frame.encode(frame))
+
+            stream = update_in(stream.window_size, &(&1 - data_size))
+            conn = put_in(conn.streams[stream_id], stream)
+            conn = update_in(conn.window_size, &(&1 - data_size))
+            {:ok, conn}
+        end
+
+      {:ok, %{state: state}} ->
+        {:error, {:stream_not_in_open_state, state}}
 
       :error ->
         {:error, :stream_not_found}
@@ -306,6 +345,14 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  defp new_stream(%__MODULE__{} = conn) do
+    %{
+      state: :idle,
+      id: conn.next_stream_id,
+      window_size: conn.initial_window_size
+    }
+  end
+
   ## Frame handling
 
   # Returns: {:ok, conn, responses} | {:error, reason}
@@ -370,6 +417,23 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  defp handle_frame(%__MODULE__{} = conn, frame_window_update() = frame, responses) do
+    Logger.debug(fn -> "Got WINDOW_UPDATE frame: #{inspect(frame)}" end)
+
+    # TODO: handle a wsi that makes the window size too big.
+    # http://httpwg.org/specs/rfc7540.html#rfc.section.6.9.1
+    case frame do
+      frame_window_update(stream_id: 0, window_size_increment: wsi) ->
+        conn = update_in(conn.window_size, &(&1 + wsi))
+        {:ok, conn, responses}
+
+      # TODO: handle this frame not existing.
+      frame_window_update(stream_id: stream_id, window_size_increment: wsi) ->
+        conn = update_in(conn.streams[stream_id].window_size, &(&1 + wsi))
+        {:ok, conn, responses}
+    end
+  end
+
   defp handle_frame(%__MODULE__{}, frame, _responses) do
     Logger.error(fn -> "Got a frame that I don't know how to handle: #{inspect(frame)}" end)
     raise "unhandleable frame"
@@ -378,7 +442,7 @@ defmodule XHTTP2.Conn do
   defp decode_headers(%__MODULE__{} = conn, hbf) do
     case HPACK.decode(hbf, conn.decode_table) do
       {:ok, headers, decode_table} ->
-        {:ok, conn, %{conn | decode_table: decode_table}}
+        {:ok, %{conn | decode_table: decode_table}, headers}
 
       # TODO: embellish this error
       {:error, _reason} = error ->

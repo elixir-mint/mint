@@ -86,6 +86,15 @@ defmodule XHTTP2.Frame do
     end
   end
 
+  def set_flags(initial_flags, frame_name, flags_to_set)
+      when is_integer(initial_flags) and is_list(flags_to_set) do
+    Enum.reduce(flags_to_set, initial_flags, &set_flag(&2, frame_name, &1))
+  end
+
+  def set_flags(frame_name, flags_to_set) do
+    set_flags(0x00, frame_name, flags_to_set)
+  end
+
   ## Parsing
 
   @doc """
