@@ -16,6 +16,17 @@ defmodule XHTTP2.Conn do
     buffer: ""
   ]
 
+  @type settings() :: Keyword.t()
+
+  @opaque t() :: %__MODULE__{
+            transport: module(),
+            socket: term(),
+            state: atom(),
+            server_settings: settings(),
+            client_settings: settings(),
+            buffer: binary()
+          }
+
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
   @default_client_settings [
@@ -35,6 +46,7 @@ defmodule XHTTP2.Conn do
 
   ## Public interface
 
+  @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = Keyword.get(opts, :transport, :ssl)
 
@@ -51,7 +63,13 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
+
+  @spec read_server_settings(t()) :: settings()
+  def read_server_settings(%__MODULE__{server_settings: server_settings}) do
+    server_settings
+  end
 
   ## Helpers
 
