@@ -7,25 +7,7 @@ defmodule XHTTP2.Conn do
 
   require Logger
 
-  defstruct [
-    :transport,
-    :socket,
-    :state,
-    :server_settings,
-    :client_settings,
-    buffer: ""
-  ]
-
-  @type settings() :: Keyword.t()
-
-  @opaque t() :: %__MODULE__{
-            transport: module(),
-            socket: term(),
-            state: atom(),
-            server_settings: settings(),
-            client_settings: settings(),
-            buffer: binary()
-          }
+  ## Constants
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
@@ -37,12 +19,40 @@ defmodule XHTTP2.Conn do
     max_frame_size: 16_384
   ]
 
+  @default_window_size 65_535
+
   @forced_transport_opts [
     packet: :raw,
     mode: :binary,
     active: false,
     alpn_advertised_protocols: ["h2"]
   ]
+
+  ## Connection
+
+  defstruct [
+    :transport,
+    :socket,
+    :state,
+    :server_settings,
+    :client_settings,
+    window_size: @default_window_size,
+    initial_window_size: @default_window_size,
+    buffer: ""
+  ]
+
+  ## Types
+
+  @type settings() :: Keyword.t()
+
+  @opaque t() :: %__MODULE__{
+            transport: module(),
+            socket: term(),
+            state: atom(),
+            server_settings: settings(),
+            client_settings: settings(),
+            buffer: binary()
+          }
 
   ## Public interface
 
@@ -60,6 +70,9 @@ defmodule XHTTP2.Conn do
          :ok <- set_inet_opts(transport, socket),
          {:ok, conn} <- initiate_connection(transport, socket, opts) do
       {:ok, conn}
+    else
+      {:error, reason} ->
+        {:error, {:connect, reason}}
     end
   end
 
@@ -117,19 +130,18 @@ defmodule XHTTP2.Conn do
 
     with :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
          {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
-         {:ok, buffer} <- receive_client_settings_ack(transport, socket, buffer),
-         :ok <- transport_to_inet(transport).setopts(socket, active: true) do
+         :ok <- transport.send(socket, Frame.encode(server_settings_ack)) do
       conn = %__MODULE__{
         state: :open,
         transport: transport,
         socket: socket,
         buffer: buffer,
-        client_settings: client_settings_params,
         server_settings: frame_settings(server_settings, :params)
       }
 
-      {:ok, conn}
+      with {:ok, conn} <- receive_client_settings_ack(conn, client_settings_params),
+           :ok <- transport_to_inet(transport).setopts(socket, active: true),
+           do: {:ok, conn}
     end
   end
 
@@ -141,22 +153,22 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp receive_client_settings_ack(transport, socket, buffer) do
-    case recv_next_frame(transport, socket, buffer) do
+  defp receive_client_settings_ack(%__MODULE__{} = conn, client_settings) do
+    case recv_next_frame(conn.transport, conn.socket, conn.buffer) do
       {:ok, frame_settings(flags: flags), buffer} ->
         if flag_set?(flags, :frame_settings, :ack) do
-          {:ok, buffer}
+          {:ok, %{conn | client_settings: client_settings, buffer: buffer}}
         else
           {:error, :protocol_error}
         end
 
-      {:ok, frame_window_update() = frame, buffer} ->
-        # TODO: handle this frame.
-        Logger.warn(fn ->
-          "Received a WINDOW_UPDATE while waiting for client SETTINGS ack: #{inspect(frame)}"
-        end)
+      {:ok, frame_window_update(stream_id: 0, window_size_increment: wsi), buffer} ->
+        # TODO: handle window size increments that are too big.
+        conn = update_in(conn.window_size, &(&1 + wsi))
+        receive_client_settings_ack(%{conn | buffer: buffer}, client_settings)
 
-        receive_client_settings_ack(transport, socket, buffer)
+      {:ok, frame_window_update(), _buffer} ->
+        {:error, :protocol_error}
 
       {:ok, frame_goaway() = frame, _buffer} ->
         {:error, {:goaway, frame}}
