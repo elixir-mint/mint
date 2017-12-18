@@ -90,6 +90,9 @@ defmodule XHTTP2.Conn do
     with {:ok, conn, stream_id} <- open_stream(conn),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_stream, :end_headers]),
          do: {:ok, conn, stream_id}
+  catch
+    :throw, {:xhttp, error} ->
+      {:error, error}
   end
 
   @doc """
@@ -100,6 +103,9 @@ defmodule XHTTP2.Conn do
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
          {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
          do: {:ok, conn, stream_id}
+  catch
+    :throw, {:xhttp, error} ->
+      {:error, error}
   end
 
   @doc """
@@ -107,10 +113,11 @@ defmodule XHTTP2.Conn do
   """
   def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)
-
-    with :ok <- conn.transport.send(conn.socket, Frame.encode(frame)) do
-      {:ok, update_in(conn.ping_queue, &:queue.in(frame, &1))}
-    end
+    transport_send!(conn, Frame.encode(frame))
+    {:ok, update_in(conn.ping_queue, &:queue.in(frame, &1))}
+  catch
+    :throw, {:xhttp, error} ->
+      {:error, error}
   end
 
   defp open_stream(%__MODULE__{} = conn) do
@@ -127,58 +134,42 @@ defmodule XHTTP2.Conn do
   end
 
   defp send_headers(conn, stream_id, headers, enabled_flags) do
-    case Map.fetch(conn.streams, stream_id) do
-      {:ok, %{state: :idle} = stream} ->
-        headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-        {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
-        frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
+    stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state!(stream, :idle)
 
-        # TODO: handle failure in sending.
-        :ok = conn.transport.send(conn.socket, Frame.encode(frame))
+    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
+    {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
+    frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
+    transport_send!(conn, Frame.encode(frame))
 
-        stream = %{stream | state: :open}
-        conn = put_in(conn.encode_table, encode_table)
-        conn = put_in(conn.streams[stream_id], stream)
-        conn = update_in(conn.open_streams, &(&1 + 1))
-        {:ok, conn}
-
-      {:ok, %{state: state}} ->
-        {:error, {:stream_not_in_idle_state, state}}
-
-      :error ->
-        {:error, :stream_not_found}
-    end
+    stream = %{stream | state: :open}
+    conn = put_in(conn.encode_table, encode_table)
+    conn = put_in(conn.streams[stream_id], stream)
+    conn = update_in(conn.open_streams, &(&1 + 1))
+    {:ok, conn}
   end
 
   defp send_data(conn, stream_id, data, enabled_flags) do
-    case Map.fetch(conn.streams, stream_id) do
-      {:ok, %{state: :open} = stream} ->
-        data_size = byte_size(data)
+    stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state!(stream, :open)
 
-        cond do
-          data_size >= stream.window_size ->
-            {:error, {:exceeds_stream_window_size, stream.window_size}}
+    data_size = byte_size(data)
 
-          data_size >= conn.window_size ->
-            {:error, {:exceeds_connection_window_size, stream.window_size}}
+    cond do
+      data_size >= stream.window_size ->
+        {:error, {:exceeds_stream_window_size, stream.window_size}}
 
-          true ->
-            frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
+      data_size >= conn.window_size ->
+        {:error, {:exceeds_connection_window_size, stream.window_size}}
 
-            # TODO: handle failure in sending.
-            :ok = conn.transport.send(conn.socket, Frame.encode(frame))
+      true ->
+        frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
+        transport_send!(conn, Frame.encode(frame))
 
-            stream = update_in(stream.window_size, &(&1 - data_size))
-            conn = put_in(conn.streams[stream_id], stream)
-            conn = update_in(conn.window_size, &(&1 - data_size))
-            {:ok, conn}
-        end
-
-      {:ok, %{state: state}} ->
-        {:error, {:stream_not_in_open_state, state}}
-
-      :error ->
-        {:error, :stream_not_found}
+        stream = update_in(stream.window_size, &(&1 - data_size))
+        conn = put_in(conn.streams[stream_id], stream)
+        conn = update_in(conn.window_size, &(&1 - data_size))
+        {:ok, conn}
     end
   end
 
@@ -362,35 +353,32 @@ defmodule XHTTP2.Conn do
     Logger.debug(fn -> "Got HEADERS frame: #{inspect(frame)}" end)
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
 
-    case Map.fetch(conn.streams, stream_id) do
-      {:ok, %{state: :open} = stream} ->
-        {conn, responses} =
-          if flag_set?(flags, :headers, :end_headers) do
-            # TODO: handle bad decoding
-            {:ok, conn, headers} = decode_headers(conn, hbf)
-            {conn, [{:headers, stream_id, headers} | responses]}
-          else
-            raise "END_HEADERS not set is not supported yet"
-          end
+    stream = fetch_stream!(conn, stream_id)
 
-        {conn, responses} =
-          if flag_set?(flags, :headers, :end_stream) do
-            stream = %{stream | state: :half_closed_remote}
-            conn = put_in(conn.streams[stream_id], stream)
-            conn = update_in(conn.open_streams, &(&1 - 1))
-            {conn, [{:done, stream_id} | responses]}
-          else
-            {conn, responses}
-          end
-
-        {:ok, conn, responses}
-
-      {:ok, %{state: state}} ->
-        raise "don't know how to handle HEADERS on streams with state #{inspect(state)}"
-
-      :error ->
-        {:error, :protocol_error}
+    if stream.state != :open do
+      raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
     end
+
+    {conn, responses} =
+      if flag_set?(flags, :headers, :end_headers) do
+        # TODO: handle bad decoding
+        {:ok, conn, headers} = decode_headers(conn, hbf)
+        {conn, [{:headers, stream_id, headers} | responses]}
+      else
+        raise "END_HEADERS not set is not supported yet"
+      end
+
+    {conn, responses} =
+      if flag_set?(flags, :headers, :end_stream) do
+        stream = %{stream | state: :half_closed_remote}
+        conn = put_in(conn.streams[stream_id], stream)
+        conn = update_in(conn.open_streams, &(&1 - 1))
+        {conn, [{:done, stream_id} | responses]}
+      else
+        {conn, responses}
+      end
+
+    {:ok, conn, responses}
   end
 
   defp handle_frame(%__MODULE__{} = conn, data() = frame, responses) do
@@ -398,24 +386,21 @@ defmodule XHTTP2.Conn do
     Logger.debug(fn -> "Got DATA frame: #{inspect(frame)}" end)
     data(stream_id: stream_id, flags: flags, data: data) = frame
 
-    case Map.fetch(conn.streams, stream_id) do
-      {:ok, %{state: :open} = stream} ->
-        responses = [{:data, stream_id, data} | responses]
+    stream = fetch_stream!(conn, stream_id)
 
-        if flag_set?(flags, :data, :end_stream) do
-          stream = %{stream | state: :half_closed_remote}
-          conn = put_in(conn.streams[stream_id], stream)
-          conn = update_in(conn.open_streams, &(&1 - 1))
-          {:ok, conn, [{:done, stream_id} | responses]}
-        else
-          {:ok, conn, responses}
-        end
+    if stream.state != :open do
+      raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
+    end
 
-      {:ok, %{state: state}} ->
-        raise "don't know how to handle DATA on streams with state #{inspect(state)}"
+    responses = [{:data, stream_id, data} | responses]
 
-      :error ->
-        {:error, :protocol_error}
+    if flag_set?(flags, :data, :end_stream) do
+      stream = %{stream | state: :half_closed_remote}
+      conn = put_in(conn.streams[stream_id], stream)
+      conn = update_in(conn.open_streams, &(&1 - 1))
+      {:ok, conn, [{:done, stream_id} | responses]}
+    else
+      {:ok, conn, responses}
     end
   end
 
@@ -471,6 +456,26 @@ defmodule XHTTP2.Conn do
       # TODO: embellish this error
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  defp fetch_stream!(%__MODULE__{} = conn, stream_id) do
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} -> stream
+      :error -> throw({:xhttp, {:stream_not_found, stream_id}})
+    end
+  end
+
+  defp assert_stream_in_state!(%{state: state}, expected_state) do
+    if state != expected_state do
+      throw({:xhttp, {:"stream_not_in_#{expected_state}_state", state}})
+    end
+  end
+
+  defp transport_send!(%__MODULE__{} = conn, bytes) do
+    case conn.transport.send(conn.socket, bytes) do
+      :ok -> :ok
+      {:error, reason} -> throw({:xhttp, reason})
     end
   end
 end
