@@ -39,6 +39,7 @@ defmodule XHTTP2.Conn do
     encode_table: HPACK.new(4096),
     decode_table: HPACK.new(4096),
     buffer: "",
+    ping_queue: :queue.new(),
 
     # SETTINGS-related things.
     enable_push: true,
@@ -99,6 +100,17 @@ defmodule XHTTP2.Conn do
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
          {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
          do: {:ok, conn, stream_id}
+  end
+
+  @doc """
+  TODO
+  """
+  def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
+    frame = Frame.ping(stream_id: 0, opaque_data: payload)
+
+    with :ok <- conn.transport.send(conn.socket, Frame.encode(frame)) do
+      {:ok, update_in(conn.ping_queue, &:queue.in(frame, &1))}
+    end
   end
 
   defp open_stream(%__MODULE__{} = conn) do
@@ -421,6 +433,28 @@ defmodule XHTTP2.Conn do
       window_update(stream_id: stream_id, window_size_increment: wsi) ->
         conn = update_in(conn.streams[stream_id].window_size, &(&1 + wsi))
         {:ok, conn, responses}
+    end
+  end
+
+  defp handle_frame(%__MODULE__{} = conn, ping() = frame, responses) do
+    Logger.debug(fn -> "Got PING frame: #{inspect(frame)}" end)
+    Frame.ping(flags: flags, opaque_data: opaque_data) = frame
+
+    if flag_set?(flags, :ping, :ack) do
+      {{:value, queued_ping}, ping_queue} = :queue.out(conn.ping_queue)
+
+      if Frame.ping(queued_ping, :opaque_data) == opaque_data do
+        {:ok, conn, [:pong | responses]}
+      else
+        # TODO: handle this properly
+        raise "non-matching PING"
+      end
+    else
+      ack_ping = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
+
+      with :ok <- conn.transport.send(conn.socket, Frame.encode(ack_ping)) do
+        {:ok, conn, responses}
+      end
     end
   end
 

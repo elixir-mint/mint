@@ -52,6 +52,13 @@ defmodule XHTTP2.IntegrationTest do
       assert conn.buffer == ""
       assert Conn.open?(conn)
     end
+
+    test "ping", %{conn: conn} do
+      assert {:ok, %Conn{} = conn} = Conn.ping(conn)
+      assert {:ok, %Conn{} = conn, [:pong]} = stream_message(conn)
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
   end
 
   defp headers_for_request(method, url) do
