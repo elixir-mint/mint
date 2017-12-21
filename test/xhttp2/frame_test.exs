@@ -1,5 +1,6 @@
 defmodule XHTTP2.FrameTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   use Bitwise, skip_operators: true
 
@@ -29,21 +30,18 @@ defmodule XHTTP2.FrameTest do
 
   describe "DATA" do
     test "without padding" do
-      assert_round_trip data(
-                          stream_id: 3,
-                          flags: 0x00,
-                          data: "foo",
-                          padding: nil
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                data <- binary() do
+        assert_round_trip data(stream_id: stream_id, flags: 0x00, data: data, padding: nil)
+      end
     end
 
     test "with padding" do
-      assert_round_trip data(
-                          stream_id: 3,
-                          flags: 0x08,
-                          data: "foo",
-                          padding: "pad"
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                data <- binary(),
+                padding <- binary() do
+        assert_round_trip data(stream_id: stream_id, flags: 0x08, data: data, padding: padding)
+      end
     end
 
     test "with bad padding" do
@@ -76,39 +74,34 @@ defmodule XHTTP2.FrameTest do
     end
 
     test "without padding and without priority" do
-      assert_round_trip headers(
-                          stream_id: 3,
-                          flags: 0x00,
-                          exclusive?: nil,
-                          stream_dependency: nil,
-                          weight: nil,
-                          hbf: "hbf",
-                          padding: nil
-                        )
-    end
-
-    test "without padding and with priority" do
-      assert_round_trip headers(
-                          stream_id: 3,
-                          flags: 0x20,
-                          exclusive?: true,
-                          stream_dependency: 19,
-                          weight: 10,
-                          hbf: "hbf",
-                          padding: nil
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                hbf <- binary() do
+        assert_round_trip headers(
+                            stream_id: stream_id,
+                            flags: 0x00,
+                            exclusive?: nil,
+                            stream_dependency: nil,
+                            weight: nil,
+                            hbf: hbf,
+                            padding: nil
+                          )
+      end
     end
 
     test "with padding and priority" do
-      assert_round_trip headers(
-                          stream_id: 3,
-                          flags: bor(0x08, 0x20),
-                          exclusive?: true,
-                          stream_dependency: 19,
-                          weight: 10,
-                          hbf: "hbf",
-                          padding: "some padding"
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                hbf <- binary(),
+                padding <- binary() do
+        assert_round_trip headers(
+                            stream_id: stream_id,
+                            flags: bor(0x08, 0x20),
+                            exclusive?: true,
+                            stream_dependency: 19,
+                            weight: 10,
+                            hbf: hbf,
+                            padding: padding
+                          )
+      end
     end
 
     test "with bad stream id" do
@@ -119,13 +112,17 @@ defmodule XHTTP2.FrameTest do
 
   describe "PRIORITY" do
     test "regular" do
-      assert_round_trip priority(
-                          stream_id: 3,
-                          exclusive?: true,
-                          stream_dependency: 5,
-                          weight: 11,
-                          flags: 0x00
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                stream_dependency <- non_zero_stream_id(),
+                weight <- positive_integer() do
+        assert_round_trip priority(
+                            stream_id: stream_id,
+                            exclusive?: true,
+                            stream_dependency: stream_dependency,
+                            weight: weight,
+                            flags: 0x00
+                          )
+      end
     end
 
     test "with bad length" do
@@ -141,11 +138,14 @@ defmodule XHTTP2.FrameTest do
 
   describe "RST_STREAM" do
     test "regular" do
-      assert_round_trip rst_stream(
-                          stream_id: 3,
-                          flags: 0x00,
-                          error_code: :flow_control_error
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                error_code <- error_code() do
+        assert_round_trip rst_stream(
+                            stream_id: stream_id,
+                            flags: 0x00,
+                            error_code: error_code
+                          )
+      end
     end
 
     test "with bad stream id" do
@@ -161,28 +161,27 @@ defmodule XHTTP2.FrameTest do
 
   describe "SETTINGS" do
     test "with empty settings" do
-      assert_round_trip settings(
-                          stream_id: 0,
-                          flags: 0x00,
-                          params: []
-                        )
+      assert_round_trip settings(stream_id: 0, flags: 0x00, params: [])
     end
 
     test "with parameters" do
-      params = [
-        header_table_size: 10,
-        enable_push: false,
-        max_concurrent_streams: 250,
-        initial_window_size: 10,
-        max_frame_size: 65536,
-        max_header_list_size: 100_000
-      ]
+      check all header_table_size <- positive_integer(),
+                enable_push <- boolean(),
+                max_concurrent_streams <- non_negative_integer(),
+                initial_window_size <- positive_integer(),
+                max_frame_size <- positive_integer(),
+                max_header_list_size <- positive_integer() do
+        params = [
+          header_table_size: header_table_size,
+          enable_push: enable_push,
+          max_concurrent_streams: max_concurrent_streams,
+          initial_window_size: initial_window_size,
+          max_frame_size: max_frame_size,
+          max_header_list_size: max_header_list_size
+        ]
 
-      assert_round_trip settings(
-                          stream_id: 0,
-                          flags: 0x01,
-                          params: params
-                        )
+        assert_round_trip settings(stream_id: 0, flags: 0x01, params: params)
+      end
     end
 
     test "with bad stream id" do
@@ -198,23 +197,32 @@ defmodule XHTTP2.FrameTest do
 
   describe "PUSH_PROMISE" do
     test "without padding" do
-      assert_round_trip push_promise(
-                          stream_id: 3,
-                          flags: 0x00,
-                          promised_stream_id: 5,
-                          hbf: "some header block fragment",
-                          padding: nil
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                promised_stream_id <- non_zero_stream_id(),
+                hbf <- binary() do
+        assert_round_trip push_promise(
+                            stream_id: stream_id,
+                            flags: 0x00,
+                            promised_stream_id: promised_stream_id,
+                            hbf: hbf,
+                            padding: nil
+                          )
+      end
     end
 
     test "with padding" do
-      assert_round_trip push_promise(
-                          stream_id: 3,
-                          flags: 0x08,
-                          promised_stream_id: 5,
-                          hbf: "some header block fragment",
-                          padding: "some padding"
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                promised_stream_id <- non_zero_stream_id(),
+                hbf <- binary(),
+                padding <- binary() do
+        assert_round_trip push_promise(
+                            stream_id: stream_id,
+                            flags: 0x08,
+                            promised_stream_id: promised_stream_id,
+                            hbf: hbf,
+                            padding: padding
+                          )
+      end
     end
 
     test "with bad stream id" do
@@ -225,11 +233,9 @@ defmodule XHTTP2.FrameTest do
 
   describe "PING" do
     test "regular" do
-      assert_round_trip ping(
-                          stream_id: 0,
-                          flags: 0x01,
-                          opaque_data: "8 bytes!"
-                        )
+      check all opaque_data <- binary(length: 8) do
+        assert_round_trip ping(stream_id: 0, flags: 0x01, opaque_data: opaque_data)
+      end
     end
 
     test "with bad stream id" do
@@ -245,13 +251,17 @@ defmodule XHTTP2.FrameTest do
 
   describe "GOAWAY" do
     test "regular" do
-      assert_round_trip goaway(
-                          stream_id: 0,
-                          flags: 0x00,
-                          last_stream_id: 1000,
-                          error_code: :enhance_your_calm,
-                          debug_data: "some debug data"
-                        )
+      check all last_stream_id <- non_zero_stream_id(),
+                error_code <- error_code(),
+                debug_data <- binary() do
+        assert_round_trip goaway(
+                            stream_id: 0,
+                            flags: 0x00,
+                            last_stream_id: last_stream_id,
+                            error_code: error_code,
+                            debug_data: debug_data
+                          )
+      end
     end
 
     test "with bad stream id" do
@@ -261,20 +271,15 @@ defmodule XHTTP2.FrameTest do
   end
 
   describe "WINDOW_UPDATE" do
-    test "on connection-level (stream 0)" do
-      assert_round_trip window_update(
-                          stream_id: 0,
-                          flags: 0x00,
-                          window_size_increment: 10
-                        )
-    end
-
-    test "on stream-level (stream non-0)" do
-      assert_round_trip window_update(
-                          stream_id: 3,
-                          flags: 0x00,
-                          window_size_increment: 10
-                        )
+    test "regular" do
+      check all stream_id <- one_of([constant(0), non_zero_stream_id()]),
+                wsi <- positive_integer() do
+        assert_round_trip window_update(
+                            stream_id: stream_id,
+                            flags: 0x00,
+                            window_size_increment: wsi
+                          )
+      end
     end
 
     test "invalid window size increment" do
@@ -290,11 +295,10 @@ defmodule XHTTP2.FrameTest do
 
   describe "CONTINUATION" do
     test "regular" do
-      assert_round_trip continuation(
-                          stream_id: 3,
-                          flags: 0x00,
-                          hbf: "hbf"
-                        )
+      check all stream_id <- non_zero_stream_id(),
+                hbf <- binary() do
+        assert_round_trip continuation(stream_id: stream_id, flags: 0x00, hbf: hbf)
+      end
     end
 
     test "with bad stream id" do
@@ -310,5 +314,32 @@ defmodule XHTTP2.FrameTest do
 
   defp encode_raw(type, flags, stream_id, payload) do
     IO.iodata_to_binary(Frame.encode_raw(type, flags, stream_id, payload))
+  end
+
+  defp non_zero_stream_id() do
+    map(positive_integer(), &(&1 * 2 + 1))
+  end
+
+  defp non_negative_integer() do
+    map(integer(), &abs/1)
+  end
+
+  defp error_code() do
+    member_of([
+      :no_error,
+      :protocol_error,
+      :internal_error,
+      :flow_control_error,
+      :settings_timeout,
+      :stream_closed,
+      :frame_size_error,
+      :refused_stream,
+      :cancel,
+      :compression_error,
+      :connect_error,
+      :enhance_your_calm,
+      :inadequate_security,
+      :http_1_1_required
+    ])
   end
 end
