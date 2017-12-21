@@ -56,10 +56,14 @@ defmodule XHTTP2.Conn do
   ## Types
 
   @type settings() :: Keyword.t()
+  @type request_id() :: reference()
 
   @opaque t() :: %__MODULE__{}
 
   ## Public interface
+
+  # Possible errors we can throw:
+  # * {:xhttp, conn, reason}
 
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
@@ -81,48 +85,36 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  @doc """
-  TODO
-  """
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
 
-  @doc """
-  TODO
-  """
-  @spec request(t(), list()) :: {:ok, t(), request_ref :: term()} | {:error, term()}
+  @spec request(t(), list()) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, headers) when is_list(headers) do
     with {:ok, conn, stream_id, ref} <- open_stream(conn),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_stream, :end_headers]),
          do: {:ok, conn, ref}
   catch
-    :throw, {:xhttp, error} ->
-      {:error, error}
+    :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
-  @doc """
-  TODO
-  """
+  @spec request(t(), list(), iodata()) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
     with {:ok, conn, stream_id, ref} <- open_stream(conn),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
          {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
          do: {:ok, conn, ref}
   catch
-    :throw, {:xhttp, error} ->
-      {:error, error}
+    :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
-  @doc """
-  TODO
-  """
+  # TODO: return a regular request_id() for pings.
+  @spec ping(t(), <<_::8>>) :: {:ok, t()} | {:error, t(), term()}
   def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)
     transport_send!(conn, Frame.encode(frame))
     {:ok, update_in(conn.ping_queue, &:queue.in(frame, &1))}
   catch
-    :throw, {:xhttp, error} ->
-      {:error, error}
+    :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
   @doc """
