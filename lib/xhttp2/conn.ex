@@ -398,8 +398,7 @@ defmodule XHTTP2.Conn do
 
     {conn, responses} =
       if flag_set?(flags, :headers, :end_headers) do
-        # TODO: handle bad decoding
-        {:ok, conn, headers} = decode_headers(conn, hbf)
+        {conn, headers} = decode_headers!(conn, hbf)
         {conn, [{:headers, stream.ref, headers} | responses]}
       else
         raise "END_HEADERS not set is not supported yet"
@@ -508,14 +507,17 @@ defmodule XHTTP2.Conn do
     raise "CONTINUATION handling not implemented"
   end
 
-  defp decode_headers(%__MODULE__{} = conn, hbf) do
+  defp decode_headers!(%__MODULE__{} = conn, hbf) do
     case HPACK.decode(hbf, conn.decode_table) do
       {:ok, headers, decode_table} ->
-        {:ok, %{conn | decode_table: decode_table}, headers}
+        {%{conn | decode_table: decode_table}, headers}
 
-      # TODO: embellish this error
-      {:error, _reason} = error ->
-        error
+      {:error, _reason} ->
+        debug_data = "unable to decode headers"
+        frame = goaway(last_stream_id: 2, error_code: :compression_error, debug_data: debug_data)
+        transport_send!(conn, Frame.encode(frame))
+        transport_close!(conn)
+        throw({:xhttp, conn, :compression_error})
     end
   end
 
@@ -551,5 +553,9 @@ defmodule XHTTP2.Conn do
       :ok -> :ok
       {:error, reason} -> throw({:xhttp, reason})
     end
+  end
+
+  defp transport_close!(%__MODULE__{transport: transport, socket: socket}) do
+    transport.close(socket)
   end
 end
