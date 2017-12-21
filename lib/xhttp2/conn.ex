@@ -398,8 +398,8 @@ defmodule XHTTP2.Conn do
 
     {conn, responses} =
       if flag_set?(flags, :headers, :end_headers) do
-        {conn, headers} = decode_headers!(conn, hbf)
-        {conn, [{:headers, stream.ref, headers} | responses]}
+        {conn, status, headers} = decode_headers!(conn, hbf)
+        {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
       else
         raise "END_HEADERS not set is not supported yet"
       end
@@ -509,8 +509,13 @@ defmodule XHTTP2.Conn do
 
   defp decode_headers!(%__MODULE__{} = conn, hbf) do
     case HPACK.decode(hbf, conn.decode_table) do
+      {:ok, [{":status", status} | headers], decode_table} ->
+        conn = put_in(conn.decode_table, decode_table)
+        {conn, status, headers}
+
+      # TODO: handle this properly
       {:ok, headers, decode_table} ->
-        {%{conn | decode_table: decode_table}, headers}
+        raise ":status header is missing"
 
       {:error, _reason} ->
         debug_data = "unable to decode headers"

@@ -26,6 +26,7 @@ defmodule XHTTP2.IntegrationTest do
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
       assert [
+               {:status, ^req_id, "200"},
                {:headers, ^req_id, headers},
                {:data, ^req_id, data},
                {:done, ^req_id}
@@ -45,6 +46,7 @@ defmodule XHTTP2.IntegrationTest do
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
       assert [
+               {:status, ^req_id, "200"},
                {:headers, ^req_id, headers},
                {:data, ^req_id, data},
                {:data, ^req_id, ""},
