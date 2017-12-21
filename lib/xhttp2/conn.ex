@@ -417,17 +417,25 @@ defmodule XHTTP2.Conn do
   defp handle_frame(%__MODULE__{} = conn, window_update() = frame, responses) do
     Logger.debug(fn -> "Got WINDOW_UPDATE frame: #{inspect(frame)}" end)
 
-    # TODO: handle a wsi that makes the window size too big.
-    # http://httpwg.org/specs/rfc7540.html#rfc.section.6.9.1
     case frame do
       window_update(stream_id: 0, window_size_increment: wsi) ->
-        conn = update_in(conn.window_size, &(&1 + wsi))
-        {:ok, conn, responses}
+        case increment_window_size(conn, :connection, wsi) do
+          {:ok, conn} -> {:ok, conn, responses}
+          {:error, conn} -> {:error, conn, :flow_control_error}
+        end
 
       # TODO: handle this frame not existing.
       window_update(stream_id: stream_id, window_size_increment: wsi) ->
-        conn = update_in(conn.streams[stream_id].window_size, &(&1 + wsi))
-        {:ok, conn, responses}
+        case increment_window_size(conn, {:stream, stream_id}, wsi) do
+          {:ok, conn} ->
+            {:ok, conn, responses}
+
+          {:error, conn} ->
+            frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
+            transport_send!(conn, Frame.encode(frame))
+            resp = {:closed, lookup_req_ref(conn, stream_id), :flow_control_error}
+            {:ok, conn, [resp | responses]}
+        end
     end
   end
 
@@ -466,6 +474,20 @@ defmodule XHTTP2.Conn do
       # TODO: embellish this error
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  defp increment_window_size(conn, :connection, wsi) do
+    case conn.window_size do
+      ws when ws + wsi > @max_window_size -> {:error, conn}
+      ws -> {:ok, %{conn | window_size: ws}}
+    end
+  end
+
+  defp increment_window_size(conn, {:stream, stream_id}, wsi) do
+    case conn.streams[stream_id].window_size do
+      ws when ws + wsi > @max_window_size -> {:error, conn}
+      ws -> {:ok, put_in(conn.streams[stream_id].window_size, ws + wsi)}
     end
   end
 
