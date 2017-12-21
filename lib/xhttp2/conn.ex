@@ -31,19 +31,17 @@ defmodule XHTTP2.Conn do
     :socket,
     :state,
     :client_settings,
-    next_stream_id: 3,
-    streams: %{},
-    open_streams: 0,
     window_size: @default_window_size,
     encode_table: HPACK.new(4096),
     decode_table: HPACK.new(4096),
     buffer: "",
     ping_queue: :queue.new(),
 
-    # %{ref => stream_id} and %{stream_id => ref} lookup maps so that we can identify streams
-    # with references.
-    stream_id_lookup: %{},
-    req_ref_lookup: %{},
+    # Stream-set-related things.
+    next_stream_id: 3,
+    streams: %{},
+    open_stream_count: 0,
+    ref_to_stream_id: %{},
 
     # SETTINGS-related things.
     enable_push: true,
@@ -63,16 +61,11 @@ defmodule XHTTP2.Conn do
             socket: term(),
             state: :open | :closed | :went_away,
             client_settings: settings(),
-            next_stream_id: stream_id(),
-            streams: %{optional(stream_id()) => map()},
-            open_streams: non_neg_integer(),
             window_size: pos_integer(),
             encode_table: HPACK.Table.t(),
             decode_table: HPACK.Table.t(),
             buffer: binary(),
             ping_queue: :queue.queue(),
-            stream_id_lookup: %{optional(request_id()) => stream_id()},
-            req_ref_lookup: %{optional(stream_id()) => request_id()},
             enable_push: boolean(),
             server_max_concurrent_streams: non_neg_integer(),
             initial_window_size: pos_integer(),
@@ -109,19 +102,19 @@ defmodule XHTTP2.Conn do
 
   @spec request(t(), list()) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, headers) when is_list(headers) do
-    with {:ok, conn, stream_id, ref} <- open_stream(conn),
-         {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_stream, :end_headers]),
-         do: {:ok, conn, ref}
+    {conn, stream_id, ref} = open_stream(conn)
+    conn = send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+    {:ok, conn, ref}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
   @spec request(t(), list(), iodata()) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
-    with {:ok, conn, stream_id, ref} <- open_stream(conn),
-         {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
-         {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
-         do: {:ok, conn, ref}
+    {conn, stream_id, ref} = open_stream(conn)
+    conn = send_headers(conn, stream_id, headers, [:end_headers])
+    conn = send_data(conn, stream_id, body, [:end_stream])
+    {:ok, conn, ref}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
@@ -136,9 +129,6 @@ defmodule XHTTP2.Conn do
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
-  @doc """
-  TODO
-  """
   def stream(conn, message)
 
   def stream(%__MODULE__{socket: socket} = conn, {error_tag, socket, reason})
@@ -278,14 +268,6 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp new_stream(%__MODULE__{} = conn) do
-    %{
-      state: :idle,
-      id: conn.next_stream_id,
-      window_size: conn.initial_window_size
-    }
-  end
-
   defp apply_server_settings(conn, server_settings) do
     Enum.reduce(server_settings, conn, fn
       {:header_table_size, header_table_size}, conn ->
@@ -311,20 +293,22 @@ defmodule XHTTP2.Conn do
     end)
   end
 
-  defp open_stream(%__MODULE__{} = conn) do
-    max_concurrent_streams = conn.server_max_concurrent_streams
-
-    if conn.open_streams >= max_concurrent_streams do
-      {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
-    else
-      ref = make_ref()
-      stream = new_stream(conn)
-      conn = put_in(conn.streams[stream.id], stream)
-      conn = put_in(conn.req_ref_lookup[stream.id], ref)
-      conn = put_in(conn.stream_id_lookup[ref], stream.id)
-      conn = update_in(conn.next_stream_id, &(&1 + 2))
-      {:ok, conn, stream.id, ref}
+  defp open_stream(%__MODULE__{server_max_concurrent_streams: mcs} = conn) do
+    if conn.open_stream_count >= mcs do
+      throw({:xhttp, conn, {:max_concurrent_streams_reached, mcs}})
     end
+
+    stream = %{
+      id: conn.next_stream_id,
+      ref: make_ref(),
+      state: :idle,
+      window_size: conn.initial_window_size
+    }
+
+    conn = put_in(conn.streams[stream.id], stream)
+    conn = put_in(conn.ref_to_stream_id[stream.ref], stream.id)
+    conn = update_in(conn.next_stream_id, &(&1 + 2))
+    {conn, stream.id, stream.ref}
   end
 
   defp send_headers(conn, stream_id, headers, enabled_flags) do
@@ -336,11 +320,10 @@ defmodule XHTTP2.Conn do
     frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
     transport_send!(conn, Frame.encode(frame))
 
-    stream = %{stream | state: :open}
     conn = put_in(conn.encode_table, encode_table)
-    conn = put_in(conn.streams[stream_id], stream)
-    conn = update_in(conn.open_streams, &(&1 + 1))
-    {:ok, conn}
+    conn = put_in(conn.streams[stream_id].state, :open)
+    conn = update_in(conn.open_stream_count, &(&1 + 1))
+    conn
   end
 
   defp send_data(conn, stream_id, data, enabled_flags) do
@@ -351,29 +334,46 @@ defmodule XHTTP2.Conn do
 
     cond do
       data_size >= stream.window_size ->
-        {:error, {:exceeds_stream_window_size, stream.window_size}}
+        throw({:xhttp, conn, {:exceeds_stream_window_size, stream.window_size}})
 
       data_size >= conn.window_size ->
-        {:error, {:exceeds_connection_window_size, stream.window_size}}
+        throw({:xhttp, conn, {:exceeds_connection_window_size, conn.window_size}})
 
       true ->
         frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
         transport_send!(conn, Frame.encode(frame))
-
-        stream = update_in(stream.window_size, &(&1 - data_size))
-        conn = put_in(conn.streams[stream_id], stream)
+        conn = update_in(conn.streams[stream_id].window_size, &(&1 - data_size))
         conn = update_in(conn.window_size, &(&1 - data_size))
-        {:ok, conn}
+        conn
     end
   end
 
   ## Frame handling
 
+  # DATA
+  defp handle_frame(conn, data() = frame, responses) do
+    data(stream_id: stream_id, flags: flags, data: data) = frame
+    stream = fetch_stream!(conn, stream_id)
+
+    if stream.state != :open do
+      raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
+    end
+
+    responses = [{:data, stream.ref, data} | responses]
+
+    if flag_set?(flags, :data, :end_stream) do
+      conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
+      conn = update_in(conn.open_stream_count, &(&1 - 1))
+      {:ok, conn, [{:done, stream.ref} | responses]}
+    else
+      {:ok, conn, responses}
+    end
+  end
+
+  # HEADERS
   defp handle_frame(conn, headers() = frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
-
     stream = fetch_stream!(conn, stream_id)
-    req_ref = lookup_req_ref(conn, stream_id)
 
     if stream.state != :open do
       raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
@@ -383,17 +383,16 @@ defmodule XHTTP2.Conn do
       if flag_set?(flags, :headers, :end_headers) do
         # TODO: handle bad decoding
         {:ok, conn, headers} = decode_headers(conn, hbf)
-        {conn, [{:headers, req_ref, headers} | responses]}
+        {conn, [{:headers, stream.ref, headers} | responses]}
       else
         raise "END_HEADERS not set is not supported yet"
       end
 
     {conn, responses} =
       if flag_set?(flags, :headers, :end_stream) do
-        stream = %{stream | state: :half_closed_remote}
-        conn = put_in(conn.streams[stream_id], stream)
-        conn = update_in(conn.open_streams, &(&1 - 1))
-        {conn, [{:done, req_ref} | responses]}
+        conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
+        conn = update_in(conn.open_stream_count, &(&1 - 1))
+        {conn, [{:done, stream.ref} | responses]}
       else
         {conn, responses}
       end
@@ -401,51 +400,66 @@ defmodule XHTTP2.Conn do
     {:ok, conn, responses}
   end
 
-  defp handle_frame(conn, data() = frame, responses) do
-    data(stream_id: stream_id, flags: flags, data: data) = frame
+  # TODO: implement PRIORITY
+  defp handle_frame(_conn, priority(), _responses) do
+    raise "PRIORITY handling not implemented"
+  end
 
-    stream = fetch_stream!(conn, stream_id)
-    req_ref = lookup_req_ref(conn, stream_id)
+  # TODO: implement RST_STREAM
+  defp handle_frame(_conn, rst_stream(), _responses) do
+    raise "RST_STREAM handling not implemented"
+  end
 
-    if stream.state != :open do
-      raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
-    end
+  # TODO: implement SETTINGS
+  defp handle_frame(_conn, settings(), _responses) do
+    raise "SETTINGS handling not implemented"
+  end
 
-    responses = [{:data, req_ref, data} | responses]
+  # TODO: implement PUSH_PROMISE
+  defp handle_frame(_conn, push_promise(), _responses) do
+    raise "PUSH_PROMISE handling not implemented"
+  end
 
-    if flag_set?(flags, :data, :end_stream) do
-      stream = %{stream | state: :half_closed_remote}
-      conn = put_in(conn.streams[stream_id], stream)
-      conn = update_in(conn.open_streams, &(&1 - 1))
-      {:ok, conn, [{:done, req_ref} | responses]}
+  # PING
+  defp handle_frame(conn, ping() = frame, responses) do
+    Frame.ping(flags: flags, opaque_data: opaque_data) = frame
+
+    if flag_set?(flags, :ping, :ack) do
+      {{:value, queued_ping}, ping_queue} = :queue.out(conn.ping_queue)
+
+      if Frame.ping(queued_ping, :opaque_data) == opaque_data do
+        {:ok, conn, [:pong | responses]}
+      else
+        # TODO: handle this properly
+        raise "non-matching PING"
+      end
     else
+      ack_ping = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
+      transport_send!(conn, Frame.encode(ack_ping))
       {:ok, conn, responses}
     end
   end
 
+  # GOAWAY
   defp handle_frame(conn, goaway() = frame, responses) do
     goaway(last_stream_id: last_stream_id, error_code: error_code, debug_data: debug_data) = frame
 
-    unprocessed_stream_ids =
-      for {stream_id, _} when stream_id > last_stream_id <- conn.streams,
-          into: %{},
-          do: stream_id
+    unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
 
     {responses, conn} =
-      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn stream_id, {conn, responses} ->
-        request_ref = lookup_req_ref(conn, stream_id)
-        conn = update_in(conn.streams, &Map.delete(&1, stream_id))
+      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
+        conn = update_in(conn.streams, &Map.delete(&1, id))
         conn = update_in(conn.open_streams, &(&1 - 1))
-        conn = update_in(conn.req_ref_lookup, &Map.delete(&1, stream_id))
-        conn = update_in(conn.stream_id_lookup, &Map.delete(&1, request_ref))
+        conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
         conn = put_in(conn.state, :went_away)
-        response = {:closed, request_ref, {:goaway, error_code, debug_data}}
+        response = {:closed, stream.ref, {:goaway, error_code, debug_data}}
         {[response | responses], conn}
       end)
 
     {:ok, conn, responses}
   end
 
+  # WINDOW_UPDATE
   defp handle_frame(conn, window_update() = frame, responses) do
     case frame do
       window_update(stream_id: 0, window_size_increment: wsi) ->
@@ -463,35 +477,15 @@ defmodule XHTTP2.Conn do
           {:error, conn} ->
             frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
             transport_send!(conn, Frame.encode(frame))
-            resp = {:closed, lookup_req_ref(conn, stream_id), :flow_control_error}
-            {:ok, conn, [resp | responses]}
+            %{ref: ref} = fetch_stream!(conn, stream_id)
+            {:ok, conn, [{:closed, ref, :flow_control_error} | responses]}
         end
     end
   end
 
-  defp handle_frame(conn, ping() = frame, responses) do
-    Frame.ping(flags: flags, opaque_data: opaque_data) = frame
-
-    if flag_set?(flags, :ping, :ack) do
-      {{:value, queued_ping}, ping_queue} = :queue.out(conn.ping_queue)
-
-      if Frame.ping(queued_ping, :opaque_data) == opaque_data do
-        {:ok, conn, [:pong | responses]}
-      else
-        # TODO: handle this properly
-        raise "non-matching PING"
-      end
-    else
-      ack_ping = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
-
-      with :ok <- conn.transport.send(conn.socket, Frame.encode(ack_ping)) do
-        {:ok, conn, responses}
-      end
-    end
-  end
-
-  defp handle_frame(%__MODULE__{}, frame, _responses) do
-    raise "got a frame that I don't know how to handle: #{inspect(frame)}"
+  # TODO: implement CONTINUATION
+  defp handle_frame(_conn, continuation(), _responses) do
+    raise "CONTINUATION handling not implemented"
   end
 
   defp decode_headers(%__MODULE__{} = conn, hbf) do
@@ -519,14 +513,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp fetch_stream!(%__MODULE__{} = conn, ref) when is_reference(ref) do
-    case Map.fetch(conn.stream_id_lookup, ref) do
-      {:ok, stream_id} -> fetch_stream!(conn, stream_id)
-      :error -> throw({:xhttp, :request_not_found})
-    end
-  end
-
-  defp fetch_stream!(%__MODULE__{} = conn, stream_id) when is_integer(stream_id) do
+  defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
       :error -> throw({:xhttp, {:stream_not_found, stream_id}})
@@ -544,9 +531,5 @@ defmodule XHTTP2.Conn do
       :ok -> :ok
       {:error, reason} -> throw({:xhttp, reason})
     end
-  end
-
-  defp lookup_req_ref(conn, stream_id) when is_integer(stream_id) do
-    Map.fetch!(conn.req_ref_lookup, stream_id)
   end
 end
