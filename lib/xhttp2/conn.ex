@@ -27,14 +27,23 @@ defmodule XHTTP2.Conn do
   ## Connection
 
   defstruct [
+    # Transport things.
     :transport,
     :socket,
+
+    # Connection state (open, closed, and so on).
     :state,
+
+    # Settings set from the user.
     :client_settings,
+
+    # Fields of the connection.
+    buffer: "",
     window_size: @default_window_size,
     encode_table: HPACK.new(4096),
     decode_table: HPACK.new(4096),
-    buffer: "",
+
+    # Queue for sent PING frames.
     ping_queue: :queue.new(),
 
     # Stream-set-related things.
@@ -61,11 +70,15 @@ defmodule XHTTP2.Conn do
             socket: term(),
             state: :open | :closed | :went_away,
             client_settings: settings(),
+            buffer: binary(),
             window_size: pos_integer(),
             encode_table: HPACK.Table.t(),
             decode_table: HPACK.Table.t(),
-            buffer: binary(),
             ping_queue: :queue.queue(),
+            next_stream_id: stream_id(),
+            streams: %{optional(stream_id()) => map()},
+            open_stream_count: non_neg_integer(),
+            ref_to_stream_id: %{optional(reference()) => stream_id()},
             enable_push: boolean(),
             server_max_concurrent_streams: non_neg_integer(),
             initial_window_size: pos_integer(),
@@ -73,9 +86,6 @@ defmodule XHTTP2.Conn do
           }
 
   ## Public interface
-
-  # Possible errors we can throw:
-  # * {:xhttp, conn, reason}
 
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
