@@ -5,8 +5,12 @@ defmodule XHTTP1.ConnPropertiesTest do
   alias XHTTP1.Conn
   alias XHTTP1.TestHelpers.TCPMock
 
-  property "body with content-length" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  setup do
+    assert {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    [conn: conn]
+  end
+
+  property "body with content-length", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789XXX"
 
@@ -26,8 +30,7 @@ defmodule XHTTP1.ConnPropertiesTest do
     end
   end
 
-  property "body with chunked transfer-encoding split on every byte" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  property "body with chunked transfer-encoding split on every byte", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     response =
@@ -50,8 +53,7 @@ defmodule XHTTP1.ConnPropertiesTest do
     end
   end
 
-  property "pipeline with multiple responses in single message" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  property "pipeline with multiple responses in single message", %{conn: conn} do
     {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
@@ -83,10 +85,10 @@ defmodule XHTTP1.ConnPropertiesTest do
       |> Enum.uniq()
       |> Enum.sort()
       |> Enum.reduce({[], binary, 0}, fn split, {chunks, rest, prev_split} ->
-           length = split - prev_split
-           <<chunk::binary-size(length), rest::binary>> = rest
-           {[chunk | chunks], rest, split}
-         end)
+        length = split - prev_split
+        <<chunk::binary-size(length), rest::binary>> = rest
+        {[chunk | chunks], rest, split}
+      end)
       |> join_last_chunk()
       |> Enum.reverse()
       |> StreamData.constant()
