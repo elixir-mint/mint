@@ -404,6 +404,29 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  defp handle_frame(conn, goaway() = frame, responses) do
+    goaway(last_stream_id: last_stream_id, error_code: error_code, debug_data: debug_data) = frame
+
+    unprocessed_stream_ids =
+      for {stream_id, _} when stream_id > last_stream_id <- conn.streams,
+          into: %{},
+          do: stream_id
+
+    {responses, conn} =
+      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn stream_id, {conn, responses} ->
+        request_ref = lookup_req_ref(conn, stream_id)
+        conn = update_in(conn.streams, &Map.delete(&1, stream_id))
+        conn = update_in(conn.open_streams, &(&1 - 1))
+        conn = update_in(conn.req_ref_lookup, &Map.delete(&1, stream_id))
+        conn = update_in(conn.stream_id_lookup, &Map.delete(&1, request_ref))
+        conn = put_in(conn.state, :went_away)
+        response = {:closed, request_ref, {:goaway, error_code, debug_data}}
+        {[response | responses], conn}
+      end)
+
+    {:ok, conn, responses}
+  end
+
   defp handle_frame(conn, window_update() = frame, responses) do
     case frame do
       window_update(stream_id: 0, window_size_increment: wsi) ->
