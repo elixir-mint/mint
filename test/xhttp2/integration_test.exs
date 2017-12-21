@@ -59,8 +59,8 @@ defmodule XHTTP2.IntegrationTest do
     end
 
     test "ping", %{conn: conn} do
-      assert {:ok, %Conn{} = conn} = Conn.ping(conn)
-      assert {:ok, %Conn{} = conn, [:pong]} = receive_stream(conn)
+      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
+      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
       assert Conn.open?(conn)
     end
@@ -109,12 +109,12 @@ defmodule XHTTP2.IntegrationTest do
     {:ok, conn, acc ++ [done]}
   end
 
-  defp maybe_done(conn, [:pong | rest], acc) do
+  defp maybe_done(conn, [{:pong, _} = pong_resp | rest], acc) do
     if rest != [] do
       send(self(), {:rest, conn, rest})
     end
 
-    {:ok, conn, acc ++ [:pong]}
+    {:ok, conn, acc ++ [pong_resp]}
   end
 
   defp maybe_done(conn, [resp | rest], acc) do

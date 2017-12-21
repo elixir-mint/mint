@@ -112,6 +112,7 @@ defmodule XHTTP2.Conn do
   @spec request(t(), list(), iodata()) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
     {conn, stream_id, ref} = open_stream(conn)
+    # TODO: Optimize here by sending a single packet on the network.
     conn = send_headers(conn, stream_id, headers, [:end_headers])
     conn = send_data(conn, stream_id, body, [:end_stream])
     {:ok, conn, ref}
@@ -119,12 +120,10 @@ defmodule XHTTP2.Conn do
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
-  # TODO: return a regular request_id() for pings.
-  @spec ping(t(), <<_::8>>) :: {:ok, t()} | {:error, t(), term()}
+  @spec ping(t(), <<_::8>>) :: {:ok, t(), request_id()} | {:error, t(), term()}
   def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
-    frame = Frame.ping(stream_id: 0, opaque_data: payload)
-    transport_send!(conn, Frame.encode(frame))
-    {:ok, update_in(conn.ping_queue, &:queue.in(frame, &1))}
+    {conn, ref} = send_ping(conn, payload)
+    {:ok, conn, ref}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
@@ -348,6 +347,14 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  defp send_ping(conn, payload) do
+    frame = Frame.ping(stream_id: 0, opaque_data: payload)
+    transport_send!(conn, Frame.encode(frame))
+    ref = make_ref()
+    conn = update_in(conn.ping_queue, &:queue.in({ref, payload}, &1))
+    {conn, ref}
+  end
+
   ## Frame handling
 
   # DATA
@@ -421,17 +428,20 @@ defmodule XHTTP2.Conn do
   end
 
   # PING
-  defp handle_frame(conn, ping() = frame, responses) do
-    Frame.ping(flags: flags, opaque_data: opaque_data) = frame
-
+  defp handle_frame(conn, Frame.ping(flags: flags, opaque_data: opaque_data), responses) do
     if flag_set?(flags, :ping, :ack) do
-      {{:value, queued_ping}, ping_queue} = :queue.out(conn.ping_queue)
+      case :queue.out(conn.ping_queue) do
+        {{:value, {ref, ^opaque_data}}, ping_queue} ->
+          conn = put_in(conn.ping_queue, ping_queue)
+          {:ok, conn, [{:pong, ref} | responses]}
 
-      if Frame.ping(queued_ping, :opaque_data) == opaque_data do
-        {:ok, conn, [:pong | responses]}
-      else
-        # TODO: handle this properly
-        raise "non-matching PING"
+        {{:value, _}, _} ->
+          # TODO: handle this properly.
+          raise "non-matching PING"
+
+        {:empty, _ping_queue} ->
+          # TODO: handle this properly.
+          raise "no pings had been sent"
       end
     else
       ack_ping = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
