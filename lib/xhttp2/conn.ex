@@ -35,7 +35,6 @@ defmodule XHTTP2.Conn do
     streams: %{},
     open_streams: 0,
     window_size: @default_window_size,
-    initial_window_size: @default_window_size,
     encode_table: HPACK.new(4096),
     decode_table: HPACK.new(4096),
     buffer: "",
@@ -57,8 +56,28 @@ defmodule XHTTP2.Conn do
 
   @type settings() :: Keyword.t()
   @type request_id() :: reference()
+  @type stream_id() :: pos_integer()
 
-  @opaque t() :: %__MODULE__{}
+  @opaque t() :: %__MODULE__{
+            transport: module(),
+            socket: term(),
+            state: :open | :closed | :went_away,
+            client_settings: settings(),
+            next_stream_id: stream_id(),
+            streams: %{optional(stream_id()) => map()},
+            open_streams: non_neg_integer(),
+            window_size: pos_integer(),
+            encode_table: HPACK.Table.t(),
+            decode_table: HPACK.Table.t(),
+            buffer: binary(),
+            ping_queue: :queue.queue(),
+            stream_id_lookup: %{optional(request_id()) => stream_id()},
+            req_ref_lookup: %{optional(stream_id()) => request_id()},
+            enable_push: boolean(),
+            server_max_concurrent_streams: non_neg_integer(),
+            initial_window_size: pos_integer(),
+            max_frame_size: pos_integer()
+          }
 
   ## Public interface
 
