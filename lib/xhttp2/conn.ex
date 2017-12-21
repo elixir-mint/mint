@@ -246,6 +246,8 @@ defmodule XHTTP2.Conn do
   defp handle_new_data(%__MODULE__{} = conn, data, responses) do
     case Frame.decode_next(data) do
       {:ok, frame, rest} ->
+        Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
+
         with {:ok, conn, responses} <- handle_frame(conn, frame, responses),
              do: handle_new_data(conn, rest, responses)
 
@@ -348,9 +350,7 @@ defmodule XHTTP2.Conn do
 
   ## Frame handling
 
-  # Returns: {:ok, conn, responses} | {:error, reason}
-  defp handle_frame(%__MODULE__{} = conn, headers() = frame, responses) do
-    Logger.debug(fn -> "Got HEADERS frame: #{inspect(frame)}" end)
+  defp handle_frame(conn, headers() = frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
 
     stream = fetch_stream!(conn, stream_id)
@@ -382,9 +382,7 @@ defmodule XHTTP2.Conn do
     {:ok, conn, responses}
   end
 
-  defp handle_frame(%__MODULE__{} = conn, data() = frame, responses) do
-    # TODO: maybe send WINDOW_UPDATE to refill size here.
-    Logger.debug(fn -> "Got DATA frame: #{inspect(frame)}" end)
+  defp handle_frame(conn, data() = frame, responses) do
     data(stream_id: stream_id, flags: flags, data: data) = frame
 
     stream = fetch_stream!(conn, stream_id)
@@ -406,9 +404,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp handle_frame(%__MODULE__{} = conn, window_update() = frame, responses) do
-    Logger.debug(fn -> "Got WINDOW_UPDATE frame: #{inspect(frame)}" end)
-
+  defp handle_frame(conn, window_update() = frame, responses) do
     case frame do
       window_update(stream_id: 0, window_size_increment: wsi) ->
         case increment_window_size(conn, :connection, wsi) do
@@ -431,8 +427,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp handle_frame(%__MODULE__{} = conn, ping() = frame, responses) do
-    Logger.debug(fn -> "Got PING frame: #{inspect(frame)}" end)
+  defp handle_frame(conn, ping() = frame, responses) do
     Frame.ping(flags: flags, opaque_data: opaque_data) = frame
 
     if flag_set?(flags, :ping, :ack) do
@@ -454,8 +449,7 @@ defmodule XHTTP2.Conn do
   end
 
   defp handle_frame(%__MODULE__{}, frame, _responses) do
-    Logger.error(fn -> "Got a frame that I don't know how to handle: #{inspect(frame)}" end)
-    raise "unhandleable frame"
+    raise "got a frame that I don't know how to handle: #{inspect(frame)}"
   end
 
   defp decode_headers(%__MODULE__{} = conn, hbf) do
