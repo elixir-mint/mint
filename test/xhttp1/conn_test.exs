@@ -3,22 +3,24 @@ defmodule XHTTP1.ConnTest do
   alias XHTTP1.Conn
   alias XHTTP1.TestHelpers.TCPMock
 
-  test "unknown message" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  setup do
+    assert {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    [conn: conn]
+  end
+
+  test "unknown message", %{conn: conn} do
     {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [], nil)
     assert Conn.stream(conn, :unknown_message) == :unknown
   end
 
-  test "status" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "status", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     assert {:ok, _conn, [{:status, ^ref, {{1, 1}, 200, "OK"}}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
   end
 
-  test "partial status" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "partial status", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1"})
 
@@ -26,8 +28,7 @@ defmodule XHTTP1.ConnTest do
              Conn.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
-  test "headers" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "headers", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, [_status]} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
@@ -37,8 +38,7 @@ defmodule XHTTP1.ConnTest do
     assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
   end
 
-  test "partial headers" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "partial headers", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, [_status]} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
@@ -47,8 +47,7 @@ defmodule XHTTP1.ConnTest do
     assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
   end
 
-  test "status and headers" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "status and headers", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     assert {:ok, _conn, [status, headers]} =
@@ -58,8 +57,7 @@ defmodule XHTTP1.ConnTest do
     assert {:headers, ^ref, [{"foo", "Bar"}]} = headers
   end
 
-  test "body without content-length" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "body without content-length", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     assert {:ok, conn, [_status, _headers, {:body, ^ref, "BODY1"}]} =
@@ -71,8 +69,7 @@ defmodule XHTTP1.ConnTest do
     refute Conn.open?(conn)
   end
 
-  test "body with content-length" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "body with content-length", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n"
 
@@ -88,8 +85,7 @@ defmodule XHTTP1.ConnTest do
     assert Conn.open?(conn)
   end
 
-  test "no body with HEAD request" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "no body with HEAD request", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "HEAD", "/", [], nil)
 
     assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
@@ -98,8 +94,7 @@ defmodule XHTTP1.ConnTest do
     assert conn.buffer == "XXX"
   end
 
-  test "status, headers, and body" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "status, headers, and body", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nXX"
 
@@ -111,8 +106,7 @@ defmodule XHTTP1.ConnTest do
     assert conn.buffer == "XX"
   end
 
-  test "connection: close" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "connection: close", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\nconnection: close\r\n\r\nX"
 
@@ -123,8 +117,7 @@ defmodule XHTTP1.ConnTest do
     refute Conn.open?(conn)
   end
 
-  test "connection: keep-alive" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "connection: keep-alive", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\nconnection: keep-alive\r\n\r\nX"
 
@@ -135,8 +128,7 @@ defmodule XHTTP1.ConnTest do
     assert Conn.open?(conn)
   end
 
-  test "implicit connection: close on http/1.0" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "implicit connection: close on http/1.0", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\n\r\nX"
 
@@ -147,8 +139,7 @@ defmodule XHTTP1.ConnTest do
     refute Conn.open?(conn)
   end
 
-  test "implicit connection: keep-alive on http/1.1" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "implicit connection: keep-alive on http/1.1", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
 
@@ -159,16 +150,14 @@ defmodule XHTTP1.ConnTest do
     assert Conn.open?(conn)
   end
 
-  test "error with multiple content-length headers" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "error with multiple content-length headers", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
 
     assert {:error, ^ref, :invalid_response} = Conn.stream(conn, {:tcp, conn.socket, response})
   end
 
-  test "pipeline" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "pipeline", %{conn: conn} do
     {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
@@ -196,8 +185,7 @@ defmodule XHTTP1.ConnTest do
              responses
   end
 
-  test "pipeline with multiple responses in single message" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "pipeline with multiple responses in single message", %{conn: conn} do
     {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
@@ -227,8 +215,7 @@ defmodule XHTTP1.ConnTest do
            ] = responses
   end
 
-  test "body with chunked transfer-encoding" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     response =
@@ -246,8 +233,7 @@ defmodule XHTTP1.ConnTest do
     assert conn.buffer == "XXX"
   end
 
-  test "body with chunked transfer-encoding with metadata and trailers" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     response =
@@ -266,8 +252,7 @@ defmodule XHTTP1.ConnTest do
     assert conn.buffer == "XXX"
   end
 
-  test "do not chunk if unknown transfer-encoding" do
-    {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+  test "do not chunk if unknown transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
     response =
