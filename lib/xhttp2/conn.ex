@@ -125,62 +125,6 @@ defmodule XHTTP2.Conn do
       {:error, error}
   end
 
-  defp open_stream(%__MODULE__{} = conn) do
-    max_concurrent_streams = conn.server_max_concurrent_streams
-
-    if conn.open_streams >= max_concurrent_streams do
-      {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
-    else
-      ref = make_ref()
-      stream = new_stream(conn)
-      conn = put_in(conn.streams[stream.id], stream)
-      conn = put_in(conn.req_ref_lookup[stream.id], ref)
-      conn = put_in(conn.stream_id_lookup[ref], stream.id)
-      conn = update_in(conn.next_stream_id, &(&1 + 2))
-      {:ok, conn, stream.id, ref}
-    end
-  end
-
-  defp send_headers(conn, stream_id, headers, enabled_flags) do
-    stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(stream, :idle)
-
-    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-    {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
-    frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
-    transport_send!(conn, Frame.encode(frame))
-
-    stream = %{stream | state: :open}
-    conn = put_in(conn.encode_table, encode_table)
-    conn = put_in(conn.streams[stream_id], stream)
-    conn = update_in(conn.open_streams, &(&1 + 1))
-    {:ok, conn}
-  end
-
-  defp send_data(conn, stream_id, data, enabled_flags) do
-    stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(stream, :open)
-
-    data_size = byte_size(data)
-
-    cond do
-      data_size >= stream.window_size ->
-        {:error, {:exceeds_stream_window_size, stream.window_size}}
-
-      data_size >= conn.window_size ->
-        {:error, {:exceeds_connection_window_size, stream.window_size}}
-
-      true ->
-        frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
-        transport_send!(conn, Frame.encode(frame))
-
-        stream = update_in(stream.window_size, &(&1 - data_size))
-        conn = put_in(conn.streams[stream_id], stream)
-        conn = update_in(conn.window_size, &(&1 - data_size))
-        {:ok, conn}
-    end
-  end
-
   @doc """
   TODO
   """
@@ -352,6 +296,62 @@ defmodule XHTTP2.Conn do
         # TODO: handle this
         conn
     end)
+  end
+
+  defp open_stream(%__MODULE__{} = conn) do
+    max_concurrent_streams = conn.server_max_concurrent_streams
+
+    if conn.open_streams >= max_concurrent_streams do
+      {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
+    else
+      ref = make_ref()
+      stream = new_stream(conn)
+      conn = put_in(conn.streams[stream.id], stream)
+      conn = put_in(conn.req_ref_lookup[stream.id], ref)
+      conn = put_in(conn.stream_id_lookup[ref], stream.id)
+      conn = update_in(conn.next_stream_id, &(&1 + 2))
+      {:ok, conn, stream.id, ref}
+    end
+  end
+
+  defp send_headers(conn, stream_id, headers, enabled_flags) do
+    stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state!(stream, :idle)
+
+    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
+    {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
+    frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
+    transport_send!(conn, Frame.encode(frame))
+
+    stream = %{stream | state: :open}
+    conn = put_in(conn.encode_table, encode_table)
+    conn = put_in(conn.streams[stream_id], stream)
+    conn = update_in(conn.open_streams, &(&1 + 1))
+    {:ok, conn}
+  end
+
+  defp send_data(conn, stream_id, data, enabled_flags) do
+    stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state!(stream, :open)
+
+    data_size = byte_size(data)
+
+    cond do
+      data_size >= stream.window_size ->
+        {:error, {:exceeds_stream_window_size, stream.window_size}}
+
+      data_size >= conn.window_size ->
+        {:error, {:exceeds_connection_window_size, stream.window_size}}
+
+      true ->
+        frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
+        transport_send!(conn, Frame.encode(frame))
+
+        stream = update_in(stream.window_size, &(&1 - data_size))
+        conn = put_in(conn.streams[stream_id], stream)
+        conn = update_in(conn.window_size, &(&1 - data_size))
+        {:ok, conn}
+    end
   end
 
   ## Frame handling
