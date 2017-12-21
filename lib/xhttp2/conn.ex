@@ -41,6 +41,11 @@ defmodule XHTTP2.Conn do
     buffer: "",
     ping_queue: :queue.new(),
 
+    # %{ref => stream_id} and %{stream_id => ref} lookup maps so that we can identify streams
+    # with references.
+    stream_id_lookup: %{},
+    req_ref_lookup: %{},
+
     # SETTINGS-related things.
     enable_push: true,
     server_max_concurrent_streams: 100,
@@ -87,9 +92,9 @@ defmodule XHTTP2.Conn do
   """
   @spec request(t(), list()) :: {:ok, t(), request_ref :: term()} | {:error, term()}
   def request(%__MODULE__{} = conn, headers) when is_list(headers) do
-    with {:ok, conn, stream_id} <- open_stream(conn),
+    with {:ok, conn, stream_id, ref} <- open_stream(conn),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_stream, :end_headers]),
-         do: {:ok, conn, stream_id}
+         do: {:ok, conn, ref}
   catch
     :throw, {:xhttp, error} ->
       {:error, error}
@@ -99,10 +104,10 @@ defmodule XHTTP2.Conn do
   TODO
   """
   def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
-    with {:ok, conn, stream_id} <- open_stream(conn),
+    with {:ok, conn, stream_id, ref} <- open_stream(conn),
          {:ok, conn} <- send_headers(conn, stream_id, headers, [:end_headers]),
          {:ok, conn} <- send_data(conn, stream_id, body, [:end_stream]),
-         do: {:ok, conn, stream_id}
+         do: {:ok, conn, ref}
   catch
     :throw, {:xhttp, error} ->
       {:error, error}
@@ -126,10 +131,13 @@ defmodule XHTTP2.Conn do
     if conn.open_streams >= max_concurrent_streams do
       {:error, {:max_concurrent_streams_reached, max_concurrent_streams}}
     else
+      ref = make_ref()
       stream = new_stream(conn)
       conn = put_in(conn.streams[stream.id], stream)
+      conn = put_in(conn.req_ref_lookup[stream.id], ref)
+      conn = put_in(conn.stream_id_lookup[ref], stream.id)
       conn = update_in(conn.next_stream_id, &(&1 + 2))
-      {:ok, conn, stream.id}
+      {:ok, conn, stream.id, ref}
     end
   end
 
@@ -354,6 +362,7 @@ defmodule XHTTP2.Conn do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
 
     stream = fetch_stream!(conn, stream_id)
+    req_ref = lookup_req_ref(conn, stream_id)
 
     if stream.state != :open do
       raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
@@ -363,7 +372,7 @@ defmodule XHTTP2.Conn do
       if flag_set?(flags, :headers, :end_headers) do
         # TODO: handle bad decoding
         {:ok, conn, headers} = decode_headers(conn, hbf)
-        {conn, [{:headers, stream_id, headers} | responses]}
+        {conn, [{:headers, req_ref, headers} | responses]}
       else
         raise "END_HEADERS not set is not supported yet"
       end
@@ -373,7 +382,7 @@ defmodule XHTTP2.Conn do
         stream = %{stream | state: :half_closed_remote}
         conn = put_in(conn.streams[stream_id], stream)
         conn = update_in(conn.open_streams, &(&1 - 1))
-        {conn, [{:done, stream_id} | responses]}
+        {conn, [{:done, req_ref} | responses]}
       else
         {conn, responses}
       end
@@ -387,18 +396,19 @@ defmodule XHTTP2.Conn do
     data(stream_id: stream_id, flags: flags, data: data) = frame
 
     stream = fetch_stream!(conn, stream_id)
+    req_ref = lookup_req_ref(conn, stream_id)
 
     if stream.state != :open do
       raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
     end
 
-    responses = [{:data, stream_id, data} | responses]
+    responses = [{:data, req_ref, data} | responses]
 
     if flag_set?(flags, :data, :end_stream) do
       stream = %{stream | state: :half_closed_remote}
       conn = put_in(conn.streams[stream_id], stream)
       conn = update_in(conn.open_streams, &(&1 - 1))
-      {:ok, conn, [{:done, stream_id} | responses]}
+      {:ok, conn, [{:done, req_ref} | responses]}
     else
       {:ok, conn, responses}
     end
@@ -459,7 +469,14 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp fetch_stream!(%__MODULE__{} = conn, stream_id) do
+  defp fetch_stream!(%__MODULE__{} = conn, ref) when is_reference(ref) do
+    case Map.fetch(conn.stream_id_lookup, ref) do
+      {:ok, stream_id} -> fetch_stream!(conn, stream_id)
+      :error -> throw({:xhttp, :request_not_found})
+    end
+  end
+
+  defp fetch_stream!(%__MODULE__{} = conn, stream_id) when is_integer(stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
       :error -> throw({:xhttp, {:stream_not_found, stream_id}})
@@ -472,10 +489,14 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp transport_send!(%__MODULE__{} = conn, bytes) do
-    case conn.transport.send(conn.socket, bytes) do
+  defp transport_send!(%__MODULE__{transport: transport, socket: socket}, bytes) do
+    case transport.send(socket, bytes) do
       :ok -> :ok
       {:error, reason} -> throw({:xhttp, reason})
     end
+  end
+
+  defp lookup_req_ref(conn, stream_id) when is_integer(stream_id) do
+    Map.fetch!(conn.req_ref_lookup, stream_id)
   end
 end
