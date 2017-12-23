@@ -31,6 +31,11 @@ defmodule XHTTP2.Conn do
     :transport,
     :socket,
 
+    # Host things.
+    :hostname,
+    :port,
+    :scheme,
+
     # Connection state (open, closed, and so on).
     :state,
 
@@ -90,6 +95,7 @@ defmodule XHTTP2.Conn do
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = Keyword.get(opts, :transport, :ssl)
+    scheme = Keyword.get(opts, :scheme, "https")
 
     transport_opts =
       opts
@@ -100,6 +106,7 @@ defmodule XHTTP2.Conn do
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
          :ok <- set_inet_opts(transport, socket),
          {:ok, conn} <- initiate_connection(transport, socket, opts) do
+      conn = %{conn | hostname: hostname, port: port, scheme: scheme}
       {:ok, conn}
     else
       {:error, reason} ->
@@ -110,22 +117,29 @@ defmodule XHTTP2.Conn do
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
 
-  @spec request(t(), list()) :: {:ok, t(), request_id()} | {:error, t(), term()}
-  def request(%__MODULE__{} = conn, headers) when is_list(headers) do
-    {conn, stream_id, ref} = open_stream(conn)
-    conn = send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
-    {:ok, conn, ref}
-  catch
-    :throw, {:xhttp, conn, error} -> {:error, conn, error}
-  end
+  @spec request(t(), String.t(), String.t(), list(), iodata() | nil) ::
+          {:ok, t(), request_id()} | {:error, t(), term()}
+  def request(%__MODULE__{} = conn, method, path, headers, body \\ nil)
+      when is_binary(method) and is_binary(path) and is_list(headers) do
+    headers = [
+      {":method", method},
+      {":path", path},
+      {":scheme", conn.scheme},
+      {":authority", "#{conn.hostname}:#{conn.port}"}
+      | headers
+    ]
 
-  @spec request(t(), list(), iodata()) :: {:ok, t(), request_id()} | {:error, t(), term()}
-  def request(%__MODULE__{} = conn, headers, body) when is_list(headers) do
     {conn, stream_id, ref} = open_stream(conn)
-    # TODO: Optimize here by sending a single packet on the network.
-    conn = send_headers(conn, stream_id, headers, [:end_headers])
-    conn = send_data(conn, stream_id, body, [:end_stream])
-    {:ok, conn, ref}
+
+    if body do
+      # TODO: Optimize here by sending a single packet on the network.
+      conn = send_headers(conn, stream_id, headers, [:end_headers])
+      conn = send_data(conn, stream_id, body, [:end_stream])
+      {:ok, conn, ref}
+    else
+      conn = send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+      {:ok, conn, ref}
+    end
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end

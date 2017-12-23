@@ -82,11 +82,11 @@ defmodule XHTTP2.TestHelpers.SSLMock do
     controlling_process: nil
   }
 
-  def connect(hostname, port, opts) do
+  def connect(_hostname, _port, _opts) do
     {:ok, _pid} = GenServer.start_link(__MODULE__, self())
   end
 
-  def negotiated_protocol(pid) do
+  def negotiated_protocol(_pid) do
     {:ok, "h2"}
   end
 
@@ -94,15 +94,15 @@ defmodule XHTTP2.TestHelpers.SSLMock do
     :ok = GenServer.stop(pid)
   end
 
-  def getopts(pid, list) do
+  def getopts(_pid, list) do
     {:ok, Enum.map(list, &{&1, 0})}
   end
 
-  def setopts(pid, opts) do
+  def setopts(_pid, _opts) do
     :ok
   end
 
-  def send(pid, data, opts \\ []) do
+  def send(pid, data, _opts \\ []) do
     GenServer.call(pid, {:send, IO.iodata_to_binary(data)})
   end
 

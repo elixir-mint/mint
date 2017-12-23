@@ -20,8 +20,8 @@ defmodule XHTTP2.IntegrationTest do
     @moduletag connect: {"http2.golang.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
-      headers = headers_for_request("GET", "https://http2.golang.org/reqinfo")
-      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, headers)
+      assert {:ok, %Conn{} = conn, req_id} =
+               Conn.request(conn, "GET", "https://http2.golang.org/reqinfo", [])
 
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
@@ -40,8 +40,8 @@ defmodule XHTTP2.IntegrationTest do
     end
 
     test "PUT /ECHO", %{conn: conn} do
-      headers = headers_for_request("PUT", "https://http2.golang.org/ECHO")
-      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, headers, "hello world")
+      assert {:ok, %Conn{} = conn, req_id} =
+               Conn.request(conn, "PUT", "https://http2.golang.org/ECHO", [], "hello world")
 
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
@@ -66,17 +66,6 @@ defmodule XHTTP2.IntegrationTest do
       assert conn.buffer == ""
       assert Conn.open?(conn)
     end
-  end
-
-  defp headers_for_request(method, url) do
-    uri = URI.parse(url)
-
-    [
-      {":method", method},
-      {":path", uri.path},
-      {":scheme", uri.scheme},
-      {":authority", uri.authority}
-    ]
   end
 
   defp receive_stream(conn) do
