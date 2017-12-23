@@ -442,9 +442,10 @@ defmodule XHTTP2.Conn do
     raise "PRIORITY handling not implemented"
   end
 
-  # TODO: implement RST_STREAM
-  defp handle_frame(_conn, rst_stream(), _responses) do
-    raise "RST_STREAM handling not implemented"
+  defp handle_frame(conn, rst_stream(stream_id: stream_id, error_code: error_code), responses) do
+    stream = fetch_stream!(conn, stream_id)
+    conn = put_in(conn.streams[stream_id].state, :closed)
+    {:ok, conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
   end
 
   # TODO: implement SETTINGS

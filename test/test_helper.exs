@@ -70,56 +70,52 @@ end
 defmodule XHTTP2.TestHelpers.SSLMock do
   use GenServer
 
-  alias XHTTP2.Frame
+  alias XHTTP2.{Frame, HPACK}
 
   import XHTTP2.Frame, except: [encode: 1]
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
   @state %{
-    state: nil
+    state: nil,
+    decode_table: HPACK.new(4096),
+    controlling_process: nil
   }
 
   def connect(hostname, port, opts) do
-    Kernel.send(self(), {:ssl_mock, :connect, [hostname, port, opts]})
-    {:ok, _pid} = GenServer.start_link(__MODULE__, nil)
+    {:ok, _pid} = GenServer.start_link(__MODULE__, self())
   end
 
   def negotiated_protocol(pid) do
-    Kernel.send(self(), {:ssl_mock, :send, [pid]})
     {:ok, "h2"}
   end
 
   def close(pid) do
-    Kernel.send(self(), {:ssl_mock, :close, [pid]})
-    :ok = Agent.stop(pid)
+    :ok = GenServer.stop(pid)
   end
 
   def getopts(pid, list) do
-    Kernel.send(self(), {:ssl_mock, :getopts, [pid, list]})
     {:ok, Enum.map(list, &{&1, 0})}
   end
 
   def setopts(pid, opts) do
-    Kernel.send(self(), {:ssl_mock, :setopts, [pid, opts]})
     :ok
   end
 
   def send(pid, data, opts \\ []) do
-    Kernel.send(self(), {:ssl_mock, :send, [pid, data, opts]})
     GenServer.call(pid, {:send, IO.iodata_to_binary(data)})
   end
 
   def recv(pid, _) do
-    Kernel.send(self(), {:ssl_mock, :recv, [pid]})
     GenServer.call(pid, :recv)
   end
 
   ## Callbacks
 
   @impl true
-  def init(nil) do
-    {:ok, put_in(@state.state, :connected)}
+  def init(controlling_process) do
+    state = %{@state | state: :connected, controlling_process: controlling_process}
+    {:ok, state}
   end
 
   @impl true
@@ -133,8 +129,25 @@ defmodule XHTTP2.TestHelpers.SSLMock do
     {:reply, :ok, %{state | state: :got_client_settings_ack}}
   end
 
-  def handle_call({:send, _}, _from, state) do
-    {:reply, :ok, state}
+  def handle_call({:send, data}, _from, %{state: :ready} = state) do
+    {:ok, frame, ""} = Frame.decode_next(data)
+
+    case frame do
+      headers(hbf: hbf, stream_id: stream_id) ->
+        {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
+        state = put_in(state.decode_table, decode_table)
+
+        case get_req_header(headers, ":path") do
+          "/server-sends-rst-stream" ->
+            frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
+            Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame)})
+
+          "/" ->
+            :ok
+        end
+
+        {:reply, :ok, state}
+    end
   end
 
   @impl true
@@ -150,5 +163,10 @@ defmodule XHTTP2.TestHelpers.SSLMock do
 
   defp encode(frame) do
     frame |> Frame.encode() |> IO.iodata_to_binary()
+  end
+
+  defp get_req_header(headers, header) do
+    {^header, value} = List.keyfind(headers, header, 0)
+    value
   end
 end
