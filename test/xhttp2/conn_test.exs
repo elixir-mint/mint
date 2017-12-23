@@ -1,7 +1,10 @@
 defmodule XHTTP2.ConnTest do
   use ExUnit.Case, async: true
-  alias XHTTP2.Conn
-  alias XHTTP2.TestHelpers.SSLMock
+
+  alias XHTTP2.{
+    Conn,
+    SSLMock
+  }
 
   setup do
     {:ok, conn} = Conn.connect("localhost", 443, transport: SSLMock)
