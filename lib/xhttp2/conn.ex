@@ -398,8 +398,29 @@ defmodule XHTTP2.Conn do
 
     {conn, responses} =
       if flag_set?(flags, :headers, :end_headers) do
-        {conn, status, headers} = decode_headers!(conn, hbf)
-        {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
+        case HPACK.decode(hbf, conn.decode_table) do
+          {:ok, [{":status", status} | headers], decode_table} ->
+            conn = put_in(conn.decode_table, decode_table)
+            {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
+
+          {:ok, _headers, decode_table} ->
+            conn = put_in(conn.decode_table, decode_table)
+
+            # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
+            frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
+            transport_send!(conn, Frame.encode(frame))
+            conn = put_in(conn.streams[stream_id].state, :closed)
+            {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
+
+          {:error, _reason} ->
+            error_code = :compression_error
+            debug_data = "unable to decode headers"
+            frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+            transport_send!(conn, Frame.encode(frame))
+            transport_close!(conn)
+            conn = put_in(conn.state, :closed)
+            throw({:xhttp, conn, :compression_error})
+        end
       else
         raise "END_HEADERS not set is not supported yet"
       end
@@ -505,25 +526,6 @@ defmodule XHTTP2.Conn do
   # TODO: implement CONTINUATION
   defp handle_frame(_conn, continuation(), _responses) do
     raise "CONTINUATION handling not implemented"
-  end
-
-  defp decode_headers!(%__MODULE__{} = conn, hbf) do
-    case HPACK.decode(hbf, conn.decode_table) do
-      {:ok, [{":status", status} | headers], decode_table} ->
-        conn = put_in(conn.decode_table, decode_table)
-        {conn, status, headers}
-
-      # TODO: handle this properly
-      {:ok, headers, decode_table} ->
-        raise ":status header is missing"
-
-      {:error, _reason} ->
-        debug_data = "unable to decode headers"
-        frame = goaway(last_stream_id: 2, error_code: :compression_error, debug_data: debug_data)
-        transport_send!(conn, Frame.encode(frame))
-        transport_close!(conn)
-        throw({:xhttp, conn, :compression_error})
-    end
   end
 
   defp increment_window_size(conn, :connection, wsi) do
