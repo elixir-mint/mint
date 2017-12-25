@@ -40,6 +40,8 @@ defmodule XHTTP1.TestHelpers do
 end
 
 defmodule XHTTP1.TestHelpers.TCPMock do
+  @behaviour XHTTP1.Transport
+
   def connect(hostname, port, opts \\ []) do
     Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
     {:ok, make_ref()}
@@ -63,5 +65,9 @@ defmodule XHTTP1.TestHelpers.TCPMock do
   def send(socket, data, opts \\ []) do
     Kernel.send(self(), {:tcp_mock, :send, [socket, data, opts]})
     :ok
+  end
+
+  def message_tags() do
+    {:tcp, :tcp_error, :tcp_close}
   end
 end

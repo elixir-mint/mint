@@ -1,7 +1,7 @@
 defmodule XHTTP1.IntegrationTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTP1.Conn
+  alias XHTTP1.{Conn, Transport}
 
   @moduletag :integration
 
@@ -19,7 +19,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "ssl, path, long body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: Transport.SSL)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/50000", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -31,7 +31,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "keep alive - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: Transport.SSL)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -41,7 +41,7 @@ defmodule XHTTP1.IntegrationTest do
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "SEE ALSO"
 
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: Transport.SSL)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
