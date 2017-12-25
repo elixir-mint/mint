@@ -20,8 +20,7 @@ defmodule XHTTP2.IntegrationTest do
     @moduletag connect: {"http2.golang.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, req_id} =
-               Conn.request(conn, "GET", "https://http2.golang.org/reqinfo", [])
+      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "GET", "/reqinfo", [])
 
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
@@ -39,9 +38,26 @@ defmodule XHTTP2.IntegrationTest do
       assert Conn.open?(conn)
     end
 
+    test "GET /clockstream", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "GET", "/clockstream", [])
+
+      assert_receive message, 5000
+      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert [{:status, ^req_id, "200"}, {:headers, ^req_id, _headers}] = responses
+
+      assert_receive message, 5000
+      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert [{:data, ^req_id, data}] = responses
+      assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
+
+      assert_receive message, 5000
+      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert [{:data, ^req_id, data}] = responses
+      assert data =~ ~r/\A\d{4}-\d{2}-\d{2}/
+    end
+
     test "PUT /ECHO", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, req_id} =
-               Conn.request(conn, "PUT", "https://http2.golang.org/ECHO", [], "hello world")
+      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "PUT", "/ECHO", [], "hello world")
 
       assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
 
