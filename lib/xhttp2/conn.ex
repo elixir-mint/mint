@@ -304,31 +304,6 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp apply_server_settings(conn, server_settings) do
-    Enum.reduce(server_settings, conn, fn
-      {:header_table_size, header_table_size}, conn ->
-        update_in(conn.encode_table, &HPACK.resize(&1, header_table_size))
-
-      {:enable_push, enable_push?}, conn ->
-        put_in(conn.enable_push, enable_push?)
-
-      {:max_concurrent_streams, max_concurrent_streams}, conn ->
-        put_in(conn.server_max_concurrent_streams, max_concurrent_streams)
-
-      {:initial_window_size, initial_window_size}, conn ->
-        # TODO: update open streams
-        # TODO: check that the iws is under the @max_window_size
-        put_in(conn.initial_window_size, initial_window_size)
-
-      {:max_frame_size, max_frame_size}, conn ->
-        put_in(conn.max_frame_size, max_frame_size)
-
-      {:max_header_list_size, max_header_list_size}, conn ->
-        # TODO: handle this
-        conn
-    end)
-  end
-
   defp open_stream(%__MODULE__{server_max_concurrent_streams: mcs} = conn) do
     if conn.open_stream_count >= mcs do
       throw({:xhttp, conn, {:max_concurrent_streams_reached, mcs}})
@@ -454,9 +429,19 @@ defmodule XHTTP2.Conn do
     {:ok, conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
   end
 
-  # TODO: implement SETTINGS
-  defp handle_frame(_conn, settings(), _responses) do
-    raise "SETTINGS handling not implemented"
+  # SETTINGS
+  defp handle_frame(conn, settings() = frame, responses) do
+    settings(flags: flags, params: params) = frame
+
+    if flag_set?(flags, :settings, :ack) do
+      # TODO: handle this.
+      raise "don't know how to handle SETTINGS acks yet"
+    else
+      conn = apply_server_settings(conn, params)
+      ack = settings(flags: set_flag(:settings, :ack))
+      transport_send!(conn, Frame.encode(ack))
+      {:ok, conn, responses}
+    end
   end
 
   # TODO: implement PUSH_PROMISE
@@ -481,8 +466,8 @@ defmodule XHTTP2.Conn do
           raise "no pings had been sent"
       end
     else
-      ack_ping = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
-      transport_send!(conn, Frame.encode(ack_ping))
+      ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
+      transport_send!(conn, Frame.encode(ack))
       {:ok, conn, responses}
     end
   end
@@ -580,6 +565,31 @@ defmodule XHTTP2.Conn do
         conn = put_in(conn.state, :closed)
         throw({:xhttp, conn, :compression_error})
     end
+  end
+
+  defp apply_server_settings(conn, server_settings) do
+    Enum.reduce(server_settings, conn, fn
+      {:header_table_size, header_table_size}, conn ->
+        update_in(conn.encode_table, &HPACK.resize(&1, header_table_size))
+
+      {:enable_push, enable_push?}, conn ->
+        put_in(conn.enable_push, enable_push?)
+
+      {:max_concurrent_streams, max_concurrent_streams}, conn ->
+        put_in(conn.server_max_concurrent_streams, max_concurrent_streams)
+
+      {:initial_window_size, initial_window_size}, conn ->
+        # TODO: update open streams
+        # TODO: check that the iws is under the @max_window_size
+        put_in(conn.initial_window_size, initial_window_size)
+
+      {:max_frame_size, max_frame_size}, conn ->
+        put_in(conn.max_frame_size, max_frame_size)
+
+      {:max_header_list_size, max_header_list_size}, conn ->
+        # TODO: handle this
+        conn
+    end)
   end
 
   defp increment_window_size(conn, :connection, wsi) do
