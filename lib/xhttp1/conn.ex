@@ -16,7 +16,7 @@ defmodule XHTTP1.Conn do
   to always store the returned `%Conn{}` struct from functions.
   """
 
-  alias XHTTP1.{Conn, Parse, Request, Response}
+  alias XHTTP1.{Conn, Parse, Request, Response, Transport}
 
   require Logger
 
@@ -59,7 +59,7 @@ defmodule XHTTP1.Conn do
           {:ok, t()}
           | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = Keyword.get(opts, :transport, :gen_tcp)
+    transport = Keyword.get(opts, :transport, Transport.TCP)
     transport_opts = [packet: :raw, mode: :binary, active: true]
 
     with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
@@ -186,19 +186,29 @@ defmodule XHTTP1.Conn do
           {:ok, t(), [response()]}
           | {:error, t(), term()}
           | :unknown
-  def stream(%Conn{request: %{state: :stream_request}}, _message) do
+  def stream(%Conn{transport: transport} = conn, message) do
+    stream(conn, transport.message_tags(), message)
+  end
+
+  defp stream(%Conn{request: %{state: :stream_request}}, _tags, _message) do
     {:error, :request_body_not_streamed}
   end
 
-  def stream(%Conn{socket: socket, buffer: buffer, request: nil} = conn, {tag, socket, data})
-      when tag in [:tcp, :ssl] do
+  defp stream(
+         %Conn{socket: socket, buffer: buffer, request: nil} = conn,
+         {ok_tag, _, _},
+         {ok_tag, socket, data}
+       ) do
     # TODO: Figure out if we should keep buffering even though there are no
     # requests in flight
     {:ok, put_in(conn.buffer, buffer <> data), []}
   end
 
-  def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
-      when tag in [:tcp, :ssl] do
+  defp stream(
+         %Conn{socket: socket, buffer: buffer, request: request} = conn,
+         {ok_tag, _, _},
+         {ok_tag, socket, data}
+       ) do
     data = buffer <> data
 
     case decode(request.state, conn, data, []) do
@@ -210,8 +220,11 @@ defmodule XHTTP1.Conn do
       {:error, request.ref, reason}
   end
 
-  def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
-      when tag in [:tcp_close, :ssl_close] do
+  defp stream(
+         %Conn{socket: socket, request: request} = conn,
+         {_, _, close_tag},
+         {close_tag, socket}
+       ) do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
 
@@ -223,26 +236,23 @@ defmodule XHTTP1.Conn do
     end
   end
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
-      when tag in [:tcp_error, :ssl_error] do
+  defp stream(%Conn{socket: socket} = conn, {_, error_tag, _}, {error_tag, socket, reason}) do
     conn = put_in(conn.state, :closed)
     {:error, conn, reason}
   end
 
-  def stream(%Conn{}, _other) do
+  defp stream(%Conn{}, _tags, _other) do
     :unknown
   end
 
   defp inet_opts(transport, socket) do
-    inet = transport_to_inet(transport)
-
-    with {:ok, opts} <- inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
+    with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
       buffer =
         Keyword.fetch!(opts, :buffer)
         |> max(Keyword.fetch!(opts, :sndbuf))
         |> max(Keyword.fetch!(opts, :recbuf))
 
-      inet.setopts(socket, buffer: buffer)
+      transport.setopts(socket, buffer: buffer)
     end
   end
 
@@ -528,9 +538,6 @@ defmodule XHTTP1.Conn do
 
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
   defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
-
-  defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(other), do: other
 
   defp new_request(ref, state, method) do
     %{
