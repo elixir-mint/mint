@@ -73,6 +73,17 @@ defmodule XHTTP2.SSLMock do
             frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
             Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame)})
 
+          "/server-sends-goaway" ->
+            frame =
+              goaway(
+                stream_id: 0,
+                last_stream_id: 3,
+                error_code: :protocol_error,
+                debug_data: "debug data"
+              )
+
+            Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame)})
+
           "/" ->
             :ok
         end

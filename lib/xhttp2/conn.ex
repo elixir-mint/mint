@@ -501,14 +501,14 @@ defmodule XHTTP2.Conn do
 
     unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
 
-    {responses, conn} =
+    {conn, responses} =
       Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
         conn = update_in(conn.streams, &Map.delete(&1, id))
-        conn = update_in(conn.open_streams, &(&1 - 1))
+        conn = update_in(conn.open_stream_count, &(&1 - 1))
         conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
         conn = put_in(conn.state, :went_away)
         response = {:closed, stream.ref, {:goaway, error_code, debug_data}}
-        {[response | responses], conn}
+        {conn, [response | responses]}
       end)
 
     {:ok, conn, responses}
