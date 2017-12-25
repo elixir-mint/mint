@@ -61,7 +61,11 @@ defmodule XHTTP2.Conn do
     enable_push: true,
     server_max_concurrent_streams: 100,
     initial_window_size: @default_window_size,
-    max_frame_size: 16_384
+    max_frame_size: 16_384,
+
+    # Headers being processed (when headers are split into multiple frames with CONTINUATIONS, all
+    # the continuation frames must come one right after the other).
+    headers_being_processed: nil
   ]
 
   ## Types
@@ -280,14 +284,23 @@ defmodule XHTTP2.Conn do
       {:ok, frame, rest} ->
         Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
 
+        if conn.headers_being_processed && not match?(continuation(), frame) do
+          error_code = :protocol_error
+          debug_data = "headers are streaming but got a non-CONTINUATION frame"
+          goaway = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+          transport_send!(conn, Frame.encode(goaway))
+          transport_close!(conn)
+          throw({:xhttp, put_in(conn.state, :closed), :protocol_error})
+        end
+
         with {:ok, conn, responses} <- handle_frame(conn, frame, responses),
              do: handle_new_data(conn, rest, responses)
 
       {:error, {:malformed_frame, _}} ->
         {:ok, %{conn | buffer: data}, responses}
 
-      {:error, _reason} = error ->
-        error
+      {:error, reason} ->
+        {:error, conn, reason}
     end
   end
 
@@ -412,31 +425,10 @@ defmodule XHTTP2.Conn do
 
     {conn, responses} =
       if flag_set?(flags, :headers, :end_headers) do
-        case HPACK.decode(hbf, conn.decode_table) do
-          {:ok, [{":status", status} | headers], decode_table} ->
-            conn = put_in(conn.decode_table, decode_table)
-            {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
-
-          {:ok, _headers, decode_table} ->
-            conn = put_in(conn.decode_table, decode_table)
-
-            # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-            frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
-            transport_send!(conn, Frame.encode(frame))
-            conn = put_in(conn.streams[stream_id].state, :closed)
-            {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
-
-          {:error, _reason} ->
-            error_code = :compression_error
-            debug_data = "unable to decode headers"
-            frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
-            transport_send!(conn, Frame.encode(frame))
-            transport_close!(conn)
-            conn = put_in(conn.state, :closed)
-            throw({:xhttp, conn, :compression_error})
-        end
+        decode_headers!(conn, responses, stream, hbf)
       else
-        raise "END_HEADERS not set is not supported yet"
+        conn = put_in(conn.headers_being_processed, {stream_id, hbf})
+        {conn, responses}
       end
 
     {conn, responses} =
@@ -538,9 +530,56 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  # TODO: implement CONTINUATION
-  defp handle_frame(_conn, continuation(), _responses) do
-    raise "CONTINUATION handling not implemented"
+  # CONTINUATION
+  defp handle_frame(conn, continuation() = frame, responses) do
+    continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
+    stream = fetch_stream!(conn, stream_id)
+
+    case conn.headers_being_processed do
+      {^stream_id, hbf_acc} ->
+        if flag_set?(flags, :continuation, :end_headers) do
+          {conn, responses} = decode_headers!(conn, responses, stream, hbf_acc <> hbf)
+          {:ok, conn, responses}
+        else
+          conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf})
+          {:ok, conn, responses}
+        end
+
+      _other ->
+        error_code = :protocol_error
+        debug_data = "CONTINUATION received outside of headers streaming"
+        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+        transport_send!(conn, Frame.encode(frame))
+        transport_close!(conn)
+        conn = put_in(conn.state, :closed)
+        throw({:xhttp, conn, :protocol_error})
+    end
+  end
+
+  defp decode_headers!(conn, responses, stream, hbf) do
+    case HPACK.decode(hbf, conn.decode_table) do
+      {:ok, [{":status", status} | headers], decode_table} ->
+        conn = put_in(conn.decode_table, decode_table)
+        {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
+
+      {:ok, _headers, decode_table} ->
+        conn = put_in(conn.decode_table, decode_table)
+
+        # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
+        frame = rst_stream(stream_id: stream.id, error_code: :protocol_error)
+        transport_send!(conn, Frame.encode(frame))
+        conn = put_in(conn.streams[stream.id].state, :closed)
+        {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
+
+      {:error, _reason} ->
+        error_code = :compression_error
+        debug_data = "unable to decode headers"
+        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+        transport_send!(conn, Frame.encode(frame))
+        transport_close!(conn)
+        conn = put_in(conn.state, :closed)
+        throw({:xhttp, conn, :compression_error})
+    end
   end
 
   defp increment_window_size(conn, :connection, wsi) do

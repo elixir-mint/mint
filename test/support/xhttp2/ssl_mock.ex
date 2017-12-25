@@ -10,6 +10,7 @@ defmodule XHTTP2.SSLMock do
   @state %{
     state: nil,
     decode_table: HPACK.new(4096),
+    encode_table: HPACK.new(4096),
     controlling_process: nil
   }
 
@@ -83,6 +84,28 @@ defmodule XHTTP2.SSLMock do
               )
 
             Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame)})
+
+          "/split-headers-into-continuation" ->
+            headers = [
+              {:store_name, ":status", "200"},
+              {:store_name, "foo", "bar"},
+              {:store_name, "baz", "bong"}
+            ]
+
+            {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+
+            <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
+            # TODO: update encode table
+
+            frame1 = headers(stream_id: stream_id, hbf: hbf1)
+            Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame1)})
+
+            frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+            Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame2)})
+
+            frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
+            Kernel.send(state.controlling_process, {:ssl_mock, self(), encode(frame3)})
 
           "/" ->
             :ok

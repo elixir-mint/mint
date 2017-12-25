@@ -38,4 +38,20 @@ defmodule XHTTP2.ConnTest do
 
     assert Conn.open?(conn) == false
   end
+
+  test "server splits headers into multiple CONTINUATION frames", %{conn: conn} do
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/split-headers-into-continuation", [])
+
+    assert_receive {:ssl_mock, _socket, data1}
+    assert_receive {:ssl_mock, _socket, data2}
+    assert_receive {:ssl_mock, _socket, data3}
+
+    assert {:ok, %Conn{} = conn, []} = Conn.stream(conn, {:ssl, conn.socket, data1})
+    assert {:ok, %Conn{} = conn, []} = Conn.stream(conn, {:ssl, conn.socket, data2})
+    assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, {:ssl, conn.socket, data3})
+
+    assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}] = responses
+
+    assert Conn.open?(conn)
+  end
 end
