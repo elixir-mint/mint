@@ -473,16 +473,8 @@ defmodule XHTTP2.Conn do
         {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
 
       {:error, reason} ->
-        error_code = :compression_error
         debug_data = "unable to decode headers: #{inspect(reason)}"
-
-        frame =
-          goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
-
-        transport_send!(conn, Frame.encode(frame))
-        transport_close!(conn)
-        conn = put_in(conn.state, :closed)
-        throw({:xhttp, conn, :compression_error})
+        send_connection_error!(conn, :compression_error, debug_data)
     end
   end
 
@@ -624,14 +616,19 @@ defmodule XHTTP2.Conn do
         end
 
       _other ->
-        error_code = :protocol_error
         debug_data = "CONTINUATION received outside of headers streaming"
-        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
-        transport_send!(conn, Frame.encode(frame))
-        transport_close!(conn)
-        conn = put_in(conn.state, :closed)
-        throw({:xhttp, conn, :protocol_error})
+        send_connection_error!(conn, :protocol_error, debug_data)
     end
+  end
+
+  defp send_connection_error!(conn, error_code, debug_data) do
+    frame =
+      goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+
+    transport_send!(conn, Frame.encode(frame))
+    transport_close!(conn)
+    conn = put_in(conn.state, :closed)
+    throw({:xhttp, conn, error_code})
   end
 
   defp increment_window_size(conn, :connection, wsi) do
