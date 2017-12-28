@@ -54,6 +54,8 @@ defmodule XHTTP2.IntegrationTest do
       assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
       assert [{:data, ^req_id, data}] = responses
       assert data =~ ~r/\A\d{4}-\d{2}-\d{2}/
+
+      assert Conn.open?(conn)
     end
 
     test "PUT /ECHO", %{conn: conn} do
