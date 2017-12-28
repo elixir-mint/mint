@@ -12,40 +12,37 @@ defmodule XHTTP2.Server do
 
   @certificate Path.absname("certificate.pem", __DIR__)
   @key Path.absname("key.pem", __DIR__)
+  @ssl_opts [
+    mode: :binary,
+    packet: :raw,
+    active: false,
+    reuseaddr: true,
+    next_protocols_advertised: ["h2"],
+    alpn_preferred_protocols: ["h2"],
+    certfile: @certificate,
+    keyfile: @key
+  ]
 
-  def start() do
-    {:ok, listen_socket} =
-      :ssl.listen(
-        0,
-        mode: :binary,
-        packet: :raw,
-        active: false,
-        reuseaddr: true,
-        next_protocols_advertised: ["h2"],
-        alpn_preferred_protocols: ["h2"],
-        certfile: @certificate,
-        keyfile: @key
-      )
-
-    spawn_link(fn -> loop(listen_socket) end)
+  def start(handshake_fun \\ &handshake/1) when is_function(handshake_fun, 1) do
+    {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
+    spawn_link(fn -> loop(listen_socket, handshake_fun) end)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
     {:ok, port}
   end
 
-  defp loop(listen_socket) do
+  defp loop(listen_socket, handshake_fun) do
     {:ok, socket} = :ssl.transport_accept(listen_socket)
     :ok = :ssl.ssl_accept(socket)
 
     pid =
       spawn_link(fn ->
-        :ok = handshake(socket)
+        :ok = handshake_fun.(socket)
         :ok = :ssl.setopts(socket, active: true)
         handle_client(%{@state | socket: socket})
       end)
 
     :ok = :ssl.controlling_process(socket, pid)
-
-    loop(listen_socket)
+    loop(listen_socket, handshake_fun)
   end
 
   defp handshake(socket) do
