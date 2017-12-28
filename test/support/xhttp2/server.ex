@@ -86,6 +86,11 @@ defmodule XHTTP2.Server do
     handle_request(state, stream_id, get_req_header(headers, ":path"), headers)
   end
 
+  defp handle_frame(state, goaway()) do
+    :ssl.close(state.socket)
+    state
+  end
+
   defp handle_request(state, _stream_id, "/", _) do
     state
   end
@@ -132,6 +137,18 @@ defmodule XHTTP2.Server do
     frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
     :ok = :ssl.send(state.socket, Frame.encode(frame3))
 
+    state
+  end
+
+  defp handle_request(state, stream_id, "/server-sends-badly-encoded-hbf", _) do
+    frame =
+      headers(
+        stream_id: stream_id,
+        hbf: "not a good hbf",
+        flags: set_flag(:headers, :end_headers)
+      )
+
+    :ok = :ssl.send(state.socket, Frame.encode(frame))
     state
   end
 

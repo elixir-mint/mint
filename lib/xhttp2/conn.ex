@@ -176,6 +176,8 @@ defmodule XHTTP2.Conn do
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, data}) when tag in [:tcp, :ssl] do
     with {:ok, conn, responses} <- handle_new_data(conn, conn.buffer <> data, []),
          do: {:ok, conn, Enum.reverse(responses)}
+  catch
+    :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -561,10 +563,13 @@ defmodule XHTTP2.Conn do
         conn = put_in(conn.streams[stream.id].state, :closed)
         {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
 
-      {:error, _reason} ->
+      {:error, reason} ->
         error_code = :compression_error
-        debug_data = "unable to decode headers"
-        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+        debug_data = "unable to decode headers: #{inspect(reason)}"
+
+        frame =
+          goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+
         transport_send!(conn, Frame.encode(frame))
         transport_close!(conn)
         conn = put_in(conn.state, :closed)
