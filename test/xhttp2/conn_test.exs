@@ -99,6 +99,16 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "server sends a HEADERS with END_STREAM set but not END_HEADERS", %{conn: conn} do
+    path = "/server-ends-stream-but-not-headers"
+    {:ok, conn, ref} = Conn.request(conn, "GET", path, [])
+    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
+    assert Conn.open?(conn) == true
+  end
+
   test "server sends a response without a :status header", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/no-status-header-in-response", [])
     assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)

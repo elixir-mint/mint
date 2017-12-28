@@ -195,6 +195,32 @@ defmodule XHTTP2.Server do
     state
   end
 
+  defp handle_request(state, stream_id, "/server-ends-stream-but-not-headers", _) do
+    headers = [
+      {:store_name, ":status", "200"},
+      {:store_name, "foo", "bar"},
+      {:store_name, "baz", "bong"}
+    ]
+
+    {hbf, _encode_table} = HPACK.encode(headers, state.encode_table)
+
+    <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
+    # TODO: update encode table
+
+    frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
+    :ok = :ssl.send(state.socket, Frame.encode(frame1))
+
+    frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+    :ok = :ssl.send(state.socket, Frame.encode(frame2))
+
+    flags = set_flag(:continuation, :end_headers)
+    frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
+    :ok = :ssl.send(state.socket, Frame.encode(frame3))
+
+    state
+  end
+
   defp get_req_header(headers, header) do
     {^header, value} = List.keyfind(headers, header, 0)
     value

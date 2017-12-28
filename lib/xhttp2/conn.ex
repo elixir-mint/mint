@@ -365,6 +365,7 @@ defmodule XHTTP2.Conn do
 
       {:error, _reason} ->
         conn = put_in(conn.state, :closed)
+        # TODO: sometimes this should be FRAME_SIZE_ERROR.
         throw({:xhttp, conn, :protocol_error, responses})
     end
   catch
@@ -430,15 +431,18 @@ defmodule XHTTP2.Conn do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     stream = fetch_stream!(conn, stream_id)
 
+    end_headers? = flag_set?(flags, :headers, :end_headers)
+    end_stream? = flag_set?(flags, :headers, :end_stream)
+
     if stream.state != :open do
       raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
     end
 
     {conn, responses} =
-      if flag_set?(flags, :headers, :end_headers) do
+      if end_headers? do
         decode_headers!(conn, responses, stream, hbf)
       else
-        conn = put_in(conn.headers_being_processed, {stream_id, hbf})
+        conn = put_in(conn.headers_being_processed, {stream_id, hbf, end_stream?})
         {conn, responses}
       end
 
@@ -450,7 +454,7 @@ defmodule XHTTP2.Conn do
         match?([{:closed, ^stream_ref, _} | _], responses) ->
           {conn, responses}
 
-        flag_set?(flags, :headers, :end_stream) ->
+        end_stream? and end_headers? ->
           conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
           conn = update_in(conn.open_stream_count, &(&1 - 1))
           {conn, [{:done, stream.ref} | responses]}
@@ -540,23 +544,27 @@ defmodule XHTTP2.Conn do
 
   defp handle_ping(conn, Frame.ping(flags: flags, opaque_data: opaque_data), responses) do
     if flag_set?(flags, :ping, :ack) do
-      case :queue.out(conn.ping_queue) do
-        {{:value, {ref, ^opaque_data}}, ping_queue} ->
-          conn = put_in(conn.ping_queue, ping_queue)
-          {conn, [{:pong, ref} | responses]}
-
-        {{:value, _}, _} ->
-          # TODO: handle this properly.
-          raise "non-matching PING"
-
-        {:empty, _ping_queue} ->
-          # TODO: handle this properly.
-          raise "no pings had been sent"
-      end
+      handle_ping_ack(conn, opaque_data, responses)
     else
       ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
       transport_send!(conn, Frame.encode(ack))
       {conn, responses}
+    end
+  end
+
+  defp handle_ping_ack(conn, opaque_data, responses) do
+    case :queue.out(conn.ping_queue) do
+      {{:value, {ref, ^opaque_data}}, ping_queue} ->
+        conn = put_in(conn.ping_queue, ping_queue)
+        {conn, [{:pong, ref} | responses]}
+
+      {{:value, _}, _} ->
+        Logger.error("Received PING ack that doesn't match next PING request in the queue")
+        throw({:xhttp, conn, :protocol_error, responses})
+
+      {:empty, _ping_queue} ->
+        Logger.error("Received PING ack but no PING requests had been sent")
+        throw({:xhttp, conn, :protocol_error, responses})
     end
   end
 
@@ -612,11 +620,20 @@ defmodule XHTTP2.Conn do
     stream = fetch_stream!(conn, stream_id)
 
     case conn.headers_being_processed do
-      {^stream_id, hbf_acc} ->
-        if flag_set?(flags, :continuation, :end_headers) do
-          decode_headers!(conn, responses, stream, hbf_acc <> hbf)
+      {^stream_id, hbf_acc, end_stream?} ->
+        end_headers? = flag_set?(flags, :continuation, :end_headers)
+
+        {conn, responses} =
+          if end_headers? do
+            decode_headers!(conn, responses, stream, hbf_acc <> hbf)
+          else
+            conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf, end_stream?})
+            {conn, responses}
+          end
+
+        if end_stream? and end_headers? do
+          {conn, [{:done, stream.ref} | responses]}
         else
-          conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf})
           {conn, responses}
         end
 
