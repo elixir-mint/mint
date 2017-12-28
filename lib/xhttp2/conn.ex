@@ -376,8 +376,33 @@ defmodule XHTTP2.Conn do
 
   ## Frame handling
 
+  defp handle_frame(conn, data() = frame, resps), do: handle_data(conn, frame, resps)
+
+  defp handle_frame(conn, headers() = frame, resps), do: handle_headers(conn, frame, resps)
+
+  # TODO: implement PRIORITY
+  defp handle_frame(_, priority(), _resps), do: raise("PRIORITY handling not implemented")
+
+  defp handle_frame(conn, rst_stream() = frame, resps), do: handle_rst_stream(conn, frame, resps)
+
+  defp handle_frame(conn, settings() = frame, resps), do: handle_settings(conn, frame, resps)
+
+  # TODO: implement PUSH_PROMISE
+  defp handle_frame(_, push_promise(), _resps), do: raise("PUSH_PROMISE handling not implemented")
+
+  defp handle_frame(conn, Frame.ping() = frame, resps), do: handle_ping(conn, frame, resps)
+
+  defp handle_frame(conn, goaway() = frame, resps), do: handle_goaway(conn, frame, resps)
+
+  defp handle_frame(conn, window_update() = frame, resps),
+    do: handle_window_update(conn, frame, resps)
+
+  defp handle_frame(conn, continuation() = frame, resps),
+    do: handle_continuation(conn, frame, resps)
+
   # DATA
-  defp handle_frame(conn, data() = frame, responses) do
+
+  defp handle_data(conn, frame, responses) do
     data(stream_id: stream_id, flags: flags, data: data) = frame
     stream = fetch_stream!(conn, stream_id)
 
@@ -397,7 +422,8 @@ defmodule XHTTP2.Conn do
   end
 
   # HEADERS
-  defp handle_frame(conn, headers() = frame, responses) do
+
+  defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     stream = fetch_stream!(conn, stream_id)
 
@@ -423,129 +449,6 @@ defmodule XHTTP2.Conn do
       end
 
     {:ok, conn, responses}
-  end
-
-  # TODO: implement PRIORITY
-  defp handle_frame(_conn, priority(), _responses) do
-    raise "PRIORITY handling not implemented"
-  end
-
-  defp handle_frame(conn, rst_stream(stream_id: stream_id, error_code: error_code), responses) do
-    stream = fetch_stream!(conn, stream_id)
-    conn = put_in(conn.streams[stream_id].state, :closed)
-    {:ok, conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
-  end
-
-  # SETTINGS
-  defp handle_frame(conn, settings() = frame, responses) do
-    settings(flags: flags, params: params) = frame
-
-    if flag_set?(flags, :settings, :ack) do
-      # TODO: handle this.
-      raise "don't know how to handle SETTINGS acks yet"
-    else
-      conn = apply_server_settings(conn, params)
-      ack = settings(flags: set_flag(:settings, :ack))
-      transport_send!(conn, Frame.encode(ack))
-      {:ok, conn, responses}
-    end
-  end
-
-  # TODO: implement PUSH_PROMISE
-  defp handle_frame(_conn, push_promise(), _responses) do
-    raise "PUSH_PROMISE handling not implemented"
-  end
-
-  # PING
-  defp handle_frame(conn, Frame.ping(flags: flags, opaque_data: opaque_data), responses) do
-    if flag_set?(flags, :ping, :ack) do
-      case :queue.out(conn.ping_queue) do
-        {{:value, {ref, ^opaque_data}}, ping_queue} ->
-          conn = put_in(conn.ping_queue, ping_queue)
-          {:ok, conn, [{:pong, ref} | responses]}
-
-        {{:value, _}, _} ->
-          # TODO: handle this properly.
-          raise "non-matching PING"
-
-        {:empty, _ping_queue} ->
-          # TODO: handle this properly.
-          raise "no pings had been sent"
-      end
-    else
-      ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
-      transport_send!(conn, Frame.encode(ack))
-      {:ok, conn, responses}
-    end
-  end
-
-  # GOAWAY
-  defp handle_frame(conn, goaway() = frame, responses) do
-    goaway(last_stream_id: last_stream_id, error_code: error_code, debug_data: debug_data) = frame
-
-    unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
-
-    {conn, responses} =
-      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
-        conn = update_in(conn.streams, &Map.delete(&1, id))
-        conn = update_in(conn.open_stream_count, &(&1 - 1))
-        conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
-        conn = put_in(conn.state, :went_away)
-        response = {:closed, stream.ref, {:goaway, error_code, debug_data}}
-        {conn, [response | responses]}
-      end)
-
-    {:ok, conn, responses}
-  end
-
-  # WINDOW_UPDATE
-  defp handle_frame(conn, window_update() = frame, responses) do
-    case frame do
-      window_update(stream_id: 0, window_size_increment: wsi) ->
-        case increment_window_size(conn, :connection, wsi) do
-          {:ok, conn} -> {:ok, conn, responses}
-          {:error, conn} -> {:error, conn, :flow_control_error}
-        end
-
-      # TODO: handle this frame not existing.
-      window_update(stream_id: stream_id, window_size_increment: wsi) ->
-        case increment_window_size(conn, {:stream, stream_id}, wsi) do
-          {:ok, conn} ->
-            {:ok, conn, responses}
-
-          {:error, conn} ->
-            frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
-            transport_send!(conn, Frame.encode(frame))
-            %{ref: ref} = fetch_stream!(conn, stream_id)
-            {:ok, conn, [{:closed, ref, :flow_control_error} | responses]}
-        end
-    end
-  end
-
-  # CONTINUATION
-  defp handle_frame(conn, continuation() = frame, responses) do
-    continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
-    stream = fetch_stream!(conn, stream_id)
-
-    case conn.headers_being_processed do
-      {^stream_id, hbf_acc} ->
-        if flag_set?(flags, :continuation, :end_headers) do
-          {conn, responses} = decode_headers!(conn, responses, stream, hbf_acc <> hbf)
-          {:ok, conn, responses}
-        else
-          conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf})
-          {:ok, conn, responses}
-        end
-
-      _other ->
-        error_code = :protocol_error
-        debug_data = "CONTINUATION received outside of headers streaming"
-        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
-        transport_send!(conn, Frame.encode(frame))
-        transport_close!(conn)
-        conn = put_in(conn.state, :closed)
-        throw({:xhttp, conn, :protocol_error})
-    end
   end
 
   defp decode_headers!(conn, responses, stream, hbf) do
@@ -577,6 +480,34 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  # RST_STREAM
+
+  defp handle_rst_stream(
+         conn,
+         rst_stream(stream_id: stream_id, error_code: error_code),
+         responses
+       ) do
+    stream = fetch_stream!(conn, stream_id)
+    conn = put_in(conn.streams[stream_id].state, :closed)
+    {:ok, conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
+  end
+
+  # SETTINGS
+
+  defp handle_settings(conn, frame, responses) do
+    settings(flags: flags, params: params) = frame
+
+    if flag_set?(flags, :settings, :ack) do
+      # TODO: handle this.
+      raise "don't know how to handle SETTINGS acks yet"
+    else
+      conn = apply_server_settings(conn, params)
+      ack = settings(flags: set_flag(:settings, :ack))
+      transport_send!(conn, Frame.encode(ack))
+      {:ok, conn, responses}
+    end
+  end
+
   defp apply_server_settings(conn, server_settings) do
     Enum.reduce(server_settings, conn, fn
       {:header_table_size, header_table_size}, conn ->
@@ -600,6 +531,102 @@ defmodule XHTTP2.Conn do
         # TODO: handle this
         conn
     end)
+  end
+
+  # PING
+
+  defp handle_ping(conn, Frame.ping(flags: flags, opaque_data: opaque_data), responses) do
+    if flag_set?(flags, :ping, :ack) do
+      case :queue.out(conn.ping_queue) do
+        {{:value, {ref, ^opaque_data}}, ping_queue} ->
+          conn = put_in(conn.ping_queue, ping_queue)
+          {:ok, conn, [{:pong, ref} | responses]}
+
+        {{:value, _}, _} ->
+          # TODO: handle this properly.
+          raise "non-matching PING"
+
+        {:empty, _ping_queue} ->
+          # TODO: handle this properly.
+          raise "no pings had been sent"
+      end
+    else
+      ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
+      transport_send!(conn, Frame.encode(ack))
+      {:ok, conn, responses}
+    end
+  end
+
+  # GOAWAY
+
+  defp handle_goaway(conn, frame, responses) do
+    goaway(last_stream_id: last_stream_id, error_code: error_code, debug_data: debug_data) = frame
+
+    unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
+
+    {conn, responses} =
+      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
+        conn = update_in(conn.streams, &Map.delete(&1, id))
+        conn = update_in(conn.open_stream_count, &(&1 - 1))
+        conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
+        conn = put_in(conn.state, :went_away)
+        response = {:closed, stream.ref, {:goaway, error_code, debug_data}}
+        {conn, [response | responses]}
+      end)
+
+    {:ok, conn, responses}
+  end
+
+  # WINDOW_UPDATE
+
+  defp handle_window_update(conn, frame, responses) do
+    case frame do
+      window_update(stream_id: 0, window_size_increment: wsi) ->
+        case increment_window_size(conn, :connection, wsi) do
+          {:ok, conn} -> {:ok, conn, responses}
+          {:error, conn} -> {:error, conn, :flow_control_error}
+        end
+
+      # TODO: handle this frame not existing.
+      window_update(stream_id: stream_id, window_size_increment: wsi) ->
+        case increment_window_size(conn, {:stream, stream_id}, wsi) do
+          {:ok, conn} ->
+            {:ok, conn, responses}
+
+          {:error, conn} ->
+            frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
+            transport_send!(conn, Frame.encode(frame))
+            %{ref: ref} = fetch_stream!(conn, stream_id)
+            {:ok, conn, [{:closed, ref, :flow_control_error} | responses]}
+        end
+    end
+  end
+
+  # CONTINUATION
+
+  defp handle_continuation(conn, frame, responses) do
+    continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
+    stream = fetch_stream!(conn, stream_id)
+
+    case conn.headers_being_processed do
+      {^stream_id, hbf_acc} ->
+        if flag_set?(flags, :continuation, :end_headers) do
+          {conn, responses} = decode_headers!(conn, responses, stream, hbf_acc <> hbf)
+          {:ok, conn, responses}
+        else
+          conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf})
+          {:ok, conn, responses}
+        end
+
+      _other ->
+        error_code = :protocol_error
+        debug_data = "CONTINUATION received outside of headers streaming"
+        frame = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+        transport_send!(conn, Frame.encode(frame))
+        transport_close!(conn)
+        conn = put_in(conn.state, :closed)
+        throw({:xhttp, conn, :protocol_error})
+    end
   end
 
   defp increment_window_size(conn, :connection, wsi) do
