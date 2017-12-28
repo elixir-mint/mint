@@ -63,7 +63,8 @@ defmodule XHTTP1.Conn do
     transport_opts = [packet: :raw, mode: :binary, active: true]
 
     if transport not in [:gen_tcp, :ssl] do
-      raise ArgumentError, "the :transport option must be either :gen_tcp or :ssl"
+      raise ArgumentError,
+            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
     end
 
     with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
