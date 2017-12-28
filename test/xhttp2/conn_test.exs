@@ -73,6 +73,22 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "server sends a CONTINUATION frame outside of headers streaming", %{conn: conn} do
+    path = "/server-sends-continuation-outside-headers-streaming"
+    {:ok, conn, _ref} = Conn.request(conn, "GET", path, [])
+
+    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == false
+  end
+
+  test "server sends a non-CONTINUATION frame while streaming headers", %{conn: conn} do
+    path = "/server-sends-frame-while-streaming-headers"
+    {:ok, conn, _ref} = Conn.request(conn, "GET", path, [])
+
+    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == false
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)

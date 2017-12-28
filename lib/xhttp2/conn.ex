@@ -373,12 +373,8 @@ defmodule XHTTP2.Conn do
 
   defp assert_valid_frame!(conn, frame) do
     if conn.headers_being_processed && not match?(continuation(), frame) do
-      error_code = :protocol_error
       debug_data = "headers are streaming but got a non-CONTINUATION frame"
-      goaway = goaway(last_stream_id: 2, error_code: error_code, debug_data: debug_data)
-      transport_send!(conn, Frame.encode(goaway))
-      transport_close!(conn)
-      throw({:xhttp, put_in(conn.state, :closed), :protocol_error})
+      send_connection_error!(conn, :protocol_error, debug_data)
     end
   end
 

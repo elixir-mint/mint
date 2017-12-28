@@ -70,10 +70,10 @@ defmodule XHTTP2.Server do
         handle_client(state)
 
       {:ssl_closed, ^socket} ->
-        raise "got :ssl_closed"
+        :ok
 
-      {:ssl_error, ^socket, reason} ->
-        raise "got :ssl_error with reason: #{inspect(reason)}"
+      {:ssl_error, ^socket, _reason} ->
+        :ok
 
       other ->
         raise "got unexpected message: #{inspect(other)}"
@@ -149,6 +149,20 @@ defmodule XHTTP2.Server do
       )
 
     :ok = :ssl.send(state.socket, Frame.encode(frame))
+    state
+  end
+
+  defp handle_request(state, stream_id, "/server-sends-continuation-outside-headers-streaming", _) do
+    frame = continuation(stream_id: stream_id, hbf: "hbf")
+    :ok = :ssl.send(state.socket, Frame.encode(frame))
+    state
+  end
+
+  defp handle_request(state, stream_id, "/server-sends-frame-while-streaming-headers", _) do
+    # Headers are streaming but we send a non-CONTINUATION frame.
+    headers = headers(stream_id: stream_id, hbf: "hbf")
+    data = data(stream_id: stream_id, data: "some data")
+    :ok = :ssl.send(state.socket, [Frame.encode(headers), Frame.encode(data)])
     state
   end
 
