@@ -89,6 +89,13 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "server sends a response without a :status header", %{conn: conn} do
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/no-status-header-in-response", [])
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
+    assert Conn.open?(conn) == true
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)

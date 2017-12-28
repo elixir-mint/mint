@@ -441,13 +441,21 @@ defmodule XHTTP2.Conn do
         {conn, responses}
       end
 
+    stream_ref = stream.ref
+
+    # TODO: make this horror better.
     {conn, responses} =
-      if flag_set?(flags, :headers, :end_stream) do
-        conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
-        conn = update_in(conn.open_stream_count, &(&1 - 1))
-        {conn, [{:done, stream.ref} | responses]}
-      else
-        {conn, responses}
+      cond do
+        match?([{:closed, ^stream_ref, _} | _], responses) ->
+          {conn, responses}
+
+        flag_set?(flags, :headers, :end_stream) ->
+          conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
+          conn = update_in(conn.open_stream_count, &(&1 - 1))
+          {conn, [{:done, stream.ref} | responses]}
+
+        true ->
+          {conn, responses}
       end
 
     {conn, responses}

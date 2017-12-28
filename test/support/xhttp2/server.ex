@@ -91,6 +91,10 @@ defmodule XHTTP2.Server do
     state
   end
 
+  defp handle_frame(state, rst_stream()) do
+    state
+  end
+
   defp handle_request(state, _stream_id, "/", _) do
     state
   end
@@ -163,6 +167,25 @@ defmodule XHTTP2.Server do
     headers = headers(stream_id: stream_id, hbf: "hbf")
     data = data(stream_id: stream_id, data: "some data")
     :ok = :ssl.send(state.socket, [Frame.encode(headers), Frame.encode(data)])
+    state
+  end
+
+  defp handle_request(state, stream_id, "/no-status-header-in-response", _) do
+    headers = [
+      {:store_name, "foo", "bar"},
+      {:store_name, "baz", "bong"}
+    ]
+
+    {hbf, _encode_table} = HPACK.encode(headers, state.encode_table)
+
+    frame =
+      headers(
+        stream_id: stream_id,
+        hbf: hbf,
+        flags: set_flags(:headers, [:end_headers, :end_stream])
+      )
+
+    :ok = :ssl.send(state.socket, Frame.encode(frame))
     state
   end
 
