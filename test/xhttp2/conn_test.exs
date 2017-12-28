@@ -25,8 +25,18 @@ defmodule XHTTP2.ConnTest do
   end
 
   test "unknown message", %{conn: conn} do
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
     assert Conn.stream(conn, :unknown_message) == :unknown
+  end
+
+  test "closed-socket messages are treated as errors", %{conn: conn} do
+    assert {:error, %Conn{} = conn, :closed, []} = Conn.stream(conn, {:ssl_closed, conn.socket})
+    assert Conn.open?(conn) == false
+  end
+
+  test "socket error messages are treated as errors", %{conn: conn} do
+    message = {:ssl_error, conn.socket, :etimeout}
+    assert {:error, %Conn{} = conn, :etimeout, []} = Conn.stream(conn, message)
+    assert Conn.open?(conn) == false
   end
 
   test "server sends RST_STREAM", %{conn: conn} do
