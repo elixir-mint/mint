@@ -41,14 +41,16 @@ defmodule XHTTP2.ConnTest do
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [])
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/server-sends-goaway", [])
 
-    assert {:ok, %Conn{}, responses} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
 
     assert [
              {:closed, ^ref2, {:goaway, :protocol_error, "debug data"}},
              {:closed, ^ref3, {:goaway, :protocol_error, "debug data"}}
            ] = responses
 
-    assert {:error, %Conn{}, :closed} = stream_next_message(conn)
+    assert {:error, %Conn{} = conn, :closed, []} = stream_next_message(conn)
+
+    assert Conn.open?(conn) == false
   end
 
   test "server splits headers into multiple CONTINUATION frames", %{conn: conn} do
@@ -66,7 +68,7 @@ defmodule XHTTP2.ConnTest do
   test "server sends a badly encoded header block", %{conn: conn} do
     {:ok, conn, _ref} = Conn.request(conn, "GET", "/server-sends-badly-encoded-hbf", [])
 
-    assert {:error, %Conn{} = conn, :compression_error} = stream_next_message(conn)
+    assert {:error, %Conn{} = conn, :compression_error, []} = stream_next_message(conn)
 
     assert Conn.open?(conn) == false
   end
