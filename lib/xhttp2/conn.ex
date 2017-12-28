@@ -101,6 +101,11 @@ defmodule XHTTP2.Conn do
     transport = Keyword.get(opts, :transport, :ssl)
     scheme = Keyword.get(opts, :scheme, "https")
 
+    if transport not in [:gen_tcp, :ssl] do
+      raise ArgumentError,
+            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
+    end
+
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
@@ -164,7 +169,7 @@ defmodule XHTTP2.Conn do
   end
 
   def stream(%__MODULE__{socket: socket} = conn, {closed_tag, socket})
-      when closed_tag in [:tcp_close, :ssl_close] do
+      when closed_tag in [:tcp_closed, :ssl_closed] do
     {:error, %{conn | state: :closed}, :closed}
   end
 
@@ -204,7 +209,7 @@ defmodule XHTTP2.Conn do
   end
 
   defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(other), do: other
+  defp transport_to_inet(:ssl), do: :ssl
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
