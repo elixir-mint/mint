@@ -62,6 +62,11 @@ defmodule XHTTP1.Conn do
     transport = Keyword.get(opts, :transport, :gen_tcp)
     transport_opts = [packet: :raw, mode: :binary, active: true]
 
+    if transport not in [:gen_tcp, :ssl] do
+      raise ArgumentError,
+            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
+    end
+
     with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
          :ok <- inet_opts(transport, socket) do
       {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
@@ -530,7 +535,7 @@ defmodule XHTTP1.Conn do
   defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
 
   defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(other), do: other
+  defp transport_to_inet(:ssl), do: :ssl
 
   defp new_request(ref, state, method) do
     %{
