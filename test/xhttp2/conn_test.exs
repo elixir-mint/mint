@@ -106,6 +106,12 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == true
   end
 
+  test "server sends a frame with the wrong stream id", %{conn: conn} do
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/server-sends-frame-with-wrong-stream-id", [])
+    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == false
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)

@@ -189,6 +189,12 @@ defmodule XHTTP2.Server do
     state
   end
 
+  defp handle_request(state, _stream_id, "/server-sends-frame-with-wrong-stream-id", _) do
+    payload = Frame.encode_raw(_ping = 0x06, 0x00, 3, "opaque data")
+    :ok = :ssl.send(state.socket, payload)
+    state
+  end
+
   defp get_req_header(headers, header) do
     {^header, value} = List.keyfind(headers, header, 0)
     value

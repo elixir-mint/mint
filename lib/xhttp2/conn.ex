@@ -174,8 +174,8 @@ defmodule XHTTP2.Conn do
   end
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, data}) when tag in [:tcp, :ssl] do
-    with {:ok, conn, responses} <- handle_new_data(conn, conn.buffer <> data, []),
-         do: {:ok, conn, Enum.reverse(responses)}
+    {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+    {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
@@ -282,8 +282,8 @@ defmodule XHTTP2.Conn do
           recv_next_frame(transport, socket, buffer <> data)
         end
 
-      {:error, _reason} = error ->
-        error
+      {:error, _reason} ->
+        {:error, :protocol_error}
     end
   end
 
@@ -361,10 +361,11 @@ defmodule XHTTP2.Conn do
         handle_new_data(conn, rest, responses)
 
       {:error, {:malformed_frame, _}} ->
-        {:ok, %{conn | buffer: data}, responses}
+        {%{conn | buffer: data}, responses}
 
-      {:error, reason} ->
-        {:error, conn, reason}
+      {:error, _reason} ->
+        conn = put_in(conn.state, :closed)
+        throw({:xhttp, conn, :protocol_error, responses})
     end
   catch
     :throw, {:xhttp, conn, error} ->
