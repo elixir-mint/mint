@@ -1,21 +1,31 @@
 defmodule XHTTP2.ConnTest do
   use ExUnit.Case, async: true
 
+  import XHTTP2.Frame
+
   alias XHTTP2.{
-    Conn
+    Conn,
+    Server,
+    HPACK
   }
 
   setup context do
     if context[:connect] == false do
       []
     else
-      {:ok, port} = XHTTP2.Server.start()
+      {:ok, server} = Server.start()
+      port = Server.port(server)
+      Server.start_accepting(server)
       {:ok, conn} = Conn.connect("localhost", port, transport: :ssl)
-      [conn: conn]
+
+      on_exit(fn ->
+        Server.stop(server)
+      end)
+
+      [conn: conn, server: server]
     end
   end
 
-  @tag connect: false
   test "using an unknown transport raises an error" do
     message = "the :transport option must be either :gen_tcp or :ssl, got: :some_transport"
 
@@ -39,17 +49,36 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
-  test "server sends RST_STREAM", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/server-sends-rst-stream", [])
+  test "server sends RST_STREAM", %{conn: conn, server: server} do
+    Server.expect(server, fn state, headers(stream_id: stream_id) ->
+      frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
+      :ssl.send(state.socket, encode(frame))
+    end)
+
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
 
     assert {:ok, %Conn{}, responses} = stream_next_message(conn)
     assert [{:closed, ^ref, {:rst_stream, :protocol_error}}] = responses
   end
 
-  test "when server sends GOAWAY all unprocessed streams are closed", %{conn: conn} do
+  test "when server sends GOAWAY all unprocessed streams are closed", %{
+    conn: conn,
+    server: server
+  } do
+    server
+    |> Server.expect(fn state, headers() -> state end)
+    |> Server.expect(fn state, headers() -> state end)
+    |> Server.expect(fn state, headers() ->
+      code = :protocol_error
+      frame = goaway(stream_id: 0, last_stream_id: 3, error_code: code, debug_data: "debug data")
+      :ok = :ssl.send(state.socket, encode(frame))
+      :ok = :ssl.close(state.socket)
+      %{state | socket: nil}
+    end)
+
     {:ok, conn, _ref1} = Conn.request(conn, "GET", "/", [])
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [])
-    {:ok, conn, ref3} = Conn.request(conn, "GET", "/server-sends-goaway", [])
+    {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [])
 
     assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
 
@@ -63,8 +92,28 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
-  test "server splits headers into multiple CONTINUATION frames", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/split-headers-into-continuation", [])
+  test "server splits headers into multiple CONTINUATION frames", %{conn: conn, server: server} do
+    Server.expect(server, fn state, headers(stream_id: stream_id) ->
+      headers = [
+        {:store_name, ":status", "200"},
+        {:store_name, "foo", "bar"},
+        {:store_name, "baz", "bong"}
+      ]
+
+      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+      state = put_in(state.encode_table, encode_table)
+
+      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+      frame1 = headers(stream_id: stream_id, hbf: hbf1)
+      :ok = :ssl.send(state.socket, encode(frame1))
+      frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+      :ok = :ssl.send(state.socket, encode(frame2))
+      frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
+      :ok = :ssl.send(state.socket, encode(frame3))
+      state
+    end)
+
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
 
     assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
     assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
@@ -75,33 +124,85 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn)
   end
 
-  test "server sends a badly encoded header block", %{conn: conn} do
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/server-sends-badly-encoded-hbf", [])
+  test "server sends a badly encoded header block", %{conn: conn, server: server} do
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      flags = set_flag(:headers, :end_headers)
+      frame = headers(stream_id: stream_id, hbf: "not a good hbf", flags: flags)
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, goaway() -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
 
     assert {:error, %Conn{} = conn, :compression_error, []} = stream_next_message(conn)
 
     assert Conn.open?(conn) == false
   end
 
-  test "server sends a CONTINUATION frame outside of headers streaming", %{conn: conn} do
-    path = "/server-sends-continuation-outside-headers-streaming"
-    {:ok, conn, _ref} = Conn.request(conn, "GET", path, [])
+  test "server sends a CONTINUATION frame outside of headers streaming", %{
+    conn: conn,
+    server: server
+  } do
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      frame = continuation(stream_id: stream_id, hbf: "hbf")
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, goaway() -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
 
     assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
     assert Conn.open?(conn) == false
   end
 
-  test "server sends a non-CONTINUATION frame while streaming headers", %{conn: conn} do
-    path = "/server-sends-frame-while-streaming-headers"
-    {:ok, conn, _ref} = Conn.request(conn, "GET", path, [])
+  test "server sends a non-CONTINUATION frame while streaming headers", %{
+    conn: conn,
+    server: server
+  } do
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      # Headers are streaming but we send a non-CONTINUATION frame.
+      headers = headers(stream_id: stream_id, hbf: "hbf")
+      data = data(stream_id: stream_id, data: "some data")
+      :ssl.send(state.socket, [encode(headers), encode(data)])
+    end)
+    |> Server.expect(fn state, goaway() -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
 
     assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
     assert Conn.open?(conn) == false
   end
 
-  test "server sends a HEADERS with END_STREAM set but not END_HEADERS", %{conn: conn} do
-    path = "/server-ends-stream-but-not-headers"
-    {:ok, conn, ref} = Conn.request(conn, "GET", path, [])
+  test "server sends a HEADERS with END_STREAM set but not END_HEADERS", %{
+    conn: conn,
+    server: server
+  } do
+    Server.expect(server, fn state, headers(stream_id: stream_id) ->
+      headers = [
+        {:store_name, ":status", "200"},
+        {:store_name, "foo", "bar"},
+        {:store_name, "baz", "bong"}
+      ]
+
+      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+      state = put_in(state.encode_table, encode_table)
+
+      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+      frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
+      :ssl.send(state.socket, encode(frame1))
+      frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+      :ssl.send(state.socket, encode(frame2))
+      flags = set_flag(:continuation, :end_headers)
+      frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
+      :ssl.send(state.socket, encode(frame3))
+      state
+    end)
+
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
+
     assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
     assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
     assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
@@ -109,15 +210,37 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == true
   end
 
-  test "server sends a response without a :status header", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/no-status-header-in-response", [])
+  test "server sends a response without a :status header", %{conn: conn, server: server} do
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      headers = [
+        {:store_name, "foo", "bar"},
+        {:store_name, "baz", "bong"}
+      ]
+
+      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+      state = put_in(state.encode_table, encode_table)
+
+      flags = set_flags(:headers, [:end_headers, :end_stream])
+      frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, rst_stream() -> state end)
+
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
+
     assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
     assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
     assert Conn.open?(conn) == true
   end
 
-  test "server sends a frame with the wrong stream id", %{conn: conn} do
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/server-sends-frame-with-wrong-stream-id", [])
+  test "server sends a frame with the wrong stream id", %{conn: conn, server: server} do
+    Server.expect(server, fn state, headers() ->
+      payload = encode_raw(_ping = 0x06, 0x00, 3, "opaque data")
+      :ssl.send(state.socket, payload)
+    end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
     assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
     assert Conn.open?(conn) == false
   end

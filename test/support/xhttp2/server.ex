@@ -1,14 +1,18 @@
 defmodule XHTTP2.Server do
+  use GenServer
+
   import XHTTP2.Frame
 
-  alias XHTTP2.{HPACK, Frame}
-
-  @state %{
-    socket: nil,
-    encode_table: HPACK.new(4096),
-    decode_table: HPACK.new(4096)
-  }
-  @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+  defstruct [
+    :listen_socket,
+    :socket,
+    :port,
+    :handshake_fun,
+    buffer: "",
+    encode_table: XHTTP2.HPACK.new(4096),
+    decode_table: XHTTP2.HPACK.new(4096),
+    frame_handlers: :queue.new()
+  ]
 
   @certificate Path.absname("certificate.pem", __DIR__)
   @key Path.absname("key.pem", __DIR__)
@@ -24,202 +28,111 @@ defmodule XHTTP2.Server do
   ]
 
   def start(handshake_fun \\ &handshake/1) when is_function(handshake_fun, 1) do
+    GenServer.start(__MODULE__, handshake_fun)
+  end
+
+  def port(server) do
+    GenServer.call(server, :get_port)
+  end
+
+  def expect(server, fun) when is_function(fun, 2) do
+    :ok = GenServer.call(server, {:expect, fun})
+    server
+  end
+
+  def start_accepting(server) do
+    GenServer.cast(server, :start_accepting)
+  end
+
+  def stop(server) do
+    GenServer.stop(server)
+  end
+
+  ## Callbacks
+
+  @impl true
+  def init(handshake_fun) do
     {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
-    spawn_link(fn -> loop(listen_socket, handshake_fun) end)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
-    {:ok, port}
+    state = %__MODULE__{listen_socket: listen_socket, port: port, handshake_fun: handshake_fun}
+    {:ok, state}
   end
 
-  defp loop(listen_socket, handshake_fun) do
-    {:ok, socket} = :ssl.transport_accept(listen_socket)
+  @impl true
+  def handle_call(call, from, state)
+
+  def handle_call(:get_port, _from, %{port: port} = state) do
+    {:reply, port, state}
+  end
+
+  def handle_call({:expect, fun}, _from, state) do
+    state = update_in(state.frame_handlers, &:queue.in(fun, &1))
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_cast(:start_accepting, state) do
+    {:ok, socket} = :ssl.transport_accept(state.listen_socket)
     :ok = :ssl.ssl_accept(socket)
-
-    pid =
-      spawn_link(fn ->
-        :ok = handshake_fun.(socket)
-        :ok = :ssl.setopts(socket, active: true)
-        handle_client(%{@state | socket: socket})
-      end)
-
-    :ok = :ssl.controlling_process(socket, pid)
-    loop(listen_socket, handshake_fun)
+    :ok = state.handshake_fun.(socket)
+    :ok = :ssl.setopts(socket, active: true)
+    {:noreply, %{state | socket: socket}}
   end
 
-  defp handshake(socket) do
-    {:ok, @connection_preface <> rest} = :ssl.recv(socket, 0, 100)
-    {:ok, settings(stream_id: 0, flags: 0x00), ""} = Frame.decode_next(rest)
+  @impl true
+  def handle_info(msg, state)
 
-    settings = settings(stream_id: 0, flags: 0x00, params: [])
-    :ok = :ssl.send(socket, Frame.encode(settings))
-
-    {:ok, packet} = :ssl.recv(socket, 0, 100)
-    {:ok, settings(stream_id: 0, flags: 0x01), ""} = Frame.decode_next(packet)
-
-    settings = settings(stream_id: 0, flags: 0x01, params: [])
-    :ok = :ssl.send(socket, Frame.encode(settings))
+  def handle_info({:ssl, socket, packet}, %{socket: socket} = state) do
+    state = handle_data(state, packet)
+    {:noreply, state}
   end
 
-  defp handle_client(%{socket: socket} = state) do
-    receive do
-      {:ssl, ^socket, packet} ->
-        {:ok, frame, ""} = Frame.decode_next(packet)
-        state = handle_frame(state, frame)
-        handle_client(state)
+  def handle_info({:ssl_closed, socket}, %{socket: socket} = state) do
+    {:noreply, state}
+  end
 
-      {:ssl_closed, ^socket} ->
-        :ok
+  def handle_info({:ssl_error, socket, _reason}, %{socket: socket} = state) do
+    {:noreply, state}
+  end
 
-      {:ssl_error, ^socket, _reason} ->
-        :ok
+  defp handle_data(state, packet) do
+    case decode_next(state.buffer <> packet) do
+      {:ok, frame, rest} ->
+        case get_and_update_in(state.frame_handlers, &:queue.out/1) do
+          {{:value, handler}, state} ->
+            state =
+              case handler.(state, frame) do
+                :ok -> state
+                %{} = new_state -> new_state
+              end
 
-      other ->
-        raise "got unexpected message: #{inspect(other)}"
+            handle_data(state, rest)
+
+          {:empty, _state} ->
+            raise "could not handle frame because of missing handler: #{inspect(frame)}"
+        end
+
+      {:error, {:malformed_frame, _}} ->
+        put_in(state.buffer, packet)
+
+      {:error, reason} ->
+        raise "frame decoding error: #{inspect(reason)}"
     end
   end
 
-  defp handle_frame(state, headers(hbf: hbf, stream_id: stream_id)) do
-    {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
-    state = put_in(state.decode_table, decode_table)
-    handle_request(state, stream_id, get_req_header(headers, ":path"), headers)
-  end
+  connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  defp handle_frame(state, goaway()) do
-    :ssl.close(state.socket)
-    state
-  end
+  defp handshake(socket) do
+    {:ok, unquote(connection_preface) <> rest} = :ssl.recv(socket, 0, 100)
+    {:ok, settings(stream_id: 0, flags: 0x00), ""} = decode_next(rest)
 
-  defp handle_frame(state, rst_stream()) do
-    state
-  end
+    settings = settings(stream_id: 0, flags: 0x00, params: [])
+    :ok = :ssl.send(socket, encode(settings))
 
-  defp handle_request(state, _stream_id, "/", _) do
-    state
-  end
+    {:ok, packet} = :ssl.recv(socket, 0, 100)
+    {:ok, settings(stream_id: 0, flags: 0x01), ""} = decode_next(packet)
 
-  defp handle_request(state, stream_id, "/server-sends-rst-stream", _) do
-    frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
-    :ok = :ssl.send(state.socket, Frame.encode(frame))
-    state
-  end
-
-  defp handle_request(state, _stream_id, "/server-sends-goaway", _) do
-    frame =
-      goaway(
-        stream_id: 0,
-        last_stream_id: 3,
-        error_code: :protocol_error,
-        debug_data: "debug data"
-      )
-
-    :ok = :ssl.send(state.socket, Frame.encode(frame))
-    :ok = :ssl.close(state.socket)
-    %{state | socket: nil}
-  end
-
-  defp handle_request(state, stream_id, "/split-headers-into-continuation", _) do
-    headers = [
-      {:store_name, ":status", "200"},
-      {:store_name, "foo", "bar"},
-      {:store_name, "baz", "bong"}
-    ]
-
-    {hbf, _encode_table} = HPACK.encode(headers, state.encode_table)
-
-    <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
-
-    # TODO: update encode table
-
-    frame1 = headers(stream_id: stream_id, hbf: hbf1)
-    :ok = :ssl.send(state.socket, Frame.encode(frame1))
-
-    frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-    :ok = :ssl.send(state.socket, Frame.encode(frame2))
-
-    frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
-    :ok = :ssl.send(state.socket, Frame.encode(frame3))
-
-    state
-  end
-
-  defp handle_request(state, stream_id, "/server-sends-badly-encoded-hbf", _) do
-    frame =
-      headers(
-        stream_id: stream_id,
-        hbf: "not a good hbf",
-        flags: set_flag(:headers, :end_headers)
-      )
-
-    :ok = :ssl.send(state.socket, Frame.encode(frame))
-    state
-  end
-
-  defp handle_request(state, stream_id, "/server-sends-continuation-outside-headers-streaming", _) do
-    frame = continuation(stream_id: stream_id, hbf: "hbf")
-    :ok = :ssl.send(state.socket, Frame.encode(frame))
-    state
-  end
-
-  defp handle_request(state, stream_id, "/server-sends-frame-while-streaming-headers", _) do
-    # Headers are streaming but we send a non-CONTINUATION frame.
-    headers = headers(stream_id: stream_id, hbf: "hbf")
-    data = data(stream_id: stream_id, data: "some data")
-    :ok = :ssl.send(state.socket, [Frame.encode(headers), Frame.encode(data)])
-    state
-  end
-
-  defp handle_request(state, stream_id, "/no-status-header-in-response", _) do
-    headers = [
-      {:store_name, "foo", "bar"},
-      {:store_name, "baz", "bong"}
-    ]
-
-    {hbf, _encode_table} = HPACK.encode(headers, state.encode_table)
-
-    frame =
-      headers(
-        stream_id: stream_id,
-        hbf: hbf,
-        flags: set_flags(:headers, [:end_headers, :end_stream])
-      )
-
-    :ok = :ssl.send(state.socket, Frame.encode(frame))
-    state
-  end
-
-  defp handle_request(state, _stream_id, "/server-sends-frame-with-wrong-stream-id", _) do
-    payload = Frame.encode_raw(_ping = 0x06, 0x00, 3, "opaque data")
-    :ok = :ssl.send(state.socket, payload)
-    state
-  end
-
-  defp handle_request(state, stream_id, "/server-ends-stream-but-not-headers", _) do
-    headers = [
-      {:store_name, ":status", "200"},
-      {:store_name, "foo", "bar"},
-      {:store_name, "baz", "bong"}
-    ]
-
-    {hbf, _encode_table} = HPACK.encode(headers, state.encode_table)
-
-    <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
-
-    # TODO: update encode table
-
-    frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
-    :ok = :ssl.send(state.socket, Frame.encode(frame1))
-
-    frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-    :ok = :ssl.send(state.socket, Frame.encode(frame2))
-
-    flags = set_flag(:continuation, :end_headers)
-    frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
-    :ok = :ssl.send(state.socket, Frame.encode(frame3))
-
-    state
-  end
-
-  defp get_req_header(headers, header) do
-    {^header, value} = List.keyfind(headers, header, 0)
-    value
+    settings = settings(stream_id: 0, flags: 0x01, params: [])
+    :ok = :ssl.send(socket, encode(settings))
   end
 end
