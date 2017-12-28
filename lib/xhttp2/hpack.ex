@@ -62,7 +62,7 @@ defmodule XHTTP2.HPACK do
   # Indexed header field
   # http://httpwg.org/specs/rfc7541.html#rfc.section.6.1
   defp decode_headers(<<0b1::1, rest::bitstring>>, table, acc) do
-    {index, rest} = Types.decode_integer(rest, 7)
+    {index, rest} = decode_integer(rest, 7)
     decode_headers(rest, table, [lookup_by_index!(table, index) | acc])
   end
 
@@ -73,14 +73,14 @@ defmodule XHTTP2.HPACK do
       case rest do
         # The header name is a string.
         <<0::6, rest::binary>> ->
-          {name, rest} = Types.decode_binary(rest)
-          {value, rest} = Types.decode_binary(rest)
+          {name, rest} = decode_binary(rest)
+          {value, rest} = decode_binary(rest)
           {name, value, rest}
 
         # The header name is an index to be looked up in the table.
         _other ->
-          {index, rest} = Types.decode_integer(rest, 6)
-          {value, rest} = Types.decode_binary(rest)
+          {index, rest} = decode_integer(rest, 6)
+          {value, rest} = decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
           {name, value, rest}
       end
@@ -94,13 +94,13 @@ defmodule XHTTP2.HPACK do
     {name, value, rest} =
       case rest do
         <<0::4, rest::binary>> ->
-          {name, rest} = Types.decode_binary(rest)
-          {value, rest} = Types.decode_binary(rest)
+          {name, rest} = decode_binary(rest)
+          {value, rest} = decode_binary(rest)
           {name, value, rest}
 
         _other ->
-          {index, rest} = Types.decode_integer(rest, 4)
-          {value, rest} = Types.decode_binary(rest)
+          {index, rest} = decode_integer(rest, 4)
+          {value, rest} = decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
           {name, value, rest}
       end
@@ -114,13 +114,13 @@ defmodule XHTTP2.HPACK do
     {name, value, rest} =
       case rest do
         <<0::4, rest::binary>> ->
-          {name, rest} = Types.decode_binary(rest)
-          {value, rest} = Types.decode_binary(rest)
+          {name, rest} = decode_binary(rest)
+          {value, rest} = decode_binary(rest)
           {name, value, rest}
 
         _other ->
-          {index, rest} = Types.decode_integer(rest, 4)
-          {value, rest} = Types.decode_binary(rest)
+          {index, rest} = decode_integer(rest, 4)
+          {value, rest} = decode_binary(rest)
           {name, _value} = lookup_by_index!(table, index)
           {name, value, rest}
       end
@@ -131,7 +131,7 @@ defmodule XHTTP2.HPACK do
 
   # Dynamic table size update
   defp decode_headers(<<0b001::3, rest::bitstring>>, table, acc) do
-    {new_size, rest} = Types.decode_integer(rest, 5)
+    {new_size, rest} = decode_integer(rest, 5)
     decode_headers(rest, Table.resize(table, new_size), acc)
   end
 
@@ -143,6 +143,20 @@ defmodule XHTTP2.HPACK do
     case Table.lookup_by_index(table, index) do
       {:ok, header} -> header
       :error -> throw({:xhttp, {:index_not_found, index}})
+    end
+  end
+
+  defp decode_integer(bitstring, prefix) do
+    case Types.decode_integer(bitstring, prefix) do
+      {:ok, int, rest} -> {int, rest}
+      :error -> throw({:xhttp, :bad_integer_encoding})
+    end
+  end
+
+  defp decode_binary(binary) do
+    case Types.decode_binary(binary) do
+      {:ok, binary, rest} -> {binary, rest}
+      :error -> throw({:xhttp, :bad_binary_encoding})
     end
   end
 

@@ -11,9 +11,13 @@ defmodule HPACK.TypesTest do
   end
 
   test "decode_integer/2 with examples from the spec" do
-    assert decode_integer(<<0b01010::5, "foo">>, _prefix = 5) == {10, "foo"}
-    assert decode_integer(<<0b11111_10011010_00001010::21, "foo">>, 5) == {1337, "foo"}
-    assert decode_integer(<<0b00101010::8, "foo">>, 8) == {42, "foo"}
+    assert decode_integer(<<0b01010::5, "foo">>, _prefix = 5) == {:ok, 10, "foo"}
+    assert decode_integer(<<0b11111_10011010_00001010::21, "foo">>, 5) == {:ok, 1337, "foo"}
+    assert decode_integer(<<0b00101010::8, "foo">>, 8) == {:ok, 42, "foo"}
+  end
+
+  test "decode_integer/2 with bad data" do
+    assert decode_integer("bad integer", 5) == :error
   end
 
   property "encoding and then decoding integers is circular" do
@@ -21,7 +25,7 @@ defmodule HPACK.TypesTest do
               prefix <- integer(1..8),
               cruft <- binary() do
       encoded = encode_integer(value, prefix)
-      assert decode_integer(<<encoded::bitstring, cruft::binary>>, prefix) == {value, cruft}
+      assert decode_integer(<<encoded::bitstring, cruft::binary>>, prefix) == {:ok, value, cruft}
     end
   end
 
@@ -30,7 +34,7 @@ defmodule HPACK.TypesTest do
               cruft <- binary(),
               huffman? <- boolean() do
       encoded = encode_binary(string, huffman?)
-      assert decode_binary(IO.iodata_to_binary([encoded, cruft])) == {string, cruft}
+      assert decode_binary(IO.iodata_to_binary([encoded, cruft])) == {:ok, string, cruft}
     end
   end
 end
