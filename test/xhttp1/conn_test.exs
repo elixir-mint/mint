@@ -1,10 +1,11 @@
 defmodule XHTTP1.ConnTest do
   use ExUnit.Case, async: true
   alias XHTTP1.Conn
-  alias XHTTP1.TestHelpers.TCPMock
+  alias XHTTP1.TestHelpers.Server
 
   setup do
-    assert {:ok, conn} = Conn.connect("localhost", 80, transport: TCPMock)
+    {:ok, port} = Server.start()
+    assert {:ok, conn} = Conn.connect("localhost", port, transport: :gen_tcp)
     [conn: conn]
   end
 

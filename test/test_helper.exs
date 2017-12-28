@@ -39,29 +39,15 @@ defmodule XHTTP1.TestHelpers do
   end
 end
 
-defmodule XHTTP1.TestHelpers.TCPMock do
-  def connect(hostname, port, opts \\ []) do
-    Kernel.send(self(), {:tcp_mock, :connect, [hostname, port, opts]})
-    {:ok, make_ref()}
+defmodule XHTTP1.TestHelpers.Server do
+  def start() do
+    {:ok, listen_socket} = :gen_tcp.listen(0, mode: :binary, packet: :raw)
+    spawn_link(fn -> loop(listen_socket) end)
+    :inet.port(listen_socket)
   end
 
-  def close(socket) do
-    Kernel.send(self(), {:tcp_mock, :close, [socket]})
-    :ok
-  end
-
-  def getopts(socket, list) do
-    Kernel.send(self(), {:tcp_mock, :getopts, [socket, list]})
-    {:ok, Enum.map(list, &{&1, 0})}
-  end
-
-  def setopts(socket, opts) do
-    Kernel.send(self(), {:tcp_mock, :setopts, [socket, opts]})
-    :ok
-  end
-
-  def send(socket, data, opts \\ []) do
-    Kernel.send(self(), {:tcp_mock, :send, [socket, data, opts]})
-    :ok
+  defp loop(listen_socket) do
+    {:ok, _socket} = :gen_tcp.accept(listen_socket)
+    loop(listen_socket)
   end
 end
