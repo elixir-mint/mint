@@ -108,6 +108,32 @@ defmodule XHTTP2.IntegrationTest do
     end
   end
 
+  describe "twitter.com" do
+    @moduletag connect: {"twitter.com", 443}
+
+    test "ping", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
+      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+
+    @tag :focus
+    test "GET /", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, "200"}, {:headers, ^ref, headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert is_list(headers)
+
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+  end
+
   defp receive_stream(conn) do
     receive_stream(conn, [])
   end
