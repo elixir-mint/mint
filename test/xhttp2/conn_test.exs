@@ -5,8 +5,7 @@ defmodule XHTTP2.ConnTest do
 
   alias XHTTP2.{
     Conn,
-    Server,
-    HPACK
+    Server
   }
 
   setup context do
@@ -51,8 +50,7 @@ defmodule XHTTP2.ConnTest do
 
   test "server closes a stream with RST_STREAM", context do
     Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
-      frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
-      :ssl.send(state.socket, encode(frame))
+      Server.send_frame(state, rst_stream(stream_id: stream_id, error_code: :protocol_error))
     end)
 
     {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
@@ -69,7 +67,7 @@ defmodule XHTTP2.ConnTest do
     |> Server.expect(fn state, headers(stream_id: 7) ->
       code = :protocol_error
       frame = goaway(stream_id: 0, last_stream_id: 3, error_code: code, debug_data: "debug data")
-      :ok = :ssl.send(state.socket, encode(frame))
+      Server.send_frame(state, frame)
       :ok = :ssl.close(state.socket)
       %{state | socket: nil}
     end)
@@ -98,16 +96,19 @@ defmodule XHTTP2.ConnTest do
           {:store_name, "baz", "bong"}
         ]
 
-        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-        state = put_in(state.encode_table, encode_table)
+        {state, hbf} = Server.encode_headers(state, headers)
 
         <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
         frame1 = headers(stream_id: stream_id, hbf: hbf1)
-        :ok = :ssl.send(state.socket, encode(frame1))
+        state = Server.send_frame(state, frame1)
+
         frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-        :ok = :ssl.send(state.socket, encode(frame2))
+        state = Server.send_frame(state, frame2)
+
         frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
-        :ok = :ssl.send(state.socket, encode(frame3))
+        state = Server.send_frame(state, frame3)
+
         state
       end)
 
@@ -124,9 +125,11 @@ defmodule XHTTP2.ConnTest do
       |> Server.expect(fn state, headers(stream_id: stream_id) ->
         flags = set_flag(:headers, :end_headers)
         frame = headers(stream_id: stream_id, hbf: "not a good hbf", flags: flags)
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, goaway() -> state end)
+      |> Server.expect(fn state, goaway() ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -137,10 +140,11 @@ defmodule XHTTP2.ConnTest do
     test "server sends a CONTINUATION frame outside of headers streaming", context do
       context.server
       |> Server.expect(fn state, headers(stream_id: stream_id) ->
-        frame = continuation(stream_id: stream_id, hbf: "hbf")
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, continuation(stream_id: stream_id, hbf: "hbf"))
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -154,9 +158,11 @@ defmodule XHTTP2.ConnTest do
         # Headers are streaming but we send a non-CONTINUATION frame.
         headers = headers(stream_id: stream_id, hbf: "hbf")
         data = data(stream_id: stream_id, data: "some data")
-        :ssl.send(state.socket, [encode(headers), encode(data)])
+        Server.send(state, [encode(headers), encode(data)])
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -172,17 +178,20 @@ defmodule XHTTP2.ConnTest do
           {:store_name, "baz", "bong"}
         ]
 
-        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-        state = put_in(state.encode_table, encode_table)
+        {state, hbf} = Server.encode_headers(state, headers)
 
         <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
         frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
-        :ssl.send(state.socket, encode(frame1))
+        state = Server.send_frame(state, frame1)
+
         frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-        :ssl.send(state.socket, encode(frame2))
+        state = Server.send_frame(state, frame2)
+
         flags = set_flag(:continuation, :end_headers)
         frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
-        :ssl.send(state.socket, encode(frame3))
+        state = Server.send_frame(state, frame3)
+
         state
       end)
 
@@ -201,14 +210,14 @@ defmodule XHTTP2.ConnTest do
           {:store_name, "baz", "bong"}
         ]
 
-        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-        state = put_in(state.encode_table, encode_table)
+        {state, hbf} = Server.encode_headers(state, headers)
 
         flags = set_flags(:headers, [:end_headers, :end_stream])
-        frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
       end)
-      |> Server.expect(fn state, rst_stream() -> state end)
+      |> Server.expect(fn state, rst_stream() ->
+        state
+      end)
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -231,19 +240,13 @@ defmodule XHTTP2.ConnTest do
       |> Server.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
         assert flag_set?(flags, :continuation, :end_headers)
         hbf = Map.fetch!(state, :current_hbf) <> hbf
-        {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
-        state = put_in(state.decode_table, decode_table)
+        {state, headers} = Server.decode_headers(state, hbf)
         assert [{":method", "METH"} | _] = headers
 
-        {hbf, encode_table} = HPACK.encode([{:store_name, ":status", "200"}], state.encode_table)
-        state = put_in(state.encode_table, encode_table)
+        {state, hbf} = Server.encode_headers(state, [{:store_name, ":status", "200"}])
 
         flags = set_flags(:headers, [:end_stream, :end_headers])
-        frame = headers(stream_id: 3, hbf: hbf, flags: flags)
-
-        :ssl.send(state.socket, encode(frame))
-
-        state
+        Server.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
       end)
 
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
@@ -262,10 +265,11 @@ defmodule XHTTP2.ConnTest do
     test "server sends a frame with the wrong stream id", context do
       context.server
       |> Server.expect(fn state, headers() ->
-        payload = encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>)
-        :ssl.send(state.socket, payload)
+        Server.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -277,10 +281,11 @@ defmodule XHTTP2.ConnTest do
       context.server
       |> Server.expect(fn state, headers() ->
         # Payload should be 8 bytes long.
-        payload = encode_raw(_ping = 0x06, 0x00, 3, <<>>)
-        :ssl.send(state.socket, payload)
+        Server.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<>>))
       end)
-      |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :frame_size_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
       assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_messages_until_error(conn)
@@ -295,9 +300,11 @@ defmodule XHTTP2.ConnTest do
       context.server
       |> Server.expect(fn state, headers(stream_id: stream_id) ->
         frame = window_update(stream_id: stream_id, window_size_increment: max_window_size)
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, rst_stream() -> state end)
+      |> Server.expect(fn state, rst_stream() ->
+        state
+      end)
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -312,9 +319,11 @@ defmodule XHTTP2.ConnTest do
       context.server
       |> Server.expect(fn state, headers() ->
         frame = window_update(stream_id: 0, window_size_increment: max_window_size)
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :flow_control_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
       assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_messages_until_error(conn)
@@ -324,10 +333,12 @@ defmodule XHTTP2.ConnTest do
     test "server violates client's max frame size", context do
       context.server
       |> Server.expect(fn state, headers(stream_id: stream_id) ->
-        frame = data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
-        :ssl.send(state.socket, encode(frame))
+        data = :binary.copy(<<0>>, 100_000)
+        Server.send_frame(state, data(stream_id: stream_id, data: data))
       end)
-      |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+      |> Server.expect(fn state, goaway(error_code: :frame_size_error) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
@@ -339,24 +350,18 @@ defmodule XHTTP2.ConnTest do
       max_frame_size = Conn.get_setting(context.conn, :max_frame_size)
 
       context.server
-      |> Server.expect(fn state, headers(stream_id: 3) -> state end)
+      |> Server.expect(fn state, headers(stream_id: 3) ->
+        state
+      end)
       |> Server.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
         assert data == :binary.copy(<<0>>, max_frame_size)
         state
       end)
       |> Server.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
         assert data == <<0>>
-
-        headers = [{:store_name, ":status", "200"}]
-        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-        state = put_in(state.encode_table, encode_table)
-
-        frame =
-          headers(stream_id: 3, hbf: hbf, flags: set_flags(:headers, [:end_stream, :end_headers]))
-
-        :ok = :ssl.send(state.socket, encode(frame))
-
-        state
+        {state, hbf} = Server.encode_headers(state, [{:store_name, ":status", "200"}])
+        flags = set_flags(:headers, [:end_stream, :end_headers])
+        Server.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
       end)
 
       body = :binary.copy(<<0>>, max_frame_size + 1)
@@ -374,7 +379,7 @@ defmodule XHTTP2.ConnTest do
 
       Server.expect(context.server, fn state, settings(params: [max_concurrent_streams: 123]) ->
         frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, frame)
       end)
 
       {:ok, conn} = Conn.put_settings(conn, max_concurrent_streams: 123)
@@ -390,10 +395,11 @@ defmodule XHTTP2.ConnTest do
     test "server can update the initial window size and affect open streams", context do
       context.server
       |> Server.expect(fn state, headers(stream_id: 3) ->
-        frame = settings(params: [initial_window_size: 100])
-        :ssl.send(state.socket, encode(frame))
+        Server.send_frame(state, settings(params: [initial_window_size: 100]))
       end)
-      |> Server.expect(fn state, settings(flags: 0x01, params: []) -> state end)
+      |> Server.expect(fn state, settings(flags: 0x01, params: []) ->
+        state
+      end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 

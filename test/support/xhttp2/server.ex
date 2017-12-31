@@ -3,6 +3,8 @@ defmodule XHTTP2.Server do
 
   import XHTTP2.Frame
 
+  alias XHTTP2.HPACK
+
   defstruct [
     :listen_socket,
     :socket,
@@ -27,6 +29,8 @@ defmodule XHTTP2.Server do
     keyfile: @key
   ]
 
+  ## API
+
   def start(handshake_fun \\ &handshake/1) when is_function(handshake_fun, 1) do
     GenServer.start(__MODULE__, handshake_fun)
   end
@@ -46,6 +50,29 @@ defmodule XHTTP2.Server do
 
   def stop(server) do
     GenServer.stop(server)
+  end
+
+  ## Helpers
+
+  def decode_headers(%__MODULE__{} = state, hbf) do
+    {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
+    state = put_in(state.decode_table, decode_table)
+    {state, headers}
+  end
+
+  def encode_headers(%__MODULE__{} = state, headers) do
+    {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+    state = put_in(state.encode_table, encode_table)
+    {state, hbf}
+  end
+
+  def send(%__MODULE__{} = state, iodata) do
+    :ok = :ssl.send(state.socket, iodata)
+    state
+  end
+
+  def send_frame(%__MODULE__{} = state, frame) do
+    __MODULE__.send(state, encode(frame))
   end
 
   ## Callbacks
@@ -100,12 +127,7 @@ defmodule XHTTP2.Server do
       {:ok, frame, rest} ->
         case get_and_update_in(state.frame_handlers, &:queue.out/1) do
           {{:value, handler}, state} ->
-            state =
-              case handler.(state, frame) do
-                :ok -> state
-                %{} = new_state -> new_state
-              end
-
+            %__MODULE__{} = state = handler.(state, frame)
             handle_data(state, rest)
 
           {:empty, _state} ->
