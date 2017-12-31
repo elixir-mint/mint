@@ -248,6 +248,8 @@ defmodule XHTTP2.Conn do
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   defp initiate_connection(transport, socket, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
+    validate_settings!(client_settings_params)
+
     client_settings = settings(stream_id: 0, params: client_settings_params)
     server_settings_ack = settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack))
 
@@ -281,6 +283,7 @@ defmodule XHTTP2.Conn do
     case recv_next_frame(conn.transport, conn.socket, conn.buffer) do
       {:ok, settings(flags: flags), buffer} ->
         if flag_set?(flags, :settings, :ack) do
+          conn = apply_client_settings(conn, client_settings)
           {:ok, %{conn | buffer: buffer}}
         else
           {:error, :protocol_error}
@@ -338,6 +341,7 @@ defmodule XHTTP2.Conn do
     {conn, stream.id, stream.ref}
   end
 
+  # TODO: split headers if hbf goes over max frame size (like we do for DATA).
   defp send_headers(conn, stream_id, headers, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state!(stream, :idle)
@@ -553,13 +557,7 @@ defmodule XHTTP2.Conn do
       raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
     end
 
-    data_size = byte_size(data) + byte_size(padding || "")
-
-    frame = window_update(stream_id: 0, window_size_increment: data_size)
-    transport_send!(conn, Frame.encode(frame))
-
-    frame = window_update(stream_id: stream_id, window_size_increment: data_size)
-    transport_send!(conn, Frame.encode(frame))
+    refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
 
     responses = [{:data, stream.ref, data} | responses]
 
@@ -570,6 +568,12 @@ defmodule XHTTP2.Conn do
     else
       {conn, responses}
     end
+  end
+
+  defp refill_client_windows(conn, stream_id, data_size) do
+    connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
+    stream_frame = window_update(stream_id: stream_id, window_size_increment: data_size)
+    transport_send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
   end
 
   # HEADERS
@@ -693,7 +697,6 @@ defmodule XHTTP2.Conn do
           send_connection_error!(conn, :protocol_error, debug_data)
         end
 
-        # TODO: put this into effect
         put_in(conn.max_frame_size, max_frame_size)
 
       {:max_header_list_size, max_header_list_size}, conn ->
