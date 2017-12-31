@@ -78,6 +78,28 @@ defmodule XHTTP2.IntegrationTest do
       assert Conn.open?(conn)
     end
 
+    test "GET /file/gopher.png", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/file/gopher.png", [])
+      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+
+      assert [
+               {:status, ^ref, "200"},
+               {:headers, ^ref, headers},
+               {:data, ^ref, data1},
+               {:data, ^ref, data2},
+               {:data, ^ref, data3},
+               {:done, ^ref}
+             ] = responses
+
+      assert is_list(headers)
+      assert is_binary(data1)
+      assert is_binary(data2)
+      assert is_binary(data3)
+
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+
     test "ping", %{conn: conn} do
       assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
       assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
