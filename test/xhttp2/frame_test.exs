@@ -28,6 +28,10 @@ defmodule XHTTP2.FrameTest do
     assert_raise FunctionClauseError, fn -> flag_set?(0x00, :data, :ack) end
   end
 
+  test "decode_next/1 with an incomplete frame" do
+    assert Frame.decode_next(<<>>) == :more
+  end
+
   describe "DATA" do
     test "without padding" do
       check all stream_id <- non_zero_stream_id(),
@@ -49,12 +53,7 @@ defmodule XHTTP2.FrameTest do
       payload = <<5::8, "data">>
 
       assert Frame.decode_next(encode_raw(0x00, 0x08, 3, payload)) ==
-               {:error, {:pad_length_bigger_than_payload_length, :data}}
-    end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x00, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :data}}
+               {:error, {:protocol_error, {:pad_length_bigger_than_payload_length, :data}}}
     end
   end
 
@@ -103,11 +102,6 @@ defmodule XHTTP2.FrameTest do
                           )
       end
     end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x01, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :headers}}
-    end
   end
 
   describe "PRIORITY" do
@@ -127,12 +121,7 @@ defmodule XHTTP2.FrameTest do
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x02, 0x00, 3, "")) ==
-               {:error, {:bad_size, :priority, 0}}
-    end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x02, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, :priority}}
+               {:error, {:frame_size_error, :priority}}
     end
   end
 
@@ -148,14 +137,9 @@ defmodule XHTTP2.FrameTest do
       end
     end
 
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x03, 0x00, 0, <<_5_bytes = 0::40>>)) ==
-               {:error, {:frame_not_allowed_on_stream_0, :rst_stream}}
-    end
-
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x03, 0x00, 3, <<3::8>>)) ==
-               {:error, {:bad_size, :rst_stream, 1}}
+               {:error, {:frame_size_error, :rst_stream}}
     end
   end
 
@@ -184,14 +168,9 @@ defmodule XHTTP2.FrameTest do
       end
     end
 
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x04, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :settings}}
-    end
-
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x04, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
-               {:error, {:bad_size, :settings, 1}}
+               {:error, {:frame_size_error, :settings}}
     end
   end
 
@@ -224,11 +203,6 @@ defmodule XHTTP2.FrameTest do
                           )
       end
     end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x05, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :push_promise}}
-    end
   end
 
   describe "PING" do
@@ -238,14 +212,9 @@ defmodule XHTTP2.FrameTest do
       end
     end
 
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x06, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :ping}}
-    end
-
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x06, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
-               {:error, {:bad_size, :ping, 1}}
+               {:error, {:frame_size_error, :ping}}
     end
   end
 
@@ -263,11 +232,6 @@ defmodule XHTTP2.FrameTest do
                           )
       end
     end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x07, 0x00, 3, "")) ==
-               {:error, {:frame_only_allowed_on_stream_0, :goaway}}
-    end
   end
 
   describe "WINDOW_UPDATE" do
@@ -284,12 +248,12 @@ defmodule XHTTP2.FrameTest do
 
     test "invalid window size increment" do
       assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<0::1, 0::31>>)) ==
-               {:error, {:bad_window_size_increment, :window_update, 0}}
+               {:error, {:protocol_error, :bad_window_size_increment}}
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<>>)) ==
-               {:error, {:bad_size, :window_update, 0}}
+               {:error, {:frame_size_error, :window_update}}
     end
   end
 
@@ -299,11 +263,6 @@ defmodule XHTTP2.FrameTest do
                 hbf <- binary() do
         assert_round_trip continuation(stream_id: stream_id, flags: 0x00, hbf: hbf)
       end
-    end
-
-    test "with bad stream id" do
-      assert Frame.decode_next(encode_raw(0x09, 0x00, 0, "")) ==
-               {:error, {:frame_not_allowed_on_stream_0, :continuation}}
     end
   end
 

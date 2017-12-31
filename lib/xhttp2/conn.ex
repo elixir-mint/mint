@@ -308,7 +308,10 @@ defmodule XHTTP2.Conn do
           recv_next_frame(transport, socket, buffer <> data)
         end
 
-      {:error, _reason} ->
+      {:error, {:frame_size_error, _frame}} ->
+        {:error, :frame_size_error}
+
+      {:error, {:protocol_error, _info}} ->
         {:error, :protocol_error}
     end
   end
@@ -461,10 +464,13 @@ defmodule XHTTP2.Conn do
       :more ->
         {%{conn | buffer: data}, responses}
 
-      {:error, _reason} ->
-        conn = put_in(conn.state, :closed)
-        # TODO: sometimes this should be FRAME_SIZE_ERROR.
-        throw({:xhttp, conn, :protocol_error, responses})
+      {:error, {:frame_size_error, frame}} ->
+        debug_data = "error with size of frame: #{inspect(frame)}"
+        send_connection_error!(conn, :frame_size_error, debug_data)
+
+      {:error, {:protocol_error, info}} ->
+        debug_data = "error when decoding frame: #{inspect(info)}"
+        send_connection_error!(conn, :protocol_error, debug_data)
     end
   catch
     :throw, {:xhttp, conn, error} ->
@@ -508,6 +514,8 @@ defmodule XHTTP2.Conn do
     # TODO: refill window_size here.
 
     data(stream_id: stream_id, flags: flags, data: data) = frame
+
+    assert_frame_on_stream!(conn, :data, stream_id)
     stream = fetch_stream!(conn, stream_id)
 
     if stream.state not in [:open, :half_closed_local] do
@@ -529,6 +537,7 @@ defmodule XHTTP2.Conn do
 
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
+    assert_frame_on_stream!(conn, :headers, stream_id)
     stream = fetch_stream!(conn, stream_id)
 
     end_headers? = flag_set?(flags, :headers, :end_headers)
@@ -594,6 +603,8 @@ defmodule XHTTP2.Conn do
          rst_stream(stream_id: stream_id, error_code: error_code),
          responses
        ) do
+    assert_frame_on_stream!(conn, :rst_stream, stream_id)
+
     stream = fetch_stream!(conn, stream_id)
     conn = put_in(conn.streams[stream_id].state, :closed)
     {conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
@@ -602,7 +613,8 @@ defmodule XHTTP2.Conn do
   # SETTINGS
 
   defp handle_settings(conn, frame, responses) do
-    settings(flags: flags, params: params) = frame
+    settings(stream_id: stream_id, flags: flags, params: params) = frame
+    assert_frame_on_connection!(conn, :settings, stream_id)
 
     if flag_set?(flags, :settings, :ack) do
       {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
@@ -661,7 +673,10 @@ defmodule XHTTP2.Conn do
 
   # PING
 
-  defp handle_ping(conn, Frame.ping(flags: flags, opaque_data: opaque_data), responses) do
+  defp handle_ping(conn, Frame.ping() = frame, responses) do
+    Frame.ping(stream_id: stream_id, flags: flags, opaque_data: opaque_data) = frame
+    assert_frame_on_connection!(conn, :ping, stream_id)
+
     if flag_set?(flags, :ping, :ack) do
       handle_ping_ack(conn, opaque_data, responses)
     else
@@ -690,7 +705,14 @@ defmodule XHTTP2.Conn do
   # GOAWAY
 
   defp handle_goaway(conn, frame, responses) do
-    goaway(last_stream_id: last_stream_id, error_code: error_code, debug_data: debug_data) = frame
+    goaway(
+      stream_id: stream_id,
+      last_stream_id: last_stream_id,
+      error_code: error_code,
+      debug_data: debug_data
+    ) = frame
+
+    assert_frame_on_connection!(conn, :goaway, stream_id)
 
     unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
 
@@ -747,6 +769,8 @@ defmodule XHTTP2.Conn do
 
   defp handle_continuation(conn, frame, responses) do
     continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
+    assert_frame_on_stream!(conn, :continuation, stream_id)
+
     stream = fetch_stream!(conn, stream_id)
 
     case conn.headers_being_processed do
@@ -795,6 +819,20 @@ defmodule XHTTP2.Conn do
   defp assert_stream_in_state!(%{state: state}, expected_state) do
     if state != expected_state do
       throw({:xhttp, {:"stream_not_in_#{expected_state}_state", state}})
+    end
+  end
+
+  defp assert_frame_on_stream!(conn, frame, stream_id) do
+    if stream_id == 0 do
+      debug_data = "frame #{frame} not allowed at the connection level (stream_id = 0)"
+      send_connection_error!(conn, :protocol_error, debug_data)
+    end
+  end
+
+  defp assert_frame_on_connection!(conn, frame, stream_id) do
+    if stream_id != 0 do
+      debug_data = "frame #{frame} only allowed at the connection level"
+      send_connection_error!(conn, :protocol_error, debug_data)
     end
   end
 

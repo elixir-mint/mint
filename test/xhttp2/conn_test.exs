@@ -235,13 +235,29 @@ defmodule XHTTP2.ConnTest do
   end
 
   test "server sends a frame with the wrong stream id", %{conn: conn, server: server} do
-    Server.expect(server, fn state, headers() ->
-      payload = encode_raw(_ping = 0x06, 0x00, 3, "opaque data")
+    server
+    |> Server.expect(fn state, headers() ->
+      payload = encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>)
       :ssl.send(state.socket, payload)
     end)
+    |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
 
     {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
     assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == false
+  end
+
+  test "server sends a frame with a bad size", %{conn: conn, server: server} do
+    server
+    |> Server.expect(fn state, headers() ->
+      # Payload should be 8 bytes long.
+      payload = encode_raw(_ping = 0x06, 0x00, 3, <<>>)
+      :ssl.send(state.socket, payload)
+    end)
+    |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+    assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_next_message(conn)
     assert Conn.open?(conn) == false
   end
 

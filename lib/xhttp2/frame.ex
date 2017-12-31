@@ -102,7 +102,8 @@ defmodule XHTTP2.Frame do
 
   Returns `{:ok, frame, rest}` if successful, `{:error, reason}` if not.
   """
-  @spec decode_next(binary()) :: {:ok, tuple(), binary()} | :more | {:error, term()}
+  @spec decode_next(binary()) :: {:ok, tuple(), binary()} | :more | {:error, reason}
+        when reason: {:frame_size_error, atom()} | {:protocol_error, term()}
   def decode_next(bin) when is_binary(bin) do
     case decode_next_raw(bin) do
       {:ok, {type, flags, stream_id, payload}, rest} ->
@@ -131,33 +132,6 @@ defmodule XHTTP2.Frame do
     :more
   end
 
-  not_allowed_on_stream_0 = [
-    :data,
-    :headers,
-    :priority,
-    :rst_stream,
-    :push_promise,
-    :continuation
-  ]
-
-  for {frame, type} <- Map.take(@types, not_allowed_on_stream_0) do
-    defp decode_contents(unquote(type), _flags, _stream_id = 0, _payload) do
-      throw({:xhttp, {:frame_not_allowed_on_stream_0, unquote(frame)}})
-    end
-  end
-
-  only_allowed_on_stream_0 = [
-    :settings,
-    :ping,
-    :goaway
-  ]
-
-  for {frame, type} <- Map.take(@types, only_allowed_on_stream_0) do
-    defp decode_contents(unquote(type), _flags, stream_id, _payload) when stream_id != 0 do
-      throw({:xhttp, {:frame_only_allowed_on_stream_0, unquote(frame)}})
-    end
-  end
-
   for {frame, type} <- @types do
     function = :"decode_#{frame}"
 
@@ -168,6 +142,7 @@ defmodule XHTTP2.Frame do
 
   # Parsing of specific frames
 
+  # http://httpwg.org/specs/rfc7540.html#rfc.section.6.1
   defp decode_data(flags, stream_id, payload) do
     {data, padding} = decode_padding(:data, flags, payload)
     data(stream_id: stream_id, flags: flags, data: data, padding: padding)
@@ -198,7 +173,7 @@ defmodule XHTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.3
   defp decode_priority(_flags, _stream_id, payload) when byte_size(payload) != 5 do
-    throw({:xhttp, {:bad_size, :priority, byte_size(payload)}})
+    throw({:xhttp, {:frame_size_error, :priority}})
   end
 
   defp decode_priority(flags, stream_id, payload) do
@@ -215,7 +190,7 @@ defmodule XHTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.4
   defp decode_rst_stream(_flags, _stream_id, payload) when byte_size(payload) != 4 do
-    throw({:xhttp, {:bad_size, :rst_stream, byte_size(payload)}})
+    throw({:xhttp, {:frame_size_error, :rst_stream}})
   end
 
   defp decode_rst_stream(flags, stream_id, <<error_code::32>>) do
@@ -228,11 +203,11 @@ defmodule XHTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   defp decode_settings(_flags, _stream_id, payload) when rem(byte_size(payload), 6) != 0 do
-    throw({:xhttp, {:bad_size, :settings, byte_size(payload)}})
+    throw({:xhttp, {:frame_size_error, :settings}})
   end
 
-  defp decode_settings(flags, _stream_id = 0, payload) do
-    settings(stream_id: 0, flags: flags, params: decode_settings_params(payload))
+  defp decode_settings(flags, stream_id, payload) do
+    settings(stream_id: stream_id, flags: flags, params: decode_settings_params(payload))
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.6
@@ -251,11 +226,11 @@ defmodule XHTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.7
   defp decode_ping(_flags, _stream_id, payload) when byte_size(payload) != 8 do
-    throw({:xhttp, {:bad_size, :ping, byte_size(payload)}})
+    throw({:xhttp, {:frame_size_error, :ping}})
   end
 
-  defp decode_ping(flags, 0, payload) do
-    ping(stream_id: 0, flags: flags, opaque_data: payload)
+  defp decode_ping(flags, stream_id, payload) do
+    ping(stream_id: stream_id, flags: flags, opaque_data: payload)
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.8
@@ -273,11 +248,11 @@ defmodule XHTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.9
   defp decode_window_update(_flags, _stream_id, payload) when byte_size(payload) != 4 do
-    throw({:xhttp, {:bad_size, :window_update, byte_size(payload)}})
+    throw({:xhttp, {:frame_size_error, :window_update}})
   end
 
   defp decode_window_update(_flags, _stream_id, <<_reserved::1, 0::31>>) do
-    throw({:xhttp, {:bad_window_size_increment, :window_update, 0}})
+    throw({:xhttp, {:protocol_error, :bad_window_size_increment}})
   end
 
   defp decode_window_update(flags, stream_id, <<_reserved::1, window_size_increment::31>>) do
@@ -296,7 +271,7 @@ defmodule XHTTP2.Frame do
   defp decode_padding(frame, flags, <<pad_length, rest::binary>> = payload)
        when is_flag_set(flags, unquote(@flags[:data][:padded])) do
     if pad_length >= byte_size(payload) do
-      throw({:xhttp, {:pad_length_bigger_than_payload_length, frame}})
+      throw({:xhttp, {:protocol_error, {:pad_length_bigger_than_payload_length, frame}}})
     else
       # 1 byte is for the space taken by pad_length
       data_length = byte_size(payload) - pad_length - 1
