@@ -511,9 +511,7 @@ defmodule XHTTP2.Conn do
   # DATA
 
   defp handle_data(conn, frame, responses) do
-    # TODO: refill window_size here.
-
-    data(stream_id: stream_id, flags: flags, data: data) = frame
+    data(stream_id: stream_id, flags: flags, data: data, padding: padding) = frame
 
     assert_frame_on_stream!(conn, :data, stream_id)
     stream = fetch_stream!(conn, stream_id)
@@ -521,6 +519,14 @@ defmodule XHTTP2.Conn do
     if stream.state not in [:open, :half_closed_local] do
       raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
     end
+
+    data_size = byte_size(data) + byte_size(padding || "")
+
+    frame = window_update(stream_id: 0, window_size_increment: data_size)
+    transport_send!(conn, Frame.encode(frame))
+
+    frame = window_update(stream_id: stream_id, window_size_increment: data_size)
+    transport_send!(conn, Frame.encode(frame))
 
     responses = [{:data, stream.ref, data} | responses]
 
