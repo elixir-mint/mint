@@ -530,8 +530,7 @@ defmodule XHTTP2.Conn do
 
   defp handle_frame(conn, headers() = frame, resps), do: handle_headers(conn, frame, resps)
 
-  # TODO: implement PRIORITY
-  defp handle_frame(_, priority(), _resps), do: raise("PRIORITY handling not implemented")
+  defp handle_frame(conn, priority() = frame, resps), do: handle_priority(conn, frame, resps)
 
   defp handle_frame(conn, rst_stream() = frame, resps), do: handle_rst_stream(conn, frame, resps)
 
@@ -642,6 +641,13 @@ defmodule XHTTP2.Conn do
         debug_data = "unable to decode headers: #{inspect(reason)}"
         send_connection_error!(conn, :compression_error, debug_data)
     end
+  end
+
+  # PRIORITY
+
+  defp handle_priority(conn, frame, responses) do
+    Logger.warn(fn -> "Ignoring PRIORITY frame: #{inspect(frame)}" end)
+    {conn, responses}
   end
 
   # RST_STREAM
