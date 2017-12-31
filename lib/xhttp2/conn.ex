@@ -604,12 +604,16 @@ defmodule XHTTP2.Conn do
     case frame do
       window_update(stream_id: 0, window_size_increment: wsi) ->
         case increment_window_size(conn, :connection, wsi) do
-          {:ok, conn} -> {conn, responses}
-          {:error, conn} -> throw({:xhttp, conn, :flow_control_error})
+          {:ok, conn} ->
+            {conn, responses}
+
+          {:error, conn} ->
+            send_connection_error!(conn, :flow_control_error, "window size too big")
         end
 
-      # TODO: handle this frame not existing.
       window_update(stream_id: stream_id, window_size_increment: wsi) ->
+        _ = fetch_stream!(conn, stream_id)
+
         case increment_window_size(conn, {:stream, stream_id}, wsi) do
           {:ok, conn} ->
             {conn, responses}
@@ -620,6 +624,20 @@ defmodule XHTTP2.Conn do
             %{ref: ref} = fetch_stream!(conn, stream_id)
             {conn, [{:closed, ref, :flow_control_error} | responses]}
         end
+    end
+  end
+
+  defp increment_window_size(conn, :connection, wsi) do
+    case conn.window_size do
+      ws when ws + wsi > @max_window_size -> {:error, conn}
+      ws -> {:ok, %{conn | window_size: ws}}
+    end
+  end
+
+  defp increment_window_size(conn, {:stream, stream_id}, wsi) do
+    case conn.streams[stream_id].window_size do
+      ws when ws + wsi > @max_window_size -> {:error, conn}
+      ws -> {:ok, put_in(conn.streams[stream_id].window_size, ws + wsi)}
     end
   end
 
@@ -661,20 +679,6 @@ defmodule XHTTP2.Conn do
     transport_close!(conn)
     conn = put_in(conn.state, :closed)
     throw({:xhttp, conn, error_code})
-  end
-
-  defp increment_window_size(conn, :connection, wsi) do
-    case conn.window_size do
-      ws when ws + wsi > @max_window_size -> {:error, conn}
-      ws -> {:ok, %{conn | window_size: ws}}
-    end
-  end
-
-  defp increment_window_size(conn, {:stream, stream_id}, wsi) do
-    case conn.streams[stream_id].window_size do
-      ws when ws + wsi > @max_window_size -> {:error, conn}
-      ws -> {:ok, put_in(conn.streams[stream_id].window_size, ws + wsi)}
-    end
   end
 
   defp fetch_stream!(conn, stream_id) do

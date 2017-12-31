@@ -245,6 +245,43 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "server sends a WINDOW_UPDATE with too big of a size on a stream", %{
+    conn: conn,
+    server: server
+  } do
+    max_window_size = 2_147_483_647
+
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      frame = window_update(stream_id: stream_id, window_size_increment: max_window_size)
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, rst_stream() -> state end)
+
+    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert [{:closed, ^ref, :flow_control_error}] = responses
+    assert Conn.open?(conn) == true
+  end
+
+  test "server sends a WINDOW_UPDATE with too big of a size on the connection level", %{
+    conn: conn,
+    server: server
+  } do
+    max_window_size = 2_147_483_647
+
+    server
+    |> Server.expect(fn state, headers() ->
+      frame = window_update(stream_id: 0, window_size_increment: max_window_size)
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+    assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == false
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)
