@@ -315,7 +315,7 @@ defmodule XHTTP2.Conn do
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
 
     payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
-    transport_send!(conn, payload)
+    send!(conn, payload)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
@@ -386,7 +386,7 @@ defmodule XHTTP2.Conn do
 
       true ->
         frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
-        transport_send!(conn, Frame.encode(frame))
+        send!(conn, Frame.encode(frame))
         conn = update_in(conn.streams[stream_id].window_size, &(&1 - data_size))
         conn = update_in(conn.window_size, &(&1 - data_size))
 
@@ -415,7 +415,7 @@ defmodule XHTTP2.Conn do
 
   defp send_ping(conn, payload) do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)
-    transport_send!(conn, Frame.encode(frame))
+    send!(conn, Frame.encode(frame))
     ref = make_ref()
     conn = update_in(conn.ping_queue, &:queue.in({ref, payload}, &1))
     {conn, ref}
@@ -424,7 +424,7 @@ defmodule XHTTP2.Conn do
   defp send_settings(conn, settings) do
     validate_settings!(settings)
     frame = settings(stream_id: 0, params: settings)
-    transport_send!(conn, Frame.encode(frame))
+    send!(conn, Frame.encode(frame))
     conn = update_in(conn.client_settings_queue, &:queue.in(settings, &1))
     conn
   end
@@ -577,7 +577,7 @@ defmodule XHTTP2.Conn do
   defp refill_client_windows(conn, stream_id, data_size) do
     connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
     stream_frame = window_update(stream_id: stream_id, window_size_increment: data_size)
-    transport_send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
+    send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
   end
 
   # HEADERS
@@ -629,12 +629,9 @@ defmodule XHTTP2.Conn do
         {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
 
       {:ok, _headers, decode_table} ->
-        conn = put_in(conn.decode_table, decode_table)
-
         # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-        frame = rst_stream(stream_id: stream.id, error_code: :protocol_error)
-        transport_send!(conn, Frame.encode(frame))
-        conn = put_in(conn.streams[stream.id].state, :closed)
+        conn = put_in(conn.decode_table, decode_table)
+        conn = close_stream!(conn, stream.id, :protocol_error)
         {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
 
       {:error, reason} ->
@@ -677,7 +674,7 @@ defmodule XHTTP2.Conn do
     else
       conn = apply_server_settings(conn, params)
       frame = settings(flags: set_flag(:settings, :ack), params: [])
-      transport_send!(conn, Frame.encode(frame))
+      send!(conn, Frame.encode(frame))
       {conn, responses}
     end
   end
@@ -760,7 +757,7 @@ defmodule XHTTP2.Conn do
       handle_ping_ack(conn, opaque_data, responses)
     else
       ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
-      transport_send!(conn, Frame.encode(ack))
+      send!(conn, Frame.encode(ack))
       {conn, responses}
     end
   end
@@ -834,8 +831,7 @@ defmodule XHTTP2.Conn do
 
     case conn.streams[stream_id].window_size do
       ws when ws + wsi > @max_window_size ->
-        frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
-        transport_send!(conn, Frame.encode(frame))
+        conn = close_stream!(conn, stream_id, :flow_control_error)
         {conn, [{:closed, stream.ref, :flow_control_error} | responses]}
 
       ws ->
@@ -882,10 +878,16 @@ defmodule XHTTP2.Conn do
     frame =
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
-    transport_send!(conn, Frame.encode(frame))
+    send!(conn, Frame.encode(frame))
     conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
     throw({:xhttp, conn, error_code})
+  end
+
+  defp close_stream!(conn, stream_id, error_code) do
+    frame = rst_stream(stream_id: stream_id, error_code: error_code)
+    send!(conn, Frame.encode(frame))
+    put_in(conn.streams[stream_id].state, :closed)
   end
 
   defp fetch_stream!(conn, stream_id) do
@@ -915,7 +917,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp transport_send!(%__MODULE__{transport: transport, socket: socket}, bytes) do
+  defp send!(%__MODULE__{transport: transport, socket: socket}, bytes) do
     case transport.send(socket, bytes) do
       :ok -> :ok
       {:error, reason} -> throw({:xhttp, reason})
