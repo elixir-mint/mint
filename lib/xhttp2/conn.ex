@@ -314,8 +314,10 @@ defmodule XHTTP2.Conn do
     frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
     transport_send!(conn, Frame.encode(frame))
 
+    stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
+
+    conn = put_in(conn.streams[stream_id].state, stream_state)
     conn = put_in(conn.encode_table, encode_table)
-    conn = put_in(conn.streams[stream_id].state, :open)
     conn = update_in(conn.open_stream_count, &(&1 + 1))
     conn
   end
@@ -338,6 +340,14 @@ defmodule XHTTP2.Conn do
         transport_send!(conn, Frame.encode(frame))
         conn = update_in(conn.streams[stream_id].window_size, &(&1 - data_size))
         conn = update_in(conn.window_size, &(&1 - data_size))
+
+        conn =
+          if :end_stream in enabled_flags do
+            put_in(conn.streams[stream_id].state, :half_closed_local)
+          else
+            conn
+          end
+
         conn
     end
   end
@@ -410,7 +420,7 @@ defmodule XHTTP2.Conn do
     data(stream_id: stream_id, flags: flags, data: data) = frame
     stream = fetch_stream!(conn, stream_id)
 
-    if stream.state != :open do
+    if stream.state not in [:open, :half_closed_local] do
       raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
     end
 
@@ -434,7 +444,7 @@ defmodule XHTTP2.Conn do
     end_headers? = flag_set?(flags, :headers, :end_headers)
     end_stream? = flag_set?(flags, :headers, :end_stream)
 
-    if stream.state != :open do
+    if stream.state not in [:open, :half_closed_local] do
       raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
     end
 
