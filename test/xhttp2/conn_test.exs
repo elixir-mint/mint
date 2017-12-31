@@ -40,35 +40,33 @@ defmodule XHTTP2.ConnTest do
 
   test "closed-socket messages are treated as errors", %{conn: conn} do
     assert {:error, %Conn{} = conn, :closed, []} = Conn.stream(conn, {:ssl_closed, conn.socket})
-    assert Conn.open?(conn) == false
+    refute Conn.open?(conn)
   end
 
   test "socket error messages are treated as errors", %{conn: conn} do
     message = {:ssl_error, conn.socket, :etimeout}
     assert {:error, %Conn{} = conn, :etimeout, []} = Conn.stream(conn, message)
-    assert Conn.open?(conn) == false
+    refute Conn.open?(conn)
   end
 
-  test "server sends RST_STREAM", %{conn: conn, server: server} do
-    Server.expect(server, fn state, headers(stream_id: stream_id) ->
+  test "server closes a stream with RST_STREAM", context do
+    Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
       frame = rst_stream(stream_id: stream_id, error_code: :protocol_error)
       :ssl.send(state.socket, encode(frame))
     end)
 
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
+    {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-    assert {:ok, %Conn{}, responses} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
     assert [{:closed, ^ref, {:rst_stream, :protocol_error}}] = responses
+    assert Conn.open?(conn)
   end
 
-  test "when server sends GOAWAY all unprocessed streams are closed", %{
-    conn: conn,
-    server: server
-  } do
-    server
-    |> Server.expect(fn state, headers() -> state end)
-    |> Server.expect(fn state, headers() -> state end)
-    |> Server.expect(fn state, headers() ->
+  test "server closes the connection with GOAWAY", context do
+    context.server
+    |> Server.expect(fn state, headers(stream_id: 3) -> state end)
+    |> Server.expect(fn state, headers(stream_id: 5) -> state end)
+    |> Server.expect(fn state, headers(stream_id: 7) ->
       code = :protocol_error
       frame = goaway(stream_id: 0, last_stream_id: 3, error_code: code, debug_data: "debug data")
       :ok = :ssl.send(state.socket, encode(frame))
@@ -76,7 +74,7 @@ defmodule XHTTP2.ConnTest do
       %{state | socket: nil}
     end)
 
-    {:ok, conn, _ref1} = Conn.request(conn, "GET", "/", [])
+    {:ok, conn, _ref1} = Conn.request(context.conn, "GET", "/", [])
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [])
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [])
 
@@ -88,279 +86,268 @@ defmodule XHTTP2.ConnTest do
            ] = responses
 
     assert {:error, %Conn{} = conn, :closed, []} = stream_next_message(conn)
-
-    assert Conn.open?(conn) == false
+    refute Conn.open?(conn)
   end
 
-  test "server splits headers into multiple CONTINUATION frames", %{conn: conn, server: server} do
-    Server.expect(server, fn state, headers(stream_id: stream_id) ->
-      headers = [
-        {:store_name, ":status", "200"},
-        {:store_name, "foo", "bar"},
-        {:store_name, "baz", "bong"}
-      ]
+  describe "headers and continuation" do
+    test "server splits headers into multiple CONTINUATION frames", context do
+      Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
+        headers = [
+          {:store_name, ":status", "200"},
+          {:store_name, "foo", "bar"},
+          {:store_name, "baz", "bong"}
+        ]
 
-      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-      state = put_in(state.encode_table, encode_table)
+        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+        state = put_in(state.encode_table, encode_table)
 
-      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
-      frame1 = headers(stream_id: stream_id, hbf: hbf1)
-      :ok = :ssl.send(state.socket, encode(frame1))
-      frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-      :ok = :ssl.send(state.socket, encode(frame2))
-      frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
-      :ok = :ssl.send(state.socket, encode(frame3))
-      state
-    end)
+        <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+        frame1 = headers(stream_id: stream_id, hbf: hbf1)
+        :ok = :ssl.send(state.socket, encode(frame1))
+        frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+        :ok = :ssl.send(state.socket, encode(frame2))
+        frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
+        :ok = :ssl.send(state.socket, encode(frame3))
+        state
+      end)
 
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
+      {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}] = responses
 
-    assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}] = responses
+      assert Conn.open?(conn)
+    end
 
-    assert Conn.open?(conn)
+    test "server sends a badly encoded header block", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        flags = set_flag(:headers, :end_headers)
+        frame = headers(stream_id: stream_id, hbf: "not a good hbf", flags: flags)
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, goaway() -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:error, %Conn{} = conn, :compression_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
+
+    test "server sends a CONTINUATION frame outside of headers streaming", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        frame = continuation(stream_id: stream_id, hbf: "hbf")
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
+
+    test "server sends a non-CONTINUATION frame while streaming headers", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        # Headers are streaming but we send a non-CONTINUATION frame.
+        headers = headers(stream_id: stream_id, hbf: "hbf")
+        data = data(stream_id: stream_id, data: "some data")
+        :ssl.send(state.socket, [encode(headers), encode(data)])
+      end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
+
+    test "server sends a HEADERS with END_STREAM set but not END_HEADERS", context do
+      Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
+        headers = [
+          {:store_name, ":status", "200"},
+          {:store_name, "foo", "bar"},
+          {:store_name, "baz", "bong"}
+        ]
+
+        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+        state = put_in(state.encode_table, encode_table)
+
+        <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+        frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
+        :ssl.send(state.socket, encode(frame1))
+        frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+        :ssl.send(state.socket, encode(frame2))
+        flags = set_flag(:continuation, :end_headers)
+        frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
+        :ssl.send(state.socket, encode(frame3))
+        state
+      end)
+
+      {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
+      assert Conn.open?(conn)
+    end
+
+    test "server sends a response without a :status header", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        headers = [
+          {:store_name, "foo", "bar"},
+          {:store_name, "baz", "bong"}
+        ]
+
+        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+        state = put_in(state.encode_table, encode_table)
+
+        flags = set_flags(:headers, [:end_headers, :end_stream])
+        frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, rst_stream() -> state end)
+
+      {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
+      assert Conn.open?(conn)
+    end
   end
 
-  test "server sends a badly encoded header block", %{conn: conn, server: server} do
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      flags = set_flag(:headers, :end_headers)
-      frame = headers(stream_id: stream_id, hbf: "not a good hbf", flags: flags)
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, goaway() -> state end)
+  describe "frame encoding errors by the server" do
+    test "server sends a frame with the wrong stream id", context do
+      context.server
+      |> Server.expect(fn state, headers() ->
+        payload = encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>)
+        :ssl.send(state.socket, payload)
+      end)
+      |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
 
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-    assert {:error, %Conn{} = conn, :compression_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
 
-    assert Conn.open?(conn) == false
+    test "server sends a frame with a bad size", context do
+      context.server
+      |> Server.expect(fn state, headers() ->
+        # Payload should be 8 bytes long.
+        payload = encode_raw(_ping = 0x06, 0x00, 3, <<>>)
+        :ssl.send(state.socket, payload)
+      end)
+      |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+      assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
   end
 
-  test "server sends a CONTINUATION frame outside of headers streaming", %{
-    conn: conn,
-    server: server
-  } do
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      frame = continuation(stream_id: stream_id, hbf: "hbf")
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, goaway() -> state end)
+  describe "flow control" do
+    test "server sends a WINDOW_UPDATE with too big of a size on a stream", context do
+      max_window_size = 2_147_483_647
 
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        frame = window_update(stream_id: stream_id, window_size_increment: max_window_size)
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, rst_stream() -> state end)
 
-    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == false
+      {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert [{:closed, ^ref, :flow_control_error}] = responses
+      assert Conn.open?(conn)
+    end
+
+    test "server sends a WINDOW_UPDATE with too big of a size on the connection level", context do
+      max_window_size = 2_147_483_647
+
+      context.server
+      |> Server.expect(fn state, headers() ->
+        frame = window_update(stream_id: 0, window_size_increment: max_window_size)
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+      assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_next_message(conn)
+      refute Conn.open?(conn)
+    end
+
+    test "server violates client's max frame size", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+        frame = data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {conn, :frame_size_error} = stream_messages_until_error(conn)
+      refute Conn.open?(conn)
+    end
+
+    test "client splits data automatically based on server's max frame size", context do
+      max_frame_size = Conn.get_setting(context.conn, :max_frame_size)
+
+      context.server
+      |> Server.expect(fn state, headers(stream_id: 3) -> state end)
+      |> Server.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
+        assert data == :binary.copy(<<0>>, max_frame_size)
+        state
+      end)
+      |> Server.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
+        assert data == <<0>>
+
+        headers = [{:store_name, ":status", "200"}]
+        {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+        state = put_in(state.encode_table, encode_table)
+
+        frame =
+          headers(stream_id: 3, hbf: hbf, flags: set_flags(:headers, [:end_stream, :end_headers]))
+
+        :ok = :ssl.send(state.socket, encode(frame))
+
+        state
+      end)
+
+      body = :binary.copy(<<0>>, max_frame_size + 1)
+      assert {:ok, %Conn{} = conn, ref} = Conn.request(context.conn, "GET", "/", [], body)
+
+      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert Conn.open?(conn)
+    end
   end
 
-  test "server sends a non-CONTINUATION frame while streaming headers", %{
-    conn: conn,
-    server: server
-  } do
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      # Headers are streaming but we send a non-CONTINUATION frame.
-      headers = headers(stream_id: stream_id, hbf: "hbf")
-      data = data(stream_id: stream_id, data: "some data")
-      :ssl.send(state.socket, [encode(headers), encode(data)])
-    end)
-    |> Server.expect(fn state, goaway() -> state end)
+  describe "settings" do
+    test "client can send settings to server", context do
+      Server.expect(context.server, fn state, settings(params: [max_concurrent_streams: 123]) ->
+        frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
+        :ssl.send(state.socket, encode(frame))
+      end)
 
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+      {:ok, conn} = Conn.put_settings(context.conn, max_concurrent_streams: 123)
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert Conn.open?(conn)
+    end
 
-    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == false
-  end
-
-  test "server sends a HEADERS with END_STREAM set but not END_HEADERS", %{
-    conn: conn,
-    server: server
-  } do
-    Server.expect(server, fn state, headers(stream_id: stream_id) ->
-      headers = [
-        {:store_name, ":status", "200"},
-        {:store_name, "foo", "bar"},
-        {:store_name, "baz", "bong"}
-      ]
-
-      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-      state = put_in(state.encode_table, encode_table)
-
-      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
-      frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
-      :ssl.send(state.socket, encode(frame1))
-      frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-      :ssl.send(state.socket, encode(frame2))
-      flags = set_flag(:continuation, :end_headers)
-      frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
-      :ssl.send(state.socket, encode(frame3))
-      state
-    end)
-
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
-
-    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
-    assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
-    assert Conn.open?(conn) == true
-  end
-
-  test "server sends a response without a :status header", %{conn: conn, server: server} do
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      headers = [
-        {:store_name, "foo", "bar"},
-        {:store_name, "baz", "bong"}
-      ]
-
-      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-      state = put_in(state.encode_table, encode_table)
-
-      flags = set_flags(:headers, [:end_headers, :end_stream])
-      frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, rst_stream() -> state end)
-
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
-
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
-    assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
-    assert Conn.open?(conn) == true
-  end
-
-  test "server sends a frame with the wrong stream id", %{conn: conn, server: server} do
-    server
-    |> Server.expect(fn state, headers() ->
-      payload = encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>)
-      :ssl.send(state.socket, payload)
-    end)
-    |> Server.expect(fn state, goaway(error_code: :protocol_error) -> state end)
-
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
-    assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == false
-  end
-
-  test "server sends a frame with a bad size", %{conn: conn, server: server} do
-    server
-    |> Server.expect(fn state, headers() ->
-      # Payload should be 8 bytes long.
-      payload = encode_raw(_ping = 0x06, 0x00, 3, <<>>)
-      :ssl.send(state.socket, payload)
-    end)
-    |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
-
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
-    assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == false
-  end
-
-  test "server sends a WINDOW_UPDATE with too big of a size on a stream", %{
-    conn: conn,
-    server: server
-  } do
-    max_window_size = 2_147_483_647
-
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      frame = window_update(stream_id: stream_id, window_size_increment: max_window_size)
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, rst_stream() -> state end)
-
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [])
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
-    assert [{:closed, ^ref, :flow_control_error}] = responses
-    assert Conn.open?(conn) == true
-  end
-
-  test "server sends a WINDOW_UPDATE with too big of a size on the connection level", %{
-    conn: conn,
-    server: server
-  } do
-    max_window_size = 2_147_483_647
-
-    server
-    |> Server.expect(fn state, headers() ->
-      frame = window_update(stream_id: 0, window_size_increment: max_window_size)
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
-
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
-    assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == false
-  end
-
-  test "client can send settings to server", %{conn: conn, server: server} do
-    Server.expect(server, fn state, settings(params: [max_concurrent_streams: 123]) ->
-      frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
-      :ssl.send(state.socket, encode(frame))
-    end)
-
-    {:ok, conn} = Conn.put_settings(conn, max_concurrent_streams: 123)
-    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-    assert Conn.open?(conn) == true
-  end
-
-  test "client can read server settings", %{conn: conn} do
-    assert Conn.get_setting(conn, :max_concurrent_streams) == 100
-    assert Conn.get_setting(conn, :enable_push) == true
-  end
-
-  test "server violates client's max frame size", %{conn: conn, server: server} do
-    server
-    |> Server.expect(fn state, headers(stream_id: stream_id) ->
-      frame = data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
-      :ssl.send(state.socket, encode(frame))
-    end)
-    |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
-
-    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
-
-    assert {conn, :frame_size_error} = stream_messages_until_error(conn)
-    assert Conn.open?(conn) == false
-  end
-
-  test "client splits data automatically based on server's max frame size", %{
-    conn: conn,
-    server: server
-  } do
-    max_frame_size = Conn.get_setting(conn, :max_frame_size)
-
-    server
-    |> Server.expect(fn state, headers(stream_id: 3) -> state end)
-    |> Server.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
-      assert data == :binary.copy(<<0>>, max_frame_size)
-      state
-    end)
-    |> Server.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
-      assert data == <<0>>
-
-      headers = [{:store_name, ":status", "200"}]
-      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-      state = put_in(state.encode_table, encode_table)
-
-      frame =
-        headers(stream_id: 3, hbf: hbf, flags: set_flags(:headers, [:end_stream, :end_headers]))
-
-      :ok = :ssl.send(state.socket, encode(frame))
-
-      state
-    end)
-
-    body = :binary.copy(<<0>>, max_frame_size + 1)
-    assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [], body)
-
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
-    assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
-    assert Conn.open?(conn) == true
+    test "client can read server settings", %{conn: conn} do
+      assert Conn.get_setting(conn, :max_concurrent_streams) == 100
+      assert Conn.get_setting(conn, :enable_push) == true
+    end
   end
 
   defp stream_next_message(conn) do
