@@ -328,6 +328,41 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "client splits data automatically based on server's max frame size", %{
+    conn: conn,
+    server: server
+  } do
+    max_frame_size = Conn.get_setting(conn, :max_frame_size)
+
+    server
+    |> Server.expect(fn state, headers(stream_id: 3) -> state end)
+    |> Server.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
+      assert data == :binary.copy(<<0>>, max_frame_size)
+      state
+    end)
+    |> Server.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
+      assert data == <<0>>
+
+      headers = [{:store_name, ":status", "200"}]
+      {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
+      state = put_in(state.encode_table, encode_table)
+
+      frame =
+        headers(stream_id: 3, hbf: hbf, flags: set_flags(:headers, [:end_stream, :end_headers]))
+
+      :ok = :ssl.send(state.socket, encode(frame))
+
+      state
+    end)
+
+    body = :binary.copy(<<0>>, max_frame_size + 1)
+    assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [], body)
+
+    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+    assert Conn.open?(conn) == true
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)

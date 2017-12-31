@@ -359,7 +359,7 @@ defmodule XHTTP2.Conn do
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state!(stream, :open)
 
-    data_size = byte_size(data)
+    data_size = IO.iodata_length(data)
 
     cond do
       data_size >= stream.window_size ->
@@ -367,6 +367,19 @@ defmodule XHTTP2.Conn do
 
       data_size >= conn.window_size ->
         throw({:xhttp, conn, {:exceeds_connection_window_size, conn.window_size}})
+
+      data_size > conn.max_frame_size ->
+        {chunks, last_chunk} =
+          data
+          |> IO.iodata_to_binary()
+          |> split_payload_in_chunks(conn.max_frame_size, _acc = [])
+
+        conn =
+          Enum.reduce(chunks, conn, fn chunk, acc ->
+            send_data(acc, stream_id, chunk, [])
+          end)
+
+        send_data(conn, stream_id, last_chunk, enabled_flags)
 
       true ->
         frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
@@ -383,6 +396,15 @@ defmodule XHTTP2.Conn do
 
         conn
     end
+  end
+
+  defp split_payload_in_chunks(chunk, chunk_size, acc) when byte_size(chunk) <= chunk_size do
+    {Enum.reverse(acc), chunk}
+  end
+
+  defp split_payload_in_chunks(binary, chunk_size, acc) do
+    <<chunk::size(chunk_size)-binary, rest::binary>> = binary
+    split_payload_in_chunks(rest, chunk_size, [chunk | acc])
   end
 
   defp send_ping(conn, payload) do
