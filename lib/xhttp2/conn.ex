@@ -420,6 +420,8 @@ defmodule XHTTP2.Conn do
   # DATA
 
   defp handle_data(conn, frame, responses) do
+    # TODO: refill window_size here.
+
     data(stream_id: stream_id, flags: flags, data: data) = frame
     stream = fetch_stream!(conn, stream_id)
 
