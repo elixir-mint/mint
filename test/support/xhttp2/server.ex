@@ -112,7 +112,7 @@ defmodule XHTTP2.Server do
             raise "could not handle frame because of missing handler: #{inspect(frame)}"
         end
 
-      {:error, {:malformed_frame, _}} ->
+      :more ->
         put_in(state.buffer, packet)
 
       {:error, reason} ->

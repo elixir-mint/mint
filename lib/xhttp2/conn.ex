@@ -303,7 +303,7 @@ defmodule XHTTP2.Conn do
       {:ok, _frame, _rest} = result ->
         result
 
-      {:error, {:malformed_frame, _}} ->
+      :more ->
         with {:ok, data} <- transport.recv(socket, 0) do
           recv_next_frame(transport, socket, buffer <> data)
         end
@@ -458,7 +458,7 @@ defmodule XHTTP2.Conn do
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
 
-      {:error, {:malformed_frame, _}} ->
+      :more ->
         {%{conn | buffer: data}, responses}
 
       {:error, _reason} ->

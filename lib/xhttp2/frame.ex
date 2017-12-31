@@ -3,17 +3,19 @@ defmodule XHTTP2.Frame do
 
   import Record
 
-  shared = [:stream_id, {:flags, 0x00}]
-  defrecord :data, shared ++ [:data, :padding]
-  defrecord :headers, shared ++ [:exclusive?, :stream_dependency, :weight, :hbf, :padding]
-  defrecord :priority, shared ++ [:exclusive?, :stream_dependency, :weight]
-  defrecord :rst_stream, shared ++ [:error_code]
-  defrecord :settings, shared ++ [:params]
-  defrecord :push_promise, shared ++ [:promised_stream_id, :hbf, :padding]
-  defrecord :ping, shared ++ [:opaque_data]
-  defrecord :goaway, shared ++ [:last_stream_id, :error_code, :debug_data]
-  defrecord :window_update, shared ++ [:window_size_increment]
-  defrecord :continuation, shared ++ [:hbf]
+  shared_stream = [:stream_id, {:flags, 0x00}]
+  shared_conn = [stream_id: 0, flags: 0x00]
+
+  defrecord :data, shared_stream ++ [:data, :padding]
+  defrecord :headers, shared_stream ++ [:exclusive?, :stream_dependency, :weight, :hbf, :padding]
+  defrecord :priority, shared_stream ++ [:exclusive?, :stream_dependency, :weight]
+  defrecord :rst_stream, shared_stream ++ [:error_code]
+  defrecord :settings, shared_conn ++ [:params]
+  defrecord :push_promise, shared_stream ++ [:promised_stream_id, :hbf, :padding]
+  defrecord :ping, shared_conn ++ [:opaque_data]
+  defrecord :goaway, shared_conn ++ [:last_stream_id, :error_code, :debug_data]
+  defrecord :window_update, shared_stream ++ [:window_size_increment]
+  defrecord :continuation, shared_stream ++ [:hbf]
 
   @types %{
     data: 0x00,
@@ -100,10 +102,15 @@ defmodule XHTTP2.Frame do
 
   Returns `{:ok, frame, rest}` if successful, `{:error, reason}` if not.
   """
-  @spec decode_next(binary()) :: {:ok, tuple(), binary()} | {:error, term()}
+  @spec decode_next(binary()) :: {:ok, tuple(), binary()} | :more | {:error, term()}
   def decode_next(bin) when is_binary(bin) do
-    {{type, flags, stream_id, payload}, rest} = decode_next_raw(bin)
-    {:ok, decode_contents(type, flags, stream_id, payload), rest}
+    case decode_next_raw(bin) do
+      {:ok, {type, flags, stream_id, payload}, rest} ->
+        {:ok, decode_contents(type, flags, stream_id, payload), rest}
+
+      :more ->
+        :more
+    end
   catch
     :throw, {:xhttp, reason} -> {:error, reason}
   end
@@ -117,11 +124,11 @@ defmodule XHTTP2.Frame do
          payload::size(length)-binary,
          rest::binary
        >>) do
-    {{type, flags, stream_id, payload}, rest}
+    {:ok, {type, flags, stream_id, payload}, rest}
   end
 
-  defp decode_next_raw(other) do
-    throw({:xhttp, {:malformed_frame, other}})
+  defp decode_next_raw(_other) do
+    :more
   end
 
   not_allowed_on_stream_0 = [
