@@ -600,44 +600,37 @@ defmodule XHTTP2.Conn do
 
   # WINDOW_UPDATE
 
-  defp handle_window_update(conn, frame, responses) do
-    case frame do
-      window_update(stream_id: 0, window_size_increment: wsi) ->
-        case increment_window_size(conn, :connection, wsi) do
-          {:ok, conn} ->
-            {conn, responses}
-
-          {:error, conn} ->
-            send_connection_error!(conn, :flow_control_error, "window size too big")
-        end
-
-      window_update(stream_id: stream_id, window_size_increment: wsi) ->
-        _ = fetch_stream!(conn, stream_id)
-
-        case increment_window_size(conn, {:stream, stream_id}, wsi) do
-          {:ok, conn} ->
-            {conn, responses}
-
-          {:error, conn} ->
-            frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
-            transport_send!(conn, Frame.encode(frame))
-            %{ref: ref} = fetch_stream!(conn, stream_id)
-            {conn, [{:closed, ref, :flow_control_error} | responses]}
-        end
-    end
-  end
-
-  defp increment_window_size(conn, :connection, wsi) do
+  defp handle_window_update(
+         conn,
+         window_update(stream_id: 0, window_size_increment: wsi),
+         responses
+       ) do
     case conn.window_size do
-      ws when ws + wsi > @max_window_size -> {:error, conn}
-      ws -> {:ok, %{conn | window_size: ws}}
+      ws when ws + wsi > @max_window_size ->
+        send_connection_error!(conn, :flow_control_error, "window size too big")
+
+      ws ->
+        conn = put_in(conn.window_size, ws)
+        {conn, responses}
     end
   end
 
-  defp increment_window_size(conn, {:stream, stream_id}, wsi) do
+  defp handle_window_update(
+         conn,
+         window_update(stream_id: stream_id, window_size_increment: wsi),
+         responses
+       ) do
+    stream = fetch_stream!(conn, stream_id)
+
     case conn.streams[stream_id].window_size do
-      ws when ws + wsi > @max_window_size -> {:error, conn}
-      ws -> {:ok, put_in(conn.streams[stream_id].window_size, ws + wsi)}
+      ws when ws + wsi > @max_window_size ->
+        frame = rst_stream(stream_id: stream_id, error_code: :flow_control_error)
+        transport_send!(conn, Frame.encode(frame))
+        {conn, [{:closed, stream.ref, :flow_control_error} | responses]}
+
+      ws ->
+        conn = put_in(conn.streams[stream_id].window_size, ws + wsi)
+        {conn, responses}
     end
   end
 
