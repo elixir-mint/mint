@@ -309,7 +309,7 @@ defmodule XHTTP2.Conn do
 
   defp send_headers(conn, stream_id, headers, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(stream, :idle)
+    assert_stream_in_state!(conn, stream, [:idle])
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
@@ -360,7 +360,7 @@ defmodule XHTTP2.Conn do
 
   defp send_data(conn, stream_id, data, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(stream, :open)
+    assert_stream_in_state!(conn, stream, [:open])
 
     data_size = IO.iodata_length(data)
 
@@ -556,10 +556,7 @@ defmodule XHTTP2.Conn do
 
     assert_frame_on_stream!(conn, :data, stream_id)
     stream = fetch_stream!(conn, stream_id)
-
-    if stream.state not in [:open, :half_closed_local] do
-      raise "don't know how to handle DATA on streams with state #{inspect(stream.state)}"
-    end
+    assert_stream_in_state!(conn, stream, [:open, :half_closed_local])
 
     refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
 
@@ -586,13 +583,10 @@ defmodule XHTTP2.Conn do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     assert_frame_on_stream!(conn, :headers, stream_id)
     stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state!(conn, stream, [:open, :half_closed_local])
 
     end_headers? = flag_set?(flags, :headers, :end_headers)
     end_stream? = flag_set?(flags, :headers, :end_stream)
-
-    if stream.state not in [:open, :half_closed_local] do
-      raise "don't know how to handle HEADERS on streams with state #{inspect(stream.state)}"
-    end
 
     {conn, responses} =
       if end_headers? do
@@ -893,13 +887,13 @@ defmodule XHTTP2.Conn do
   defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw({:xhttp, {:stream_not_found, stream_id}})
+      :error -> throw({:xhttp, conn, {:stream_not_found, stream_id}})
     end
   end
 
-  defp assert_stream_in_state!(%{state: state}, expected_state) do
-    if state != expected_state do
-      throw({:xhttp, {:"stream_not_in_#{expected_state}_state", state}})
+  defp assert_stream_in_state!(conn, %{state: state}, expected_states) do
+    if state not in expected_states do
+      throw({:xhttp, conn, {:stream_not_in_expected_state, expected_states, state}})
     end
   end
 
@@ -917,10 +911,10 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp send!(%__MODULE__{transport: transport, socket: socket}, bytes) do
+  defp send!(%__MODULE__{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
       :ok -> :ok
-      {:error, reason} -> throw({:xhttp, reason})
+      {:error, reason} -> throw({:xhttp, conn, reason})
     end
   end
 end
