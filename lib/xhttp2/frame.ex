@@ -103,11 +103,18 @@ defmodule XHTTP2.Frame do
   Returns `{:ok, frame, rest}` if successful, `{:error, reason}` if not.
   """
   @spec decode_next(binary()) :: {:ok, tuple(), binary()} | :more | {:error, reason}
-        when reason: {:frame_size_error, atom()} | {:protocol_error, term()}
-  def decode_next(bin) when is_binary(bin) do
+        when reason:
+               {:frame_size_error, atom()}
+               | {:protocol_error, term()}
+               | :payload_too_big
+  def decode_next(bin, max_frame_size \\ 16_384) when is_binary(bin) do
     case decode_next_raw(bin) do
       {:ok, {type, flags, stream_id, payload}, rest} ->
-        {:ok, decode_contents(type, flags, stream_id, payload), rest}
+        if byte_size(payload) > max_frame_size do
+          {:error, :payload_too_big}
+        else
+          {:ok, decode_contents(type, flags, stream_id, payload), rest}
+        end
 
       :more ->
         :more

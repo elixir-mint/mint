@@ -314,8 +314,33 @@ defmodule XHTTP2.ConnTest do
     assert Conn.get_setting(conn, :enable_push) == true
   end
 
+  test "server violates client's max frame size", %{conn: conn, server: server} do
+    server
+    |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      frame = data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
+      :ssl.send(state.socket, encode(frame))
+    end)
+    |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
+
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [])
+
+    assert {conn, :frame_size_error} = stream_messages_until_error(conn)
+    assert Conn.open?(conn) == false
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)
+  end
+
+  defp stream_messages_until_error(conn) do
+    case stream_next_message(conn) do
+      {:ok, %Conn{} = conn, responses} ->
+        assert responses == []
+        stream_messages_until_error(conn)
+
+      {:error, %Conn{} = conn, reason, _responses} ->
+        {conn, reason}
+    end
   end
 end

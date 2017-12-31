@@ -60,11 +60,15 @@ defmodule XHTTP2.Conn do
     open_stream_count: 0,
     ref_to_stream_id: %{},
 
-    # SETTINGS-related things.
+    # SETTINGS-related things for server.
     enable_push: true,
     server_max_concurrent_streams: 100,
     initial_window_size: @default_window_size,
     max_frame_size: @default_max_frame_size,
+
+    # SETTINGS-related things for client.
+    client_max_frame_size: @default_max_frame_size,
+    client_max_concurrent_streams: 100,
 
     # Headers being processed (when headers are split into multiple frames with CONTINUATIONS, all
     # the continuation frames must come one right after the other).
@@ -299,7 +303,7 @@ defmodule XHTTP2.Conn do
   end
 
   defp recv_next_frame(transport, socket, buffer) do
-    case Frame.decode_next(buffer) do
+    case Frame.decode_next(buffer, @default_max_frame_size) do
       {:ok, _frame, _rest} = result ->
         result
 
@@ -454,7 +458,7 @@ defmodule XHTTP2.Conn do
   ## Frame handling
 
   defp handle_new_data(%__MODULE__{} = conn, data, responses) do
-    case Frame.decode_next(data) do
+    case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
         Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
         assert_valid_frame!(conn, frame)
@@ -463,6 +467,13 @@ defmodule XHTTP2.Conn do
 
       :more ->
         {%{conn | buffer: data}, responses}
+
+      {:error, :payload_too_big} ->
+        # TODO: sometimes, this could be handled with RST_STREAM instead of a GOAWAY frame (for
+        # example, if the payload of a DATA frame is too big).
+        # http://httpwg.org/specs/rfc7540.html#rfc.section.4.2
+        debug_data = "frame payload exceeds connection's max frame size"
+        send_connection_error!(conn, :frame_size_error, debug_data)
 
       {:error, {:frame_size_error, frame}} ->
         debug_data = "error with size of frame: #{inspect(frame)}"
@@ -673,8 +684,13 @@ defmodule XHTTP2.Conn do
   end
 
   defp apply_client_settings(conn, client_settings) do
-    Logger.debug(fn -> "Applied client settings: #{inspect(client_settings)}" end)
-    conn
+    Enum.reduce(client_settings, conn, fn
+      {:max_frame_size, value}, conn ->
+        put_in(conn.client_max_frame_size, value)
+
+      {:max_concurrent_streams, value}, conn ->
+        put_in(conn.client_max_concurrent_streams, value)
+    end)
   end
 
   # PING
