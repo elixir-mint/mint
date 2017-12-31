@@ -216,6 +216,46 @@ defmodule XHTTP2.ConnTest do
       assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
       assert Conn.open?(conn)
     end
+
+    test "client has to split headers because of max frame size", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: 3, hbf: hbf, flags: flags) ->
+        assert flag_set?(flags, :headers, :end_stream)
+        refute flag_set?(flags, :headers, :end_headers)
+        Map.put(state, :current_hbf, hbf)
+      end)
+      |> Server.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
+        refute flag_set?(flags, :continuation, :end_headers)
+        Map.update!(state, :current_hbf, &(&1 <> hbf))
+      end)
+      |> Server.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
+        assert flag_set?(flags, :continuation, :end_headers)
+        hbf = Map.fetch!(state, :current_hbf) <> hbf
+        {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
+        state = put_in(state.decode_table, decode_table)
+        assert [{":method", "METH"} | _] = headers
+
+        {hbf, encode_table} = HPACK.encode([{:store_name, ":status", "200"}], state.encode_table)
+        state = put_in(state.encode_table, encode_table)
+
+        flags = set_flags(:headers, [:end_stream, :end_headers])
+        frame = headers(stream_id: 3, hbf: hbf, flags: flags)
+
+        :ssl.send(state.socket, encode(frame))
+
+        state
+      end)
+
+      # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
+      # between 2 and 3 times (so that we can test the behaviour above).
+      headers = for i <- 1..400, do: {"a#{i}", String.duplicate("a", 100)}
+      assert {:ok, conn, ref} = Conn.request(context.conn, "METH", "/", headers)
+
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
+      assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert Conn.open?(conn)
+    end
   end
 
   describe "frame encoding errors by the server" do

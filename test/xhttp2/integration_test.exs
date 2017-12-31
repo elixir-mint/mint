@@ -117,7 +117,6 @@ defmodule XHTTP2.IntegrationTest do
       assert Conn.open?(conn)
     end
 
-    @tag :focus
     test "GET /", %{conn: conn} do
       assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
 
@@ -143,7 +142,6 @@ defmodule XHTTP2.IntegrationTest do
       assert Conn.open?(conn)
     end
 
-    @tag :focus
     test "GET /", %{conn: conn} do
       assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
 

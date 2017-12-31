@@ -307,20 +307,46 @@ defmodule XHTTP2.Conn do
     {conn, stream.id, stream.ref}
   end
 
-  # TODO: split headers if hbf goes over max frame size (like we do for DATA).
   defp send_headers(conn, stream_id, headers, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state!(stream, :idle)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
     {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
-    frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
-    transport_send!(conn, Frame.encode(frame))
+    conn = put_in(conn.encode_table, encode_table)
+
+    if IO.iodata_length(hbf) > conn.max_frame_size do
+      {[first_chunk | chunks], last_chunk} =
+        hbf
+        |> IO.iodata_to_binary()
+        |> split_payload_in_chunks(conn.max_frame_size, _acc = [])
+
+      flags = set_flags(:headers, enabled_flags -- [:end_headers])
+      frame = headers(stream_id: stream_id, hbf: first_chunk, flags: flags)
+      transport_send!(conn, Frame.encode(frame))
+
+      Enum.each(chunks, fn chunk ->
+        frame = continuation(stream_id: stream_id, hbf: chunk)
+        transport_send!(conn, Frame.encode(frame))
+      end)
+
+      flags =
+        if :end_headers in enabled_flags do
+          set_flag(:continuation, :end_headers)
+        else
+          0x00
+        end
+
+      frame = continuation(stream_id: stream_id, hbf: last_chunk, flags: flags)
+      transport_send!(conn, Frame.encode(frame))
+    else
+      frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
+      transport_send!(conn, Frame.encode(frame))
+    end
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
     conn = put_in(conn.streams[stream_id].state, stream_state)
-    conn = put_in(conn.encode_table, encode_table)
     conn = update_in(conn.open_stream_count, &(&1 + 1))
     conn
   end
