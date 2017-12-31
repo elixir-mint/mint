@@ -41,8 +41,7 @@ defmodule XHTTP2.IntegrationTest do
     test "GET /clockstream", %{conn: conn} do
       assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "GET", "/clockstream", [])
 
-      assert_receive message, 5000
-      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^req_id, "200"}, {:headers, ^req_id, _headers}] = responses
 
       assert_receive message, 5000
@@ -134,6 +133,33 @@ defmodule XHTTP2.IntegrationTest do
     end
   end
 
+  describe "facebook.com" do
+    @moduletag connect: {"facebook.com", 443}
+
+    test "ping", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
+      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+
+    @tag :focus
+    test "GET /", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert status == "301"
+      assert is_list(headers)
+
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+  end
+
   defp receive_stream(conn) do
     receive_stream(conn, [])
   end
@@ -180,5 +206,14 @@ defmodule XHTTP2.IntegrationTest do
 
   defp maybe_done(conn, [], acc) do
     receive_stream(conn, acc)
+  end
+
+  defp stream_messages_until_response(conn) do
+    assert_receive message, 1000
+
+    case Conn.stream(conn, message) do
+      {:ok, %Conn{} = conn, []} -> stream_messages_until_response(conn)
+      other -> other
+    end
   end
 end

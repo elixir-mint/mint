@@ -666,7 +666,7 @@ defmodule XHTTP2.Conn do
         put_in(conn.max_frame_size, max_frame_size)
 
       {:max_header_list_size, max_header_list_size}, conn ->
-        Logger.warn(fn ->
+        Logger.debug(fn ->
           "Ignoring MAX_HEADERS_LIST_SIZE parameter with value #{max_header_list_size}"
         end)
 
