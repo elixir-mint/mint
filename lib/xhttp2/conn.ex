@@ -664,12 +664,14 @@ defmodule XHTTP2.Conn do
     end
   end
 
+  ## General helpers
+
   defp send_connection_error!(conn, error_code, debug_data) do
     frame =
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
     transport_send!(conn, Frame.encode(frame))
-    transport_close!(conn)
+    conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
     throw({:xhttp, conn, error_code})
   end
@@ -692,9 +694,5 @@ defmodule XHTTP2.Conn do
       :ok -> :ok
       {:error, reason} -> throw({:xhttp, reason})
     end
-  end
-
-  defp transport_close!(%__MODULE__{transport: transport, socket: socket}) do
-    transport.close(socket)
   end
 end
