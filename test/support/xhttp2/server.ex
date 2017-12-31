@@ -110,7 +110,7 @@ defmodule XHTTP2.Server do
   def handle_info(msg, state)
 
   def handle_info({:ssl, socket, packet}, %{socket: socket} = state) do
-    state = handle_data(state, packet)
+    state = handle_data(state, state.buffer <> packet)
     {:noreply, state}
   end
 
@@ -122,8 +122,8 @@ defmodule XHTTP2.Server do
     {:noreply, state}
   end
 
-  defp handle_data(state, packet) do
-    case decode_next(state.buffer <> packet) do
+  defp handle_data(state, data) do
+    case decode_next(data) do
       {:ok, frame, rest} ->
         case get_and_update_in(state.frame_handlers, &:queue.out/1) do
           {{:value, handler}, state} ->
@@ -135,7 +135,7 @@ defmodule XHTTP2.Server do
         end
 
       :more ->
-        put_in(state.buffer, packet)
+        put_in(state.buffer, data)
 
       {:error, reason} ->
         raise "frame decoding error: #{inspect(reason)}"

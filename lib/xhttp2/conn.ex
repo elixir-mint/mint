@@ -312,43 +312,50 @@ defmodule XHTTP2.Conn do
     assert_stream_in_state!(stream, :idle)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-    {hbf, encode_table} = HPACK.encode(headers, conn.encode_table)
-    conn = put_in(conn.encode_table, encode_table)
+    {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
 
-    if IO.iodata_length(hbf) > conn.max_frame_size do
-      {[first_chunk | chunks], last_chunk} =
-        hbf
-        |> IO.iodata_to_binary()
-        |> split_payload_in_chunks(conn.max_frame_size, _acc = [])
-
-      flags = set_flags(:headers, enabled_flags -- [:end_headers])
-      frame = headers(stream_id: stream_id, hbf: first_chunk, flags: flags)
-      transport_send!(conn, Frame.encode(frame))
-
-      Enum.each(chunks, fn chunk ->
-        frame = continuation(stream_id: stream_id, hbf: chunk)
-        transport_send!(conn, Frame.encode(frame))
-      end)
-
-      flags =
-        if :end_headers in enabled_flags do
-          set_flag(:continuation, :end_headers)
-        else
-          0x00
-        end
-
-      frame = continuation(stream_id: stream_id, hbf: last_chunk, flags: flags)
-      transport_send!(conn, Frame.encode(frame))
-    else
-      frame = headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
-      transport_send!(conn, Frame.encode(frame))
-    end
+    payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
+    transport_send!(conn, payload)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
     conn = put_in(conn.streams[stream_id].state, stream_state)
     conn = update_in(conn.open_stream_count, &(&1 + 1))
     conn
+  end
+
+  defp headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags) do
+    if IO.iodata_length(hbf) > conn.max_frame_size do
+      hbf
+      |> IO.iodata_to_binary()
+      |> split_payload_in_chunks(conn.max_frame_size)
+      |> split_hbf_to_encoded_frames(stream_id, enabled_flags)
+    else
+      Frame.encode(
+        headers(stream_id: stream_id, hbf: hbf, flags: set_flags(:headers, enabled_flags))
+      )
+    end
+  end
+
+  defp split_hbf_to_encoded_frames({[first_chunk | chunks], last_chunk}, stream_id, enabled_flags) do
+    flags = set_flags(:headers, enabled_flags -- [:end_headers])
+    first_frame = Frame.encode(headers(stream_id: stream_id, hbf: first_chunk, flags: flags))
+
+    middle_frames =
+      Enum.map(chunks, fn chunk ->
+        Frame.encode(continuation(stream_id: stream_id, hbf: chunk))
+      end)
+
+    flags =
+      if :end_headers in enabled_flags do
+        set_flag(:continuation, :end_headers)
+      else
+        0x00
+      end
+
+    last_frame = Frame.encode(continuation(stream_id: stream_id, hbf: last_chunk, flags: flags))
+
+    [first_frame, middle_frames, last_frame]
   end
 
   defp send_data(conn, stream_id, data, enabled_flags) do
@@ -368,7 +375,7 @@ defmodule XHTTP2.Conn do
         {chunks, last_chunk} =
           data
           |> IO.iodata_to_binary()
-          |> split_payload_in_chunks(conn.max_frame_size, _acc = [])
+          |> split_payload_in_chunks(conn.max_frame_size)
 
         conn =
           Enum.reduce(chunks, conn, fn chunk, acc ->
@@ -393,6 +400,9 @@ defmodule XHTTP2.Conn do
         conn
     end
   end
+
+  defp split_payload_in_chunks(binary, chunk_size),
+    do: split_payload_in_chunks(binary, chunk_size, [])
 
   defp split_payload_in_chunks(chunk, chunk_size, acc) when byte_size(chunk) <= chunk_size do
     {Enum.reverse(acc), chunk}
