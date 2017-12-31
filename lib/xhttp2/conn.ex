@@ -17,6 +17,9 @@ defmodule XHTTP2.Conn do
   @default_window_size 65_535
   @max_window_size 2_147_483_647
 
+  @default_max_frame_size 16_384
+  @valid_max_frame_size_range @default_max_frame_size..16_777_215
+
   @forced_transport_opts [
     packet: :raw,
     mode: :binary,
@@ -61,7 +64,7 @@ defmodule XHTTP2.Conn do
     enable_push: true,
     server_max_concurrent_streams: 100,
     initial_window_size: @default_window_size,
-    max_frame_size: 16_384,
+    max_frame_size: @default_max_frame_size,
 
     # Headers being processed (when headers are split into multiple frames with CONTINUATIONS, all
     # the continuation frames must come one right after the other).
@@ -538,13 +541,20 @@ defmodule XHTTP2.Conn do
 
       {:initial_window_size, initial_window_size}, conn ->
         if initial_window_size > @max_window_size do
-          send_connection_error!(conn, :flow_control_error, "initial window size is too big")
+          debug_data = "INITIAL_WINDOW_SIZE setting parameter is too big"
+          send_connection_error!(conn, :flow_control_error, debug_data)
         end
 
         # TODO: update open streams
         put_in(conn.initial_window_size, initial_window_size)
 
       {:max_frame_size, max_frame_size}, conn ->
+        if max_frame_size not in @valid_max_frame_size_range do
+          debug_data = "MAX_FRAME_SIZE setting parameter outside of allowed range"
+          send_connection_error!(conn, :protocol_error, debug_data)
+        end
+
+        # TODO: put this into effect
         put_in(conn.max_frame_size, max_frame_size)
 
       {:max_header_list_size, max_header_list_size}, conn ->
