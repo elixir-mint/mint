@@ -165,11 +165,21 @@ defmodule XHTTP2.Conn do
   end
 
   @spec put_settings(t(), keyword()) :: {:ok, t()} | {:error, t(), reason :: term()}
-  def put_settings(conn, settings) when is_list(settings) do
+  def put_settings(%__MODULE__{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
+  end
+
+  @spec get_setting(t(), atom()) :: term()
+  def get_setting(%__MODULE__{} = conn, name) do
+    case name do
+      :enable_push -> conn.enable_push
+      :max_concurrent_streams -> conn.server_max_concurrent_streams
+      :initial_window_size -> conn.initial_window_size
+      :max_frame_size -> conn.max_frame_size
+    end
   end
 
   @spec stream(t(), term()) ::

@@ -293,6 +293,11 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == true
   end
 
+  test "client can read server settings", %{conn: conn} do
+    assert Conn.get_setting(conn, :max_concurrent_streams) == 100
+    assert Conn.get_setting(conn, :enable_push) == true
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)
