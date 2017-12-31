@@ -42,9 +42,6 @@ defmodule XHTTP2.Conn do
     # Connection state (open, closed, and so on).
     :state,
 
-    # Settings set from the user.
-    :client_settings,
-
     # Fields of the connection.
     buffer: "",
     window_size: @default_window_size,
@@ -53,6 +50,9 @@ defmodule XHTTP2.Conn do
 
     # Queue for sent PING frames.
     ping_queue: :queue.new(),
+
+    # Queue for sent SETTINGS frames.
+    client_settings_queue: :queue.new(),
 
     # Stream-set-related things.
     next_stream_id: 3,
@@ -81,12 +81,12 @@ defmodule XHTTP2.Conn do
             transport: module(),
             socket: term(),
             state: :open | :closed | :went_away,
-            client_settings: settings(),
             buffer: binary(),
             window_size: pos_integer(),
             encode_table: HPACK.Table.t(),
             decode_table: HPACK.Table.t(),
             ping_queue: :queue.queue(),
+            client_settings_queue: :queue.queue(),
             next_stream_id: stream_id(),
             streams: %{optional(stream_id()) => map()},
             open_stream_count: non_neg_integer(),
@@ -160,6 +160,14 @@ defmodule XHTTP2.Conn do
   def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
     {:ok, conn, ref}
+  catch
+    :throw, {:xhttp, conn, error} -> {:error, conn, error}
+  end
+
+  @spec put_settings(t(), keyword()) :: {:ok, t()} | {:error, t(), reason :: term()}
+  def put_settings(conn, settings) when is_list(settings) do
+    conn = send_settings(conn, settings)
+    {:ok, conn}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
@@ -259,7 +267,7 @@ defmodule XHTTP2.Conn do
     case recv_next_frame(conn.transport, conn.socket, conn.buffer) do
       {:ok, settings(flags: flags), buffer} ->
         if flag_set?(flags, :settings, :ack) do
-          {:ok, %{conn | client_settings: client_settings, buffer: buffer}}
+          {:ok, %{conn | buffer: buffer}}
         else
           {:error, :protocol_error}
         end
@@ -366,6 +374,68 @@ defmodule XHTTP2.Conn do
     ref = make_ref()
     conn = update_in(conn.ping_queue, &:queue.in({ref, payload}, &1))
     {conn, ref}
+  end
+
+  defp send_settings(conn, settings) do
+    validate_settings!(settings)
+    frame = settings(stream_id: 0, params: settings)
+    transport_send!(conn, Frame.encode(frame))
+    conn = update_in(conn.client_settings_queue, &:queue.in(settings, &1))
+    conn
+  end
+
+  defp validate_settings!(settings) do
+    unless Keyword.keyword?(settings) do
+      raise ArgumentError, "settings must be a keyword list"
+    end
+
+    Enum.each(settings, fn
+      {:header_table_size, value} ->
+        unless is_integer(value) do
+          raise ArgumentError, ":header_table_size must be an integer, got: #{inspect(value)}"
+        end
+
+      {:enable_push, value} ->
+        case value do
+          true ->
+            raise ArgumentError,
+                  "push promises are not supported yet, so :enable_push must be false"
+
+          false ->
+            :ok
+
+          _other ->
+            raise ArgumentError, ":enable_push must be a boolean, got: #{inspect(value)}"
+        end
+
+      {:max_concurrent_streams, value} ->
+        unless is_integer(value) do
+          raise ArgumentError,
+                ":max_concurrent_streams must be an integer, got: #{inspect(value)}"
+        end
+
+      {:initial_window_size, value} ->
+        unless is_integer(value) and value <= @max_window_size do
+          raise ArgumentError,
+                ":initial_window_size must be an integer < #{@max_window_size}, " <>
+                  "got: #{inspect(value)}"
+        end
+
+      {:max_frame_size, value} ->
+        unless is_integer(value) and value in @valid_max_frame_size_range do
+          raise ArgumentError,
+                ":max_frame_size must be an integer in #{inspect(@valid_max_frame_size_range)}, " <>
+                  "got: #{inspect(value)}"
+        end
+
+      {:max_header_list_size, value} ->
+        unless is_integer(value) do
+          raise ArgumentError, ":max_header_list_size must be an integer, got: #{inspect(value)}"
+        end
+
+      {name, _value} ->
+        raise ArgumentError, "unknown setting parameter #{inspect(name)}"
+    end)
   end
 
   ## Frame handling
@@ -525,12 +595,13 @@ defmodule XHTTP2.Conn do
     settings(flags: flags, params: params) = frame
 
     if flag_set?(flags, :settings, :ack) do
-      # TODO: handle this.
-      raise "don't know how to handle SETTINGS acks yet"
+      {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
+      conn = apply_client_settings(conn, params)
+      {conn, responses}
     else
       conn = apply_server_settings(conn, params)
-      ack = settings(flags: set_flag(:settings, :ack))
-      transport_send!(conn, Frame.encode(ack))
+      frame = settings(flags: set_flag(:settings, :ack), params: [])
+      transport_send!(conn, Frame.encode(frame))
       {conn, responses}
     end
   end
@@ -571,6 +642,11 @@ defmodule XHTTP2.Conn do
 
         conn
     end)
+  end
+
+  defp apply_client_settings(conn, client_settings) do
+    Logger.debug(fn -> "Applied client settings: #{inspect(client_settings)}" end)
+    conn
   end
 
   # PING

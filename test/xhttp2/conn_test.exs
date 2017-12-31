@@ -282,6 +282,17 @@ defmodule XHTTP2.ConnTest do
     assert Conn.open?(conn) == false
   end
 
+  test "client can send settings to server", %{conn: conn, server: server} do
+    Server.expect(server, fn state, settings(params: [max_concurrent_streams: 123]) ->
+      frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
+      :ssl.send(state.socket, encode(frame))
+    end)
+
+    {:ok, conn} = Conn.put_settings(conn, max_concurrent_streams: 123)
+    assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+    assert Conn.open?(conn) == true
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)
