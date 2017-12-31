@@ -57,7 +57,7 @@ defmodule XHTTP2.ConnTest do
 
     {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
     assert [{:closed, ^ref, {:rst_stream, :protocol_error}}] = responses
     assert Conn.open?(conn)
   end
@@ -78,14 +78,14 @@ defmodule XHTTP2.ConnTest do
     {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [])
     {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [])
 
-    assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+    assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
 
     assert [
              {:closed, ^ref2, {:goaway, :protocol_error, "debug data"}},
              {:closed, ^ref3, {:goaway, :protocol_error, "debug data"}}
            ] = responses
 
-    assert {:error, %Conn{} = conn, :closed, []} = stream_next_message(conn)
+    assert {:error, %Conn{} = conn, :closed, []} = stream_messages_until_error(conn)
     refute Conn.open?(conn)
   end
 
@@ -113,9 +113,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}] = responses
 
       assert Conn.open?(conn)
@@ -132,7 +130,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:error, %Conn{} = conn, :compression_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :compression_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -146,7 +144,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -162,7 +160,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -190,9 +188,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
-      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
       assert Conn.open?(conn)
     end
@@ -216,7 +212,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:closed, ^ref, {:protocol_error, :missing_status_header}}] = responses
       assert Conn.open?(conn)
     end
@@ -233,7 +229,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :protocol_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -247,7 +243,7 @@ defmodule XHTTP2.ConnTest do
       |> Server.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
-      assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
   end
@@ -265,7 +261,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:closed, ^ref, :flow_control_error}] = responses
       assert Conn.open?(conn)
     end
@@ -281,7 +277,7 @@ defmodule XHTTP2.ConnTest do
       |> Server.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
-      assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_next_message(conn)
+      assert {:error, %Conn{} = conn, :flow_control_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -295,7 +291,7 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
 
-      assert {conn, :frame_size_error} = stream_messages_until_error(conn)
+      assert {:error, %Conn{} = conn, :frame_size_error, []} = stream_messages_until_error(conn)
       refute Conn.open?(conn)
     end
 
@@ -326,7 +322,7 @@ defmodule XHTTP2.ConnTest do
       body = :binary.copy(<<0>>, max_frame_size + 1)
       assert {:ok, %Conn{} = conn, ref} = Conn.request(context.conn, "GET", "/", [], body)
 
-      assert {:ok, %Conn{} = conn, responses} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
       assert Conn.open?(conn)
     end
@@ -334,12 +330,14 @@ defmodule XHTTP2.ConnTest do
 
   describe "settings" do
     test "client can send settings to server", context do
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(context.conn)
+
       Server.expect(context.server, fn state, settings(params: [max_concurrent_streams: 123]) ->
         frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
         :ssl.send(state.socket, encode(frame))
       end)
 
-      {:ok, conn} = Conn.put_settings(context.conn, max_concurrent_streams: 123)
+      {:ok, conn} = Conn.put_settings(conn, max_concurrent_streams: 123)
       assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
       assert Conn.open?(conn)
     end
@@ -355,14 +353,24 @@ defmodule XHTTP2.ConnTest do
     Conn.stream(conn, message)
   end
 
+  defp stream_messages_until_response(conn) do
+    case stream_next_message(conn) do
+      {:ok, %Conn{} = conn, []} ->
+        stream_messages_until_response(conn)
+
+      other ->
+        other
+    end
+  end
+
   defp stream_messages_until_error(conn) do
     case stream_next_message(conn) do
       {:ok, %Conn{} = conn, responses} ->
         assert responses == []
         stream_messages_until_error(conn)
 
-      {:error, %Conn{} = conn, reason, _responses} ->
-        {conn, reason}
+      {:error, %Conn{}, _reason, _responses} = error ->
+        error
     end
   end
 end

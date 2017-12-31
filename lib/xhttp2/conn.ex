@@ -253,22 +253,17 @@ defmodule XHTTP2.Conn do
     client_settings = settings(stream_id: 0, params: client_settings_params)
     server_settings_ack = settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack))
 
-    with :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
-         {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)) do
-      conn =
-        %__MODULE__{
-          state: :open,
-          transport: transport,
-          socket: socket,
-          buffer: buffer
-        }
-        |> apply_server_settings(settings(server_settings, :params))
+    conn = %__MODULE__{transport: transport, socket: socket}
 
-      with {:ok, conn} <- receive_client_settings_ack(conn, client_settings_params),
-           :ok <- transport_to_inet(transport).setopts(socket, active: true),
-           do: {:ok, conn}
-    end
+    with :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
+         conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
+         {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
+         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
+         conn = put_in(conn.state, :open),
+         conn = put_in(conn.buffer, buffer),
+         conn = apply_server_settings(conn, settings(server_settings, :params)),
+         :ok <- transport_to_inet(transport).setopts(socket, active: true),
+         do: {:ok, conn}
   end
 
   defp receive_server_settings(transport, socket) do
@@ -276,32 +271,6 @@ defmodule XHTTP2.Conn do
       {:ok, settings(), _buffer} = result -> result
       {:ok, _frame, _buffer} -> {:error, :protocol_error}
       {:error, _reason} = error -> error
-    end
-  end
-
-  defp receive_client_settings_ack(%__MODULE__{} = conn, client_settings) do
-    case recv_next_frame(conn.transport, conn.socket, conn.buffer) do
-      {:ok, settings(flags: flags), buffer} ->
-        if flag_set?(flags, :settings, :ack) do
-          conn = apply_client_settings(conn, client_settings)
-          {:ok, %{conn | buffer: buffer}}
-        else
-          {:error, :protocol_error}
-        end
-
-      {:ok, window_update(stream_id: 0, window_size_increment: wsi), buffer} ->
-        # TODO: handle window size increments that are too big.
-        conn = update_in(conn.window_size, &(&1 + wsi))
-        receive_client_settings_ack(%{conn | buffer: buffer}, client_settings)
-
-      {:ok, window_update(), _buffer} ->
-        {:error, :protocol_error}
-
-      {:ok, goaway() = frame, _buffer} ->
-        {:error, {:goaway, frame}}
-
-      {:error, _reason} = error ->
-        error
     end
   end
 
@@ -315,11 +284,8 @@ defmodule XHTTP2.Conn do
           recv_next_frame(transport, socket, buffer <> data)
         end
 
-      {:error, {:frame_size_error, _frame}} ->
-        {:error, :frame_size_error}
-
-      {:error, {:protocol_error, _info}} ->
-        {:error, :protocol_error}
+      {:error, {kind, _info}} when kind in [:frame_size_error, :protocol_error] ->
+        {:error, kind}
     end
   end
 
