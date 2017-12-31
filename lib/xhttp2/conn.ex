@@ -480,6 +480,9 @@ defmodule XHTTP2.Conn do
       throw({:xhttp, conn, error, responses})
   end
 
+  # Other frames (from any stream) MUST NOT occur between the HEADERS frame and any CONTINUATION
+  # frames that might follow.
+  # http://httpwg.org/specs/rfc7540.html#HttpSequence
   defp assert_valid_frame!(conn, frame) do
     if conn.headers_being_processed && not match?(continuation(), frame) do
       debug_data = "headers are streaming but got a non-CONTINUATION frame"
@@ -654,8 +657,7 @@ defmodule XHTTP2.Conn do
           send_connection_error!(conn, :flow_control_error, debug_data)
         end
 
-        # TODO: update open streams
-        put_in(conn.initial_window_size, initial_window_size)
+        update_initial_window_size(conn, initial_window_size)
 
       {:max_frame_size, max_frame_size}, conn ->
         if max_frame_size not in @valid_max_frame_size_range do
@@ -682,6 +684,28 @@ defmodule XHTTP2.Conn do
       {:max_concurrent_streams, value}, conn ->
         put_in(conn.client_max_concurrent_streams, value)
     end)
+  end
+
+  defp update_initial_window_size(conn, new_iws) do
+    diff = new_iws - conn.initial_window_size
+
+    conn =
+      update_in(conn.streams, fn streams ->
+        for {stream_id, stream} <- streams,
+            stream.state in [:open, :half_closed_remote],
+            into: streams do
+          window_size = stream.window_size + diff
+
+          if window_size > @max_window_size do
+            debug_data = "INITIAL_WINDOW_SIZE setting parameter makes some window sizes too big"
+            send_connection_error!(conn, :flow_control_error, debug_data)
+          end
+
+          {stream_id, %{stream | window_size: window_size}}
+        end
+      end)
+
+    put_in(conn.initial_window_size, new_iws)
   end
 
   # PING

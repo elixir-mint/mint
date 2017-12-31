@@ -346,6 +346,25 @@ defmodule XHTTP2.ConnTest do
       assert Conn.get_setting(conn, :max_concurrent_streams) == 100
       assert Conn.get_setting(conn, :enable_push) == true
     end
+
+    test "server can update the initial window size and affect open streams", context do
+      context.server
+      |> Server.expect(fn state, headers(stream_id: 3) ->
+        frame = settings(params: [initial_window_size: 100])
+        :ssl.send(state.socket, encode(frame))
+      end)
+      |> Server.expect(fn state, settings(flags: 0x01, params: []) -> state end)
+
+      {:ok, conn, _ref} = Conn.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %Conn{} = conn, []} = stream_next_message(conn)
+      assert conn.initial_window_size == 100
+
+      # This stream is half_closed_local, so there's not point in updating its window size since
+      # we won't send anything on it anymore.
+      assert conn.streams[3].window_size == 65535
+    end
   end
 
   defp stream_next_message(conn) do
