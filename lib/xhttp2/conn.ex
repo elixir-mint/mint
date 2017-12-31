@@ -537,8 +537,11 @@ defmodule XHTTP2.Conn do
         put_in(conn.server_max_concurrent_streams, max_concurrent_streams)
 
       {:initial_window_size, initial_window_size}, conn ->
+        if initial_window_size > @max_window_size do
+          send_connection_error!(conn, :flow_control_error, "initial window size is too big")
+        end
+
         # TODO: update open streams
-        # TODO: check that the iws is under the @max_window_size
         put_in(conn.initial_window_size, initial_window_size)
 
       {:max_frame_size, max_frame_size}, conn ->
