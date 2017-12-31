@@ -164,6 +164,11 @@ defmodule XHTTP2.Conn do
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
+  @spec stream(t(), term()) ::
+          {:ok, t(), [response]}
+          | {:error, t(), reason :: term(), [response]}
+          | :unknown
+        when response: term()
   def stream(conn, message)
 
   def stream(%__MODULE__{socket: socket} = conn, {error_tag, socket, reason})
@@ -180,7 +185,7 @@ defmodule XHTTP2.Conn do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
     {:ok, conn, Enum.reverse(responses)}
   catch
-    :throw, {:xhttp, conn, error} -> {:error, conn, error}
+    :throw, {:xhttp, conn, error} -> {:error, conn, error, []}
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
   end
 
