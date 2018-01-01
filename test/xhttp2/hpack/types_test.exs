@@ -4,16 +4,18 @@ defmodule HPACK.TypesTest do
 
   import XHTTP2.HPACK.Types
 
-  test "encode_integer/2 with examples from the spec" do
-    assert encode_integer(10, _prefix = 5) == <<0b01010::5>>
-    assert encode_integer(1337, 5) == <<0b11111_10011010_00001010::21>>
-    assert encode_integer(42, 8) == <<0b00101010::8>>
-  end
+  describe "examples from the spec" do
+    test "for encode_integer/2" do
+      assert encode_integer(10, _prefix = 5) == <<0b01010::5>>
+      assert encode_integer(1337, 5) == <<0b11111_10011010_00001010::21>>
+      assert encode_integer(42, 8) == <<0b00101010::8>>
+    end
 
-  test "decode_integer/2 with examples from the spec" do
-    assert decode_integer(<<0b01010::5, "foo">>, _prefix = 5) == {:ok, 10, "foo"}
-    assert decode_integer(<<0b11111_10011010_00001010::21, "foo">>, 5) == {:ok, 1337, "foo"}
-    assert decode_integer(<<0b00101010::8, "foo">>, 8) == {:ok, 42, "foo"}
+    test "for decode_integer/2" do
+      assert decode_integer(<<0b01010::5, "foo">>, _prefix = 5) == {:ok, 10, "foo"}
+      assert decode_integer(<<0b11111_10011010_00001010::21, "foo">>, 5) == {:ok, 1337, "foo"}
+      assert decode_integer(<<0b00101010::8, "foo">>, 8) == {:ok, 42, "foo"}
+    end
   end
 
   test "decode_integer/2 with bad data" do
