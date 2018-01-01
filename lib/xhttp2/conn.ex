@@ -98,7 +98,8 @@ defmodule XHTTP2.Conn do
             enable_push: boolean(),
             server_max_concurrent_streams: non_neg_integer(),
             initial_window_size: pos_integer(),
-            max_frame_size: pos_integer()
+            max_frame_size: pos_integer(),
+            headers_being_processed: {stream_id(), iodata(), boolean()} | nil
           }
 
   ## Public interface
@@ -524,6 +525,10 @@ defmodule XHTTP2.Conn do
   # http://httpwg.org/specs/rfc7540.html#HttpSequence
   defp assert_frame_doesnt_interrupt_header_streaming(conn, frame) do
     case {conn.headers_being_processed, frame} do
+      {nil, continuation()} ->
+        debug_data = "CONTINUATION received outside of headers streaming"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
       {nil, _frame} ->
         :ok
 
@@ -610,51 +615,48 @@ defmodule XHTTP2.Conn do
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     stream = fetch_stream!(conn, stream_id)
-
     assert_stream_in_state(conn, stream, [:open, :half_closed_local])
-
-    end_headers? = flag_set?(flags, :headers, :end_headers)
     end_stream? = flag_set?(flags, :headers, :end_stream)
 
-    {conn, responses} =
-      if end_headers? do
-        decode_headers!(conn, responses, stream, hbf)
-      else
-        conn = put_in(conn.headers_being_processed, {stream_id, hbf, end_stream?})
-        {conn, responses}
-      end
-
-    stream_ref = stream.ref
-
-    # TODO: make this horror better.
-    {conn, responses} =
-      cond do
-        match?([{:closed, ^stream_ref, _} | _], responses) ->
-          {conn, responses}
-
-        end_stream? and end_headers? ->
-          conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
-          conn = update_in(conn.open_stream_count, &(&1 - 1))
-          {conn, [{:done, stream.ref} | responses]}
-
-        true ->
-          {conn, responses}
-      end
-
-    {conn, responses}
+    if flag_set?(flags, :headers, :end_headers) do
+      decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
+    else
+      conn = put_in(conn.headers_being_processed, {stream_id, hbf, end_stream?})
+      {conn, responses}
+    end
   end
 
-  defp decode_headers!(conn, responses, stream, hbf) do
-    case HPACK.decode(hbf, conn.decode_table) do
-      {:ok, [{":status", status} | headers], decode_table} ->
-        conn = put_in(conn.decode_table, decode_table)
-        {conn, [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]}
+  defp decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?) do
+    case decode_hbf(conn, hbf) do
+      {:ok, status, headers, conn} ->
+        responses = [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]
 
-      {:ok, _headers, decode_table} ->
-        # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-        conn = put_in(conn.decode_table, decode_table)
+        if end_stream? do
+          conn = put_in(conn.streams[stream.id].state, :half_closed_remote)
+          conn = update_in(conn.open_stream_count, &(&1 - 1))
+          {conn, [{:done, stream.ref} | responses]}
+        else
+          {conn, responses}
+        end
+
+      # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
+      {:error, :missing_status_header, conn} ->
         conn = close_stream!(conn, stream.id, :protocol_error)
-        {conn, [{:closed, stream.ref, {:protocol_error, :missing_status_header}} | responses]}
+        reason = {:protocol_error, :missing_status_header}
+        responses = [{:closed, stream.ref, reason} | responses]
+        {conn, responses}
+    end
+  end
+
+  defp decode_hbf(conn, hbf) do
+    case HPACK.decode(hbf, conn.decode_table) do
+      {:ok, headers, decode_table} ->
+        conn = put_in(conn.decode_table, decode_table)
+
+        case headers do
+          [{":status", status} | headers] -> {:ok, status, headers, conn}
+          _other -> {:error, :missing_status_header, conn}
+        end
 
       {:error, reason} ->
         debug_data = "unable to decode headers: #{inspect(reason)}"
@@ -855,30 +857,17 @@ defmodule XHTTP2.Conn do
   # CONTINUATION
 
   defp handle_continuation(conn, frame, responses) do
-    continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
+    continuation(stream_id: stream_id, flags: flags, hbf: hbf_chunk) = frame
     stream = fetch_stream!(conn, stream_id)
 
-    case conn.headers_being_processed do
-      {^stream_id, hbf_acc, end_stream?} ->
-        end_headers? = flag_set?(flags, :continuation, :end_headers)
+    {^stream_id, hbf_acc, end_stream?} = conn.headers_being_processed
 
-        {conn, responses} =
-          if end_headers? do
-            decode_headers!(conn, responses, stream, hbf_acc <> hbf)
-          else
-            conn = put_in(conn.headers_being_processed, {stream_id, hbf_acc <> hbf, end_stream?})
-            {conn, responses}
-          end
-
-        if end_stream? and end_headers? do
-          {conn, [{:done, stream.ref} | responses]}
-        else
-          {conn, responses}
-        end
-
-      _other ->
-        debug_data = "CONTINUATION received outside of headers streaming"
-        send_connection_error!(conn, :protocol_error, debug_data)
+    if flag_set?(flags, :continuation, :end_headers) do
+      hbf = IO.iodata_to_binary([hbf_acc, hbf_chunk])
+      decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
+    else
+      conn = put_in(conn.headers_being_processed, {stream_id, [hbf_acc, hbf_chunk], end_stream?})
+      {conn, responses}
     end
   end
 
