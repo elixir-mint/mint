@@ -163,7 +163,9 @@ defmodule XHTTP2.IntegrationTest do
   end
 
   defp receive_stream(conn, responses) do
-    receive do
+    assert_receive message, 10_000
+
+    case message do
       {:rest, conn, rest_responses} ->
         maybe_done(conn, rest_responses, responses)
 
@@ -176,9 +178,9 @@ defmodule XHTTP2.IntegrationTest do
 
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
         assert {:error, %Conn{}, _reason} = Conn.stream(conn, message)
-    after
-      10000 ->
-        flunk("receive_stream timeout")
+
+      other ->
+        flunk("Received unexpected message: #{inspect(other)}")
     end
   end
 
