@@ -309,7 +309,7 @@ defmodule XHTTP2.Conn do
 
   defp send_headers(conn, stream_id, headers, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(conn, stream, [:idle])
+    assert_stream_in_state(conn, stream, [:idle])
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
@@ -360,7 +360,7 @@ defmodule XHTTP2.Conn do
 
   defp send_data(conn, stream_id, data, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(conn, stream, [:open])
+    assert_stream_in_state(conn, stream, [:open])
 
     data_size = IO.iodata_length(data)
 
@@ -489,7 +489,7 @@ defmodule XHTTP2.Conn do
     case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
         Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
-        assert_valid_frame!(conn, frame)
+        assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
 
@@ -516,14 +516,43 @@ defmodule XHTTP2.Conn do
       throw({:xhttp, conn, error, responses})
   end
 
-  # Other frames (from any stream) MUST NOT occur between the HEADERS frame and any CONTINUATION
-  # frames that might follow.
+  defp assert_valid_frame(conn, frame) do
+    assert_frame_on_right_level(conn, elem(frame, 0), elem(frame, 1))
+    assert_frame_doesnt_interrupt_header_streaming(conn, frame)
+  end
+
   # http://httpwg.org/specs/rfc7540.html#HttpSequence
-  defp assert_valid_frame!(conn, frame) do
-    if conn.headers_being_processed && not match?(continuation(), frame) do
-      debug_data = "headers are streaming but got a non-CONTINUATION frame"
-      send_connection_error!(conn, :protocol_error, debug_data)
+  defp assert_frame_doesnt_interrupt_header_streaming(conn, frame) do
+    case {conn.headers_being_processed, frame} do
+      {nil, _frame} ->
+        :ok
+
+      {{stream_id, _, _}, continuation(stream_id: stream_id)} ->
+        :ok
+
+      _other ->
+        debug_data = "headers are streaming but got a frame that is not related to that"
+        send_connection_error!(conn, :protocol_error, debug_data)
     end
+  end
+
+  stream_level_frames = [:data, :headers, :priority, :rst_stream, :push_promise, :continuation]
+  connection_level_frames = [:settings, :ping, :goaway]
+
+  defp assert_frame_on_right_level(conn, frame, 0)
+       when frame in unquote(stream_level_frames) do
+    debug_data = "frame #{frame} not allowed at the connection level (stream_id = 0)"
+    send_connection_error!(conn, :protocol_error, debug_data)
+  end
+
+  defp assert_frame_on_right_level(conn, frame, stream_id)
+       when frame in unquote(connection_level_frames) and stream_id != 0 do
+    debug_data = "frame #{frame} only allowed at the connection level"
+    send_connection_error!(conn, :protocol_error, debug_data)
+  end
+
+  defp assert_frame_on_right_level(_conn, _frame, _stream_id) do
+    :ok
   end
 
   defp handle_frame(conn, data() = frame, resps), do: handle_data(conn, frame, resps)
@@ -553,10 +582,9 @@ defmodule XHTTP2.Conn do
 
   defp handle_data(conn, frame, responses) do
     data(stream_id: stream_id, flags: flags, data: data, padding: padding) = frame
-
-    assert_frame_on_stream!(conn, :data, stream_id)
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(conn, stream, [:open, :half_closed_local])
+
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
 
     refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
 
@@ -581,9 +609,9 @@ defmodule XHTTP2.Conn do
 
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
-    assert_frame_on_stream!(conn, :headers, stream_id)
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state!(conn, stream, [:open, :half_closed_local])
+
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
 
     end_headers? = flag_set?(flags, :headers, :end_headers)
     end_stream? = flag_set?(flags, :headers, :end_stream)
@@ -643,13 +671,8 @@ defmodule XHTTP2.Conn do
 
   # RST_STREAM
 
-  defp handle_rst_stream(
-         conn,
-         rst_stream(stream_id: stream_id, error_code: error_code),
-         responses
-       ) do
-    assert_frame_on_stream!(conn, :rst_stream, stream_id)
-
+  defp handle_rst_stream(conn, frame, responses) do
+    rst_stream(stream_id: stream_id, error_code: error_code) = frame
     stream = fetch_stream!(conn, stream_id)
     conn = put_in(conn.streams[stream_id].state, :closed)
     {conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
@@ -659,7 +682,6 @@ defmodule XHTTP2.Conn do
 
   defp handle_settings(conn, frame, responses) do
     settings(stream_id: stream_id, flags: flags, params: params) = frame
-    assert_frame_on_connection!(conn, :settings, stream_id)
 
     if flag_set?(flags, :settings, :ack) do
       {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
@@ -744,8 +766,7 @@ defmodule XHTTP2.Conn do
   # PING
 
   defp handle_ping(conn, Frame.ping() = frame, responses) do
-    Frame.ping(stream_id: stream_id, flags: flags, opaque_data: opaque_data) = frame
-    assert_frame_on_connection!(conn, :ping, stream_id)
+    Frame.ping(flags: flags, opaque_data: opaque_data) = frame
 
     if flag_set?(flags, :ping, :ack) do
       handle_ping_ack(conn, opaque_data, responses)
@@ -776,13 +797,10 @@ defmodule XHTTP2.Conn do
 
   defp handle_goaway(conn, frame, responses) do
     goaway(
-      stream_id: stream_id,
       last_stream_id: last_stream_id,
       error_code: error_code,
       debug_data: debug_data
     ) = frame
-
-    assert_frame_on_connection!(conn, :goaway, stream_id)
 
     unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
 
@@ -838,8 +856,6 @@ defmodule XHTTP2.Conn do
 
   defp handle_continuation(conn, frame, responses) do
     continuation(stream_id: stream_id, flags: flags, hbf: hbf) = frame
-    assert_frame_on_stream!(conn, :continuation, stream_id)
-
     stream = fetch_stream!(conn, stream_id)
 
     case conn.headers_being_processed do
@@ -891,23 +907,9 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp assert_stream_in_state!(conn, %{state: state}, expected_states) do
+  defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
       throw({:xhttp, conn, {:stream_not_in_expected_state, expected_states, state}})
-    end
-  end
-
-  defp assert_frame_on_stream!(conn, frame, stream_id) do
-    if stream_id == 0 do
-      debug_data = "frame #{frame} not allowed at the connection level (stream_id = 0)"
-      send_connection_error!(conn, :protocol_error, debug_data)
-    end
-  end
-
-  defp assert_frame_on_connection!(conn, frame, stream_id) do
-    if stream_id != 0 do
-      debug_data = "frame #{frame} only allowed at the connection level"
-      send_connection_error!(conn, :protocol_error, debug_data)
     end
   end
 
