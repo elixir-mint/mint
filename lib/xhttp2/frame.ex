@@ -41,34 +41,19 @@ defmodule XHTTP2.Frame do
     continuation: [end_headers: 0x04]
   }
 
-  @doc """
-  Sets the flag specified by `flag_name` on the given `flags`.
+  for {frame, flags} <- @flags do
+    flags =
+      flags
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.reduce(fn name, acc -> quote(do: unquote(name) | unquote(acc)) end)
 
-  `flags` is an integer. `frame_name` should be the name of the frame
-  `flags` belong to (used for ensuring `flag_name`) belongs to that frame.
-  """
-  @spec set_flag(byte(), :data, :end_stream | :padded) :: byte()
-  @spec set_flag(byte(), :settings, :ack) :: byte()
-  @spec set_flag(byte(), :push_promise, :end_headers | :padded) :: byte()
-  @spec set_flag(byte(), :ping, :ack) :: byte()
-  @spec set_flag(byte(), :continuation, :end_headers) :: byte()
-  @spec set_flag(byte(), :headers, :end_stream | :end_headers | :padded | :priority) :: byte()
+    @spec set_flag(byte(), unquote(frame), unquote(flags)) :: byte()
+    @spec set_flag(unquote(frame), unquote(flags)) :: byte()
+    @spec flag_set?(byte(), unquote(frame), unquote(flags)) :: boolean()
+  end
+
   def set_flag(flags, frame_name, flag_name)
-
-  @spec set_flag(:data, :end_stream | :padded) :: byte()
-  @spec set_flag(:settings, :ack) :: byte()
-  @spec set_flag(:push_promise, :end_headers | :padded) :: byte()
-  @spec set_flag(:ping, :ack) :: byte()
-  @spec set_flag(:continuation, :end_headers) :: byte()
-  @spec set_flag(:headers, :end_stream | :end_headers | :padded | :priority) :: byte()
   def set_flag(frame_name, flag_name)
-
-  @spec flag_set?(byte(), :data, :end_stream | :padded) :: boolean()
-  @spec flag_set?(byte(), :settings, :ack) :: boolean()
-  @spec flag_set?(byte(), :push_promise, :end_headers | :padded) :: boolean()
-  @spec flag_set?(byte(), :ping, :ack) :: boolean()
-  @spec flag_set?(byte(), :continuation, :end_headers) :: boolean()
-  @spec flag_set?(byte(), :headers, :end_stream | :end_headers | :padded | :priority) :: boolean()
   def flag_set?(flags, frame_name, flag_name)
 
   for {frame, flags} <- @flags,
