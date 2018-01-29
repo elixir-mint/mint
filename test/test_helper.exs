@@ -1,5 +1,6 @@
 ExUnit.start()
 Application.ensure_all_started(:ssl)
+Logger.configure(level: :info)
 
 defmodule XHTTP1.TestHelpers do
   def merge_body(responses, request) do
