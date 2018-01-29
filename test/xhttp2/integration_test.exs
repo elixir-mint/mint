@@ -133,7 +133,7 @@ defmodule XHTTP2.IntegrationTest do
   end
 
   describe "facebook.com" do
-    @moduletag connect: {"facebook.com", 443}
+    @describetag connect: {"facebook.com", 443}
 
     test "ping", %{conn: conn} do
       assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
@@ -151,6 +151,33 @@ defmodule XHTTP2.IntegrationTest do
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
 
       assert status == "301"
+      assert is_list(headers)
+
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+  end
+
+  describe "nghttp2.org/httpbin" do
+    @describetag :focus
+    @describetag connect: {"nghttp2.org", 443}
+
+    test "ping", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
+      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert conn.buffer == ""
+      assert Conn.open?(conn)
+    end
+
+    test "GET /", %{conn: conn} do
+      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/httpbin/", [])
+
+      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert status == "200"
       assert is_list(headers)
 
       assert conn.buffer == ""
