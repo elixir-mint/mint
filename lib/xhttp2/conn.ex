@@ -126,8 +126,7 @@ defmodule XHTTP2.Conn do
       conn = %{conn | hostname: hostname, port: port, scheme: scheme}
       {:ok, conn}
     else
-      {:error, reason} ->
-        {:error, {:connect, reason}}
+      {:error, _reason} = error -> error
     end
   end
 

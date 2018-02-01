@@ -71,8 +71,7 @@ defmodule XHTTP1.Conn do
          :ok <- inet_opts(transport, socket) do
       {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
     else
-      {:error, reason} ->
-        {:error, {:connect, reason}}
+      {:error, _reason} = error -> error
     end
   end
 
