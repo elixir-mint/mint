@@ -66,7 +66,7 @@ defmodule XHTTP1.ConnTest do
 
     assert {:ok, conn, [{:body, ^ref, "BODY2"}]} = Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
 
-    assert {:ok, conn, [{:done, ^ref}]} = Conn.stream(conn, {:tcp_close, conn.socket})
+    assert {:ok, conn, [{:done, ^ref}]} = Conn.stream(conn, {:tcp_closed, conn.socket})
     refute Conn.open?(conn)
   end
 

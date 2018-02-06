@@ -25,7 +25,7 @@ defmodule XHTTP1.Conn do
   @type request_ref() :: reference()
   @type tcp_message() ::
           {:tcp | :ssl, :gen_tcp.socket(), binary()}
-          | {:tcp_close | :ssl_close, :gen_tcp.socket()}
+          | {:tcp_closed | :ssl_closed, :gen_tcp.socket()}
           | {:tcp_error | :ssl_error, :gen_tcp.socket(), term()}
   @type response() ::
           {:status, request_ref(), status_line()}
@@ -215,7 +215,7 @@ defmodule XHTTP1.Conn do
   end
 
   def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
-      when tag in [:tcp_close, :ssl_close] do
+      when tag in [:tcp_closed, :ssl_closed] do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
 

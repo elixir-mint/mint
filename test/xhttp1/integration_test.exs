@@ -156,7 +156,7 @@ defmodule XHTTP1.IntegrationTest do
         assert {:ok, conn, new_responses} = Conn.stream(conn, message)
         maybe_done(conn, new_responses, responses)
 
-      {tag, _socket} = message when tag in [:tcp_close, :ssl_close] ->
+      {tag, _socket} = message when tag in [:tcp_closed, :ssl_closed] ->
         assert {:error, _conn, :closed} = Conn.stream(conn, message)
 
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
