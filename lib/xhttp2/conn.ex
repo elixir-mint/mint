@@ -682,7 +682,7 @@ defmodule XHTTP2.Conn do
   # SETTINGS
 
   defp handle_settings(conn, frame, responses) do
-    settings(stream_id: stream_id, flags: flags, params: params) = frame
+    settings(flags: flags, params: params) = frame
 
     if flag_set?(flags, :settings, :ack) do
       {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
