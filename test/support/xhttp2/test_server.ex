@@ -1,4 +1,4 @@
-defmodule XHTTP2.Server do
+defmodule XHTTP2.TestServer do
   use GenServer
 
   import XHTTP2.Frame

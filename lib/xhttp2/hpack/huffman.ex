@@ -13,10 +13,10 @@ defmodule XHTTP2.HPACK.Huffman do
       [byte_value, bits, _hex, bit_count] =
         line
         |> case do
-             <<?', _, ?', ?\s, rest::binary>> -> rest
-             "EOS " <> rest -> rest
-             _other -> line
-           end
+          <<?', _, ?', ?\s, rest::binary>> -> rest
+          "EOS " <> rest -> rest
+          _other -> line
+        end
         |> String.replace(["|", "(", ")", "[", "]"], "")
         |> String.split()
 

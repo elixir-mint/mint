@@ -1,7 +1,7 @@
 language: elixir
 sudo: false
-elixir: 1.5.2
-otp_release: 20.1
+elixir: 1.6.1
+otp_release: 20.2
 notifications:
   recipients:
     - eric.meadows.jonsson@gmail.com

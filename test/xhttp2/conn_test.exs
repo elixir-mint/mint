@@ -5,20 +5,20 @@ defmodule XHTTP2.ConnTest do
 
   alias XHTTP2.{
     Conn,
-    Server
+    TestServer
   }
 
   setup context do
     if context[:connect] == false do
       []
     else
-      {:ok, server} = Server.start()
-      port = Server.port(server)
-      Server.start_accepting(server)
+      {:ok, server} = TestServer.start()
+      port = TestServer.port(server)
+      TestServer.start_accepting(server)
       {:ok, conn} = Conn.connect("localhost", port, transport: :ssl)
 
       on_exit(fn ->
-        Server.stop(server)
+        TestServer.stop(server)
       end)
 
       [conn: conn, server: server]
@@ -49,8 +49,8 @@ defmodule XHTTP2.ConnTest do
   end
 
   test "server closes a stream with RST_STREAM", context do
-    Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
-      Server.send_frame(state, rst_stream(stream_id: stream_id, error_code: :protocol_error))
+    TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
+      TestServer.send_frame(state, rst_stream(stream_id: stream_id, error_code: :protocol_error))
     end)
 
     {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
@@ -62,12 +62,12 @@ defmodule XHTTP2.ConnTest do
 
   test "server closes the connection with GOAWAY", context do
     context.server
-    |> Server.expect(fn state, headers(stream_id: 3) -> state end)
-    |> Server.expect(fn state, headers(stream_id: 5) -> state end)
-    |> Server.expect(fn state, headers(stream_id: 7) ->
+    |> TestServer.expect(fn state, headers(stream_id: 3) -> state end)
+    |> TestServer.expect(fn state, headers(stream_id: 5) -> state end)
+    |> TestServer.expect(fn state, headers(stream_id: 7) ->
       code = :protocol_error
       frame = goaway(stream_id: 0, last_stream_id: 3, error_code: code, debug_data: "debug data")
-      Server.send_frame(state, frame)
+      TestServer.send_frame(state, frame)
       :ok = :ssl.close(state.socket)
       %{state | socket: nil}
     end)
@@ -89,25 +89,25 @@ defmodule XHTTP2.ConnTest do
 
   describe "headers and continuation" do
     test "server splits headers into multiple CONTINUATION frames", context do
-      Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
+      TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
         headers = [
           {:store_name, ":status", "200"},
           {:store_name, "foo", "bar"},
           {:store_name, "baz", "bong"}
         ]
 
-        {state, hbf} = Server.encode_headers(state, headers)
+        {state, hbf} = TestServer.encode_headers(state, headers)
 
         <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
 
         frame1 = headers(stream_id: stream_id, hbf: hbf1)
-        state = Server.send_frame(state, frame1)
+        state = TestServer.send_frame(state, frame1)
 
         frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-        state = Server.send_frame(state, frame2)
+        state = TestServer.send_frame(state, frame2)
 
         frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
-        state = Server.send_frame(state, frame3)
+        state = TestServer.send_frame(state, frame3)
 
         state
       end)
@@ -115,19 +115,19 @@ defmodule XHTTP2.ConnTest do
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
       assert {:ok, %Conn{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _headers}] = responses
 
       assert Conn.open?(conn)
     end
 
     test "server sends a badly encoded header block", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         flags = set_flag(:headers, :end_headers)
         frame = headers(stream_id: stream_id, hbf: "not a good hbf", flags: flags)
-        Server.send_frame(state, frame)
+        TestServer.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, goaway() ->
+      |> TestServer.expect(fn state, goaway() ->
         state
       end)
 
@@ -141,10 +141,10 @@ defmodule XHTTP2.ConnTest do
 
     test "server sends a CONTINUATION frame outside of headers streaming", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
-        Server.send_frame(state, continuation(stream_id: stream_id, hbf: "hbf"))
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
+        TestServer.send_frame(state, continuation(stream_id: stream_id, hbf: "hbf"))
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :protocol_error) ->
         state
       end)
 
@@ -156,13 +156,13 @@ defmodule XHTTP2.ConnTest do
 
     test "server sends a non-CONTINUATION frame while streaming headers", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         # Headers are streaming but we send a non-CONTINUATION frame.
         headers = headers(stream_id: stream_id, hbf: "hbf")
         data = data(stream_id: stream_id, data: "some data")
-        Server.send(state, [encode(headers), encode(data)])
+        TestServer.send(state, [encode(headers), encode(data)])
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :protocol_error) ->
         state
       end)
 
@@ -173,26 +173,26 @@ defmodule XHTTP2.ConnTest do
     end
 
     test "server sends a HEADERS with END_STREAM set but not END_HEADERS", context do
-      Server.expect(context.server, fn state, headers(stream_id: stream_id) ->
+      TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
         headers = [
           {:store_name, ":status", "200"},
           {:store_name, "foo", "bar"},
           {:store_name, "baz", "bong"}
         ]
 
-        {state, hbf} = Server.encode_headers(state, headers)
+        {state, hbf} = TestServer.encode_headers(state, headers)
 
         <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
 
         frame1 = headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
-        state = Server.send_frame(state, frame1)
+        state = TestServer.send_frame(state, frame1)
 
         frame2 = continuation(stream_id: stream_id, hbf: hbf2)
-        state = Server.send_frame(state, frame2)
+        state = TestServer.send_frame(state, frame2)
 
         flags = set_flag(:continuation, :end_headers)
         frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: flags)
-        state = Server.send_frame(state, frame3)
+        state = TestServer.send_frame(state, frame3)
 
         state
       end)
@@ -200,24 +200,24 @@ defmodule XHTTP2.ConnTest do
       {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [])
 
       assert {:ok, %Conn{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, "200"}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
       assert Conn.open?(conn)
     end
 
     test "server sends a response without a :status header", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         headers = [
           {:store_name, "foo", "bar"},
           {:store_name, "baz", "bong"}
         ]
 
-        {state, hbf} = Server.encode_headers(state, headers)
+        {state, hbf} = TestServer.encode_headers(state, headers)
 
         flags = set_flags(:headers, [:end_headers, :end_stream])
-        Server.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
+        TestServer.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
       end)
-      |> Server.expect(fn state, rst_stream() ->
+      |> TestServer.expect(fn state, rst_stream() ->
         state
       end)
 
@@ -230,25 +230,25 @@ defmodule XHTTP2.ConnTest do
 
     test "client has to split headers because of max frame size", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: 3, hbf: hbf, flags: flags) ->
+      |> TestServer.expect(fn state, headers(stream_id: 3, hbf: hbf, flags: flags) ->
         assert flag_set?(flags, :headers, :end_stream)
         refute flag_set?(flags, :headers, :end_headers)
         Map.put(state, :current_hbf, hbf)
       end)
-      |> Server.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
+      |> TestServer.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
         refute flag_set?(flags, :continuation, :end_headers)
         Map.update!(state, :current_hbf, &(&1 <> hbf))
       end)
-      |> Server.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
+      |> TestServer.expect(fn state, continuation(stream_id: 3, hbf: hbf, flags: flags) ->
         assert flag_set?(flags, :continuation, :end_headers)
         hbf = Map.fetch!(state, :current_hbf) <> hbf
-        {state, headers} = Server.decode_headers(state, hbf)
+        {state, headers} = TestServer.decode_headers(state, hbf)
         assert [{":method", "METH"} | _] = headers
 
-        {state, hbf} = Server.encode_headers(state, [{:store_name, ":status", "200"}])
+        {state, hbf} = TestServer.encode_headers(state, [{:store_name, ":status", "200"}])
 
         flags = set_flags(:headers, [:end_stream, :end_headers])
-        Server.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
+        TestServer.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
       end)
 
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
@@ -257,7 +257,7 @@ defmodule XHTTP2.ConnTest do
       assert {:ok, conn, ref} = Conn.request(context.conn, "METH", "/", headers)
 
       assert {:ok, %Conn{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
       assert Conn.open?(conn)
     end
@@ -266,10 +266,10 @@ defmodule XHTTP2.ConnTest do
   describe "frame encoding errors by the server" do
     test "server sends a frame with the wrong stream id", context do
       context.server
-      |> Server.expect(fn state, headers() ->
-        Server.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
+      |> TestServer.expect(fn state, headers() ->
+        TestServer.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
       end)
-      |> Server.expect(fn state, goaway(error_code: :protocol_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :protocol_error) ->
         state
       end)
 
@@ -281,11 +281,11 @@ defmodule XHTTP2.ConnTest do
 
     test "server sends a frame with a bad size", context do
       context.server
-      |> Server.expect(fn state, headers() ->
+      |> TestServer.expect(fn state, headers() ->
         # Payload should be 8 bytes long.
-        Server.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<>>))
+        TestServer.send(state, encode_raw(_ping = 0x06, 0x00, 3, <<>>))
       end)
-      |> Server.expect(fn state, goaway(error_code: :frame_size_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :frame_size_error) ->
         state
       end)
 
@@ -303,11 +303,11 @@ defmodule XHTTP2.ConnTest do
       max_window_size = 2_147_483_647
 
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         frame = window_update(stream_id: stream_id, window_size_increment: max_window_size)
-        Server.send_frame(state, frame)
+        TestServer.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, rst_stream() ->
+      |> TestServer.expect(fn state, rst_stream() ->
         state
       end)
 
@@ -322,11 +322,11 @@ defmodule XHTTP2.ConnTest do
       max_window_size = 2_147_483_647
 
       context.server
-      |> Server.expect(fn state, headers() ->
+      |> TestServer.expect(fn state, headers() ->
         frame = window_update(stream_id: 0, window_size_increment: max_window_size)
-        Server.send_frame(state, frame)
+        TestServer.send_frame(state, frame)
       end)
-      |> Server.expect(fn state, goaway(error_code: :flow_control_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :flow_control_error) ->
         state
       end)
 
@@ -340,11 +340,11 @@ defmodule XHTTP2.ConnTest do
 
     test "server violates client's max frame size", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: stream_id) ->
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         data = :binary.copy(<<0>>, 100_000)
-        Server.send_frame(state, data(stream_id: stream_id, data: data))
+        TestServer.send_frame(state, data(stream_id: stream_id, data: data))
       end)
-      |> Server.expect(fn state, goaway(error_code: :frame_size_error) ->
+      |> TestServer.expect(fn state, goaway(error_code: :frame_size_error) ->
         state
       end)
 
@@ -360,25 +360,25 @@ defmodule XHTTP2.ConnTest do
       max_frame_size = Conn.get_setting(context.conn, :max_frame_size)
 
       context.server
-      |> Server.expect(fn state, headers(stream_id: 3) ->
+      |> TestServer.expect(fn state, headers(stream_id: 3) ->
         state
       end)
-      |> Server.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
+      |> TestServer.expect(fn state, data(stream_id: 3, flags: 0x00, data: data) ->
         assert data == :binary.copy(<<0>>, max_frame_size)
         state
       end)
-      |> Server.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
+      |> TestServer.expect(fn state, data(stream_id: 3, flags: 0x01, data: data) ->
         assert data == <<0>>
-        {state, hbf} = Server.encode_headers(state, [{:store_name, ":status", "200"}])
+        {state, hbf} = TestServer.encode_headers(state, [{:store_name, ":status", "200"}])
         flags = set_flags(:headers, [:end_stream, :end_headers])
-        Server.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
+        TestServer.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
       end)
 
       body = :binary.copy(<<0>>, max_frame_size + 1)
       assert {:ok, %Conn{} = conn, ref} = Conn.request(context.conn, "GET", "/", [], body)
 
       assert {:ok, %Conn{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, "200"}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
       assert Conn.open?(conn)
     end
   end
@@ -387,9 +387,10 @@ defmodule XHTTP2.ConnTest do
     test "client can send settings to server", context do
       assert {:ok, %Conn{} = conn, []} = stream_next_message(context.conn)
 
-      Server.expect(context.server, fn state, settings(params: [max_concurrent_streams: 123]) ->
+      TestServer.expect(context.server, fn state,
+                                           settings(params: [max_concurrent_streams: 123]) ->
         frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
-        Server.send_frame(state, frame)
+        TestServer.send_frame(state, frame)
       end)
 
       {:ok, conn} = Conn.put_settings(conn, max_concurrent_streams: 123)
@@ -404,10 +405,10 @@ defmodule XHTTP2.ConnTest do
 
     test "server can update the initial window size and affect open streams", context do
       context.server
-      |> Server.expect(fn state, headers(stream_id: 3) ->
-        Server.send_frame(state, settings(params: [initial_window_size: 100]))
+      |> TestServer.expect(fn state, headers(stream_id: 3) ->
+        TestServer.send_frame(state, settings(params: [initial_window_size: 100]))
       end)
-      |> Server.expect(fn state, settings(flags: 0x01, params: []) ->
+      |> TestServer.expect(fn state, settings(flags: 0x01, params: []) ->
         state
       end)
 

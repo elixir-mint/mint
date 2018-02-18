@@ -16,11 +16,19 @@ defmodule XHTTP1.Conn do
   to always store the returned `%Conn{}` struct from functions.
   """
 
+  import XHTTP.Util
+
   alias XHTTP1.{Conn, Parse, Request, Response}
 
   require Logger
 
-  @type t() :: %Conn{}
+  @forced_transport_opts [
+    packet: :raw,
+    mode: :binary,
+    active: false
+  ]
+
+  @opaque t() :: %Conn{}
 
   @type request_ref() :: reference()
   @type tcp_message() ::
@@ -28,11 +36,10 @@ defmodule XHTTP1.Conn do
           | {:tcp_closed | :ssl_closed, :gen_tcp.socket()}
           | {:tcp_error | :ssl_error, :gen_tcp.socket(), term()}
   @type response() ::
-          {:status, request_ref(), status_line()}
+          {:status, request_ref(), status()}
           | {:headers, request_ref(), headers()}
-          | {:body, request_ref(), binary()}
+          | {:data, request_ref(), binary()}
           | {:done, request_ref()}
-  @type status_line() :: {http_version(), status(), reason()}
   @type http_version() :: {non_neg_integer(), non_neg_integer()}
   @type status() :: non_neg_integer()
   @type reason() :: String.t()
@@ -59,19 +66,33 @@ defmodule XHTTP1.Conn do
           {:ok, t()}
           | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = Keyword.get(opts, :transport, :gen_tcp)
-    transport_opts = [packet: :raw, mode: :binary, active: true]
+    transport = get_transport(opts, :gen_tcp)
 
-    if transport not in [:gen_tcp, :ssl] do
-      raise ArgumentError,
-            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
+    transport_opts =
+      opts
+      |> Keyword.get(:transport_opts, [])
+      |> Keyword.merge(@forced_transport_opts)
+
+    # TODO: Also ALPN negotiate HTTP1?
+
+    case transport.connect(String.to_charlist(hostname), port, transport_opts) do
+      {:ok, socket} ->
+        initiate_connection(socket, hostname, transport)
+
+      {:error, reason} ->
+        {:error, reason}
     end
+  end
 
-    with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
-         :ok <- inet_opts(transport, socket) do
+  @doc false
+  def initiate_connection(socket, hostname, transport) do
+    with :ok <- inet_opts(transport, socket),
+         :ok <- transport_to_inet(transport).setopts(socket, active: true) do
       {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
     else
-      {:error, _reason} = error -> error
+      error ->
+        transport.close(socket)
+        error
     end
   end
 
@@ -133,7 +154,7 @@ defmodule XHTTP1.Conn do
         end
 
       {:error, reason} ->
-        {:error, {:send, reason}}
+        {:error, reason}
     end
   catch
     :throw, {:xhttp, reason} ->
@@ -160,7 +181,7 @@ defmodule XHTTP1.Conn do
       ) do
     case transport.send(socket, body) do
       :ok -> {:ok, conn}
-      {:error, reason} -> {:error, {:send, reason}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -176,7 +197,7 @@ defmodule XHTTP1.Conn do
       the body, the headers will only be returned when all headers have been
       received. Trailing headers can optionally be returned after the body
       and before done.
-    * `:body` - The body is optional and can be returned in multiple parts.
+    * `:data` - The body is optional and can be returned in multiple parts.
     * `:done` - This is the last response for a request and indicates that the
       response is done streaming.
 
@@ -237,25 +258,12 @@ defmodule XHTTP1.Conn do
     :unknown
   end
 
-  defp inet_opts(transport, socket) do
-    inet = transport_to_inet(transport)
-
-    with {:ok, opts} <- inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
-      buffer =
-        Keyword.fetch!(opts, :buffer)
-        |> max(Keyword.fetch!(opts, :sndbuf))
-        |> max(Keyword.fetch!(opts, :recbuf))
-
-      inet.setopts(socket, buffer: buffer)
-    end
-  end
-
   defp decode(:status, %{request: request} = conn, data, responses) do
     case Response.decode_status_line(data) do
-      {:ok, {version, status, _reason} = status_line, rest} ->
+      {:ok, {version, status, _reason}, rest} ->
         request = %{request | version: version, status: status, state: :headers}
         conn = %{conn | request: request}
-        responses = [{:status, request.ref, status_line} | responses]
+        responses = [{:status, request.ref, status} | responses]
         decode(:headers, conn, rest, responses)
 
       :more ->
@@ -441,11 +449,11 @@ defmodule XHTTP1.Conn do
   defp add_body("", _request_ref, responses), do: responses
 
   # TODO: Concat binaries or build iodata?
-  defp add_body(new_data, request_ref, [{:body, request_ref, data} | responses]),
-    do: [{:body, request_ref, data <> new_data} | responses]
+  defp add_body(new_data, request_ref, [{:data, request_ref, data} | responses]),
+    do: [{:data, request_ref, data <> new_data} | responses]
 
   defp add_body(new_data, request_ref, responses),
-    do: [{:body, request_ref, new_data} | responses]
+    do: [{:data, request_ref, new_data} | responses]
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
     %{request | content_length: Parse.content_length_header(value)}
@@ -532,9 +540,6 @@ defmodule XHTTP1.Conn do
 
   defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
   defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
-
-  defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(:ssl), do: :ssl
 
   defp new_request(ref, state, method) do
     %{

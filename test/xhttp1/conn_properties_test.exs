@@ -3,10 +3,10 @@ defmodule XHTTP1.ConnPropertiesTest do
   use ExUnitProperties
   import XHTTP1.TestHelpers
   alias XHTTP1.Conn
-  alias XHTTP1.TestHelpers.Server
+  alias XHTTP1.TestServer
 
   setup do
-    {:ok, port} = Server.start()
+    {:ok, port} = TestServer.start()
     assert {:ok, conn} = Conn.connect("localhost", port, transport: :gen_tcp)
     [conn: conn]
   end
@@ -23,7 +23,7 @@ defmodule XHTTP1.ConnPropertiesTest do
         end)
 
       assert [status, headers | rest] = responses
-      assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+      assert {:status, ^ref, 200} = status
       assert {:headers, ^ref, [{"content-length", "10"}]} = headers
       assert merge_body(rest, ref) == "0123456789"
 
@@ -46,7 +46,7 @@ defmodule XHTTP1.ConnPropertiesTest do
         end)
 
       assert [status, headers | rest] = responses
-      assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+      assert {:status, ^ref, 200} = status
       assert {:headers, ^ref, [{"transfer-encoding", "chunked"}]} = headers
       assert merge_body_with_trailers(rest, ref) == {"0123", [{"trailer", "value"}]}
 
