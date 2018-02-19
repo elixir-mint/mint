@@ -12,7 +12,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert get_header(headers, "connection") == ["keep-alive"]
     assert merge_body(responses, request) =~ "httpbin"
@@ -25,7 +25,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
     assert byte_size(merge_body(responses, request)) == 50000
   end
@@ -37,7 +37,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "SEE ALSO"
 
@@ -47,7 +47,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "SEE ALSO"
   end
@@ -59,7 +59,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ ~s("BODY")
   end
@@ -75,7 +75,7 @@ defmodule XHTTP1.IntegrationTest do
 
     assert conn.buffer == ""
     assert [status, headers | responses] = responses
-    assert {:status, ^request, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ ~s("BODY")
   end
@@ -141,46 +141,5 @@ defmodule XHTTP1.IntegrationTest do
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
-  end
-
-  defp receive_stream(conn) do
-    receive_stream(conn, [])
-  end
-
-  defp receive_stream(conn, responses) do
-    receive do
-      {:rest, conn, rest_responses} ->
-        maybe_done(conn, rest_responses, responses)
-
-      {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
-        assert {:ok, conn, new_responses} = Conn.stream(conn, message)
-        maybe_done(conn, new_responses, responses)
-
-      {tag, _socket} = message when tag in [:tcp_closed, :ssl_closed] ->
-        assert {:error, _conn, :closed} = Conn.stream(conn, message)
-
-      {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
-        assert {:error, _conn, _reason} = Conn.stream(conn, message)
-    after
-      10000 ->
-        flunk("receive_stream timeout")
-    end
-  end
-
-  defp maybe_done(conn, responses, acc) do
-    {new, rest} = Enum.split_while(responses, &(not match?({:done, _}, &1)))
-
-    case {new, rest} do
-      {new, []} ->
-        receive_stream(conn, acc ++ new)
-
-      {new, [done | rest]} ->
-        if rest != [], do: send(self(), {:rest, conn, rest})
-        {:ok, conn, acc ++ new ++ [done]}
-    end
-  end
-
-  defp get_header(headers, name) do
-    for {n, v} <- headers, n == name, do: v
   end
 end

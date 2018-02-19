@@ -1,6 +1,7 @@
 defmodule XHTTP2.Conn do
   use Bitwise, skip_operators: true
 
+  import XHTTP.Util
   import XHTTP2.Frame, except: [encode: 1, decode_next: 1]
 
   alias XHTTP2.{
@@ -106,13 +107,7 @@ defmodule XHTTP2.Conn do
 
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = Keyword.get(opts, :transport, :ssl)
-    scheme = Keyword.get(opts, :scheme, "https")
-
-    if transport not in [:gen_tcp, :ssl] do
-      raise ArgumentError,
-            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
-    end
+    transport = get_transport(opts, :ssl)
 
     transport_opts =
       opts
@@ -121,13 +116,7 @@ defmodule XHTTP2.Conn do
 
     with {:ok, socket} <-
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
-         :ok <- set_inet_opts(transport, socket),
-         {:ok, conn} <- initiate_connection(transport, socket, opts) do
-      conn = %{conn | hostname: hostname, port: port, scheme: scheme}
-      {:ok, conn}
-    else
-      {:error, _reason} = error -> error
-    end
+         do: initiate_connection(socket, hostname, port, transport, opts)
   end
 
   @spec open?(t()) :: boolean()
@@ -161,7 +150,8 @@ defmodule XHTTP2.Conn do
   end
 
   @spec ping(t(), <<_::8>>) :: {:ok, t(), request_id()} | {:error, t(), term()}
-  def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8)) when byte_size(payload) == 8 do
+  def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8))
+      when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
     {:ok, conn, ref}
   catch
@@ -215,6 +205,41 @@ defmodule XHTTP2.Conn do
     :unknown
   end
 
+  # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
+  # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
+  @doc false
+  def initiate_connection(socket, hostname, port, transport, opts) do
+    client_settings_params = Keyword.get(opts, :client_settings, [])
+    validate_settings!(client_settings_params)
+
+    client_settings = settings(stream_id: 0, params: client_settings_params)
+    server_settings_ack = settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack))
+
+    conn = %__MODULE__{
+      hostname: hostname,
+      port: port,
+      transport: transport,
+      socket: socket,
+      scheme: Keyword.get(opts, :scheme, "https"),
+      state: :open
+    }
+
+    with :ok <- inet_opts(transport, socket),
+         :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
+         conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
+         {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
+         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
+         conn = put_in(conn.buffer, buffer),
+         conn = apply_server_settings(conn, settings(server_settings, :params)),
+         :ok <- transport_to_inet(transport).setopts(socket, active: true) do
+      {:ok, conn}
+    else
+      error ->
+        transport.close(socket)
+        error
+    end
+  end
+
   ## Helpers
 
   defp connect_and_negotiate_protocol(hostname, port, transport, transport_opts) do
@@ -226,44 +251,6 @@ defmodule XHTTP2.Conn do
         {:error, {:bad_alpn_protocol, protocol}}
       end
     end
-  end
-
-  defp set_inet_opts(transport, socket) do
-    inet = transport_to_inet(transport)
-
-    with {:ok, opts} <- inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
-      buffer =
-        Keyword.fetch!(opts, :buffer)
-        |> max(Keyword.fetch!(opts, :sndbuf))
-        |> max(Keyword.fetch!(opts, :recbuf))
-
-      inet.setopts(socket, buffer: buffer)
-    end
-  end
-
-  defp transport_to_inet(:gen_tcp), do: :inet
-  defp transport_to_inet(:ssl), do: :ssl
-
-  # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
-  # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
-  defp initiate_connection(transport, socket, opts) do
-    client_settings_params = Keyword.get(opts, :client_settings, [])
-    validate_settings!(client_settings_params)
-
-    client_settings = settings(stream_id: 0, params: client_settings_params)
-    server_settings_ack = settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack))
-
-    conn = %__MODULE__{transport: transport, socket: socket}
-
-    with :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
-         conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
-         {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
-         conn = put_in(conn.state, :open),
-         conn = put_in(conn.buffer, buffer),
-         conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport_to_inet(transport).setopts(socket, active: true),
-         do: {:ok, conn}
   end
 
   defp receive_server_settings(transport, socket) do
@@ -653,7 +640,7 @@ defmodule XHTTP2.Conn do
         conn = put_in(conn.decode_table, decode_table)
 
         case headers do
-          [{":status", status} | headers] -> {:ok, status, headers, conn}
+          [{":status", status} | headers] -> {:ok, String.to_integer(status), headers, conn}
           _other -> {:error, :missing_status_header, conn}
         end
 

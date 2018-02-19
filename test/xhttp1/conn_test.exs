@@ -1,10 +1,10 @@
 defmodule XHTTP1.ConnTest do
   use ExUnit.Case, async: true
   alias XHTTP1.Conn
-  alias XHTTP1.TestHelpers.Server
+  alias XHTTP1.TestServer
 
   setup do
-    {:ok, port} = Server.start()
+    {:ok, port} = TestServer.start()
     assert {:ok, conn} = Conn.connect("localhost", port, transport: :gen_tcp)
     [conn: conn]
   end
@@ -17,7 +17,7 @@ defmodule XHTTP1.ConnTest do
   test "status", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert {:ok, _conn, [{:status, ^ref, {{1, 1}, 200, "OK"}}]} =
+    assert {:ok, _conn, [{:status, ^ref, 200}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
   end
 
@@ -25,7 +25,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1"})
 
-    assert {:ok, _conn, [{:status, ^ref, {{1, 1}, 200, "OK"}}]} =
+    assert {:ok, _conn, [{:status, ^ref, 200}]} =
              Conn.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
@@ -54,17 +54,17 @@ defmodule XHTTP1.ConnTest do
     assert {:ok, _conn, [status, headers]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: Bar\r\n\r\n"})
 
-    assert {:status, ^ref, {{1, 1}, 200, "OK"}} = status
+    assert {:status, ^ref, 200} = status
     assert {:headers, ^ref, [{"foo", "Bar"}]} = headers
   end
 
   test "body without content-length", %{conn: conn} do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "BODY1"}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "BODY1"}]} =
              Conn.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nBODY1"})
 
-    assert {:ok, conn, [{:body, ^ref, "BODY2"}]} = Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
+    assert {:ok, conn, [{:data, ^ref, "BODY2"}]} = Conn.stream(conn, {:tcp, conn.socket, "BODY2"})
 
     assert {:ok, conn, [{:done, ^ref}]} = Conn.stream(conn, {:tcp_closed, conn.socket})
     refute Conn.open?(conn)
@@ -76,10 +76,10 @@ defmodule XHTTP1.ConnTest do
 
     assert {:ok, conn, [_status, _headers]} = Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, [{:body, ^ref, "012345678"}]} =
+    assert {:ok, conn, [{:data, ^ref, "012345678"}]} =
              Conn.stream(conn, {:tcp, conn.socket, "012345678"})
 
-    assert {:ok, conn, [{:body, ^ref, "9"}, {:done, ^ref}]} =
+    assert {:ok, conn, [{:data, ^ref, "9"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, "9XXX"})
 
     assert conn.buffer == "XXX"
@@ -99,7 +99,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nXX"
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
@@ -111,7 +111,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\nconnection: close\r\n\r\nX"
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
@@ -122,7 +122,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\nconnection: keep-alive\r\n\r\nX"
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
@@ -133,7 +133,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.0 200 OK\r\ncontent-length: 1\r\n\r\nX"
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
@@ -144,7 +144,7 @@ defmodule XHTTP1.ConnTest do
     {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
 
-    assert {:ok, conn, [_status, _headers, {:body, ^ref, "X"}, {:done, ^ref}]} =
+    assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} = Conn.stream(conn, {:tcp, conn.socket, "X"})
@@ -167,22 +167,22 @@ defmodule XHTTP1.ConnTest do
 
     assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:body, ^ref1, "XXXXX"}, {:done, ^ref1}] =
+    assert [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:data, ^ref1, "XXXXX"}, {:done, ^ref1}] =
              responses
 
     assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:body, ^ref2, "XXXXX"}, {:done, ^ref2}] =
+    assert [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:data, ^ref2, "XXXXX"}, {:done, ^ref2}] =
              responses
 
     assert {:ok, conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert [{:status, ^ref3, _}, {:headers, ^ref3, _}, {:body, ^ref3, "XXXXX"}, {:done, ^ref3}] =
+    assert [{:status, ^ref3, _}, {:headers, ^ref3, _}, {:data, ^ref3, "XXXXX"}, {:done, ^ref3}] =
              responses
 
     assert {:ok, _conn, responses} = Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:body, ^ref4, "XXXXX"}, {:done, ^ref4}] =
+    assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:data, ^ref4, "XXXXX"}, {:done, ^ref4}] =
              responses
   end
 
@@ -199,19 +199,19 @@ defmodule XHTTP1.ConnTest do
     assert [
              {:status, ^ref1, _},
              {:headers, ^ref1, _},
-             {:body, ^ref1, "XXXXX"},
+             {:data, ^ref1, "XXXXX"},
              {:done, ^ref1},
              {:status, ^ref2, _},
              {:headers, ^ref2, _},
-             {:body, ^ref2, "XXXXX"},
+             {:data, ^ref2, "XXXXX"},
              {:done, ^ref2},
              {:status, ^ref3, _},
              {:headers, ^ref3, _},
-             {:body, ^ref3, "XXXXX"},
+             {:data, ^ref3, "XXXXX"},
              {:done, ^ref3},
              {:status, ^ref4, _},
              {:headers, ^ref4, _},
-             {:body, ^ref4, "XXXXX"},
+             {:data, ^ref4, "XXXXX"},
              {:done, ^ref4}
            ] = responses
   end
@@ -226,9 +226,9 @@ defmodule XHTTP1.ConnTest do
     assert {:ok, conn, [status, headers, body, done]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert body == {:body, ref, "0123"}
+    assert body == {:data, ref, "0123"}
     assert done == {:done, ref}
 
     assert conn.buffer == "XXX"
@@ -244,9 +244,9 @@ defmodule XHTTP1.ConnTest do
     assert {:ok, conn, [status, headers, body, trailers, done]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert body == {:body, ref, "0123"}
+    assert body == {:data, ref, "0123"}
     assert trailers == {:headers, ref, [{"trailer", "value"}]}
     assert done == {:done, ref}
 
@@ -263,8 +263,8 @@ defmodule XHTTP1.ConnTest do
     assert {:ok, _conn, [status, headers, body]} =
              Conn.stream(conn, {:tcp, conn.socket, response})
 
-    assert status == {:status, ref, {{1, 1}, 200, "OK"}}
+    assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "custom, chunked"}]}
-    assert body == {:body, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
+    assert body == {:data, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
   end
 end
