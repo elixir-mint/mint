@@ -122,7 +122,7 @@ defmodule XHTTP2.Conn do
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
 
-  @spec request(t(), String.t(), String.t(), list(), iodata() | nil) ::
+  @spec request(t(), String.t(), String.t(), list(), iodata() | nil | :stream) ::
           {:ok, t(), request_id()} | {:error, t(), term()}
   def request(%__MODULE__{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
@@ -136,17 +136,39 @@ defmodule XHTTP2.Conn do
 
     {conn, stream_id, ref} = open_stream(conn)
 
-    if body do
-      # TODO: Optimize here by sending a single packet on the network.
-      conn = send_headers(conn, stream_id, headers, [:end_headers])
-      conn = send_data(conn, stream_id, body, [:end_stream])
-      {:ok, conn, ref}
-    else
-      conn = send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
-      {:ok, conn, ref}
-    end
+    conn =
+      case body do
+        :stream ->
+          send_headers(conn, stream_id, headers, [:end_headers])
+
+        nil ->
+          send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+
+        _iodata ->
+          # TODO: Optimize here by sending a single packet on the network.
+          conn = send_headers(conn, stream_id, headers, [:end_headers])
+          conn = send_data(conn, stream_id, body, [:end_stream])
+          conn
+      end
+
+    {:ok, conn, ref}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
+  end
+
+  @spec stream_request_body(t(), request_id(), iodata() | :eof) ::
+          {:ok, t()} | {:error, t(), term()}
+  def stream_request_body(%__MODULE__{} = conn, ref, chunk) when is_reference(ref) do
+    stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+
+    conn =
+      if chunk == :eof do
+        send_data(conn, stream_id, "", [:end_stream])
+      else
+        send_data(conn, stream_id, chunk, [])
+      end
+
+    {:ok, conn}
   end
 
   @spec ping(t(), <<_::8>>) :: {:ok, t(), request_id()} | {:error, t(), term()}

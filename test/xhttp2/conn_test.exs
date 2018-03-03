@@ -424,6 +424,41 @@ defmodule XHTTP2.ConnTest do
     end
   end
 
+  test "streaming a request", context do
+    context.server
+    |> TestServer.expect(fn state, headers(stream_id: 3, flags: flags) ->
+      refute flag_set?(flags, :headers, :end_stream)
+      state
+    end)
+    |> TestServer.expect(fn state, data(stream_id: 3, data: data, flags: flags) ->
+      refute flag_set?(flags, :data, :end_stream)
+      assert data == "foo"
+      state
+    end)
+    |> TestServer.expect(fn state, data(stream_id: 3, data: data, flags: flags) ->
+      refute flag_set?(flags, :data, :end_stream)
+      assert data == "bar"
+      state
+    end)
+    |> TestServer.expect(fn state, data(stream_id: 3, data: data, flags: flags) ->
+      assert flag_set?(flags, :data, :end_stream)
+      assert data == ""
+
+      {state, hbf} = TestServer.encode_headers(state, [{:store_name, ":status", "200"}])
+      flags = set_flags(:headers, [:end_headers, :end_stream])
+      TestServer.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
+    end)
+
+    {:ok, conn, ref} = Conn.request(context.conn, "GET", "/", [], :stream)
+    assert {:ok, conn} = Conn.stream_request_body(conn, ref, "foo")
+    assert {:ok, conn} = Conn.stream_request_body(conn, ref, "bar")
+    assert {:ok, conn} = Conn.stream_request_body(conn, ref, :eof)
+
+    assert {:ok, %Conn{} = conn, responses} = stream_until_responses_or_error(conn)
+    assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+    assert Conn.open?(conn)
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     Conn.stream(conn, message)
