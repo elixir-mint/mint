@@ -481,6 +481,7 @@ defmodule XHTTP1.Conn do
     conn = pop_request(conn)
 
     cond do
+      !request -> close(conn)
       "close" in request.connection -> close(conn)
       request.version >= {1, 1} -> conn
       "keep-alive" in request.connection -> conn
