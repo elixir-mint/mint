@@ -240,7 +240,7 @@ defmodule XHTTP1.Conn do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
 
-    if request.body == :until_closed do
+    if request && request.body == :until_closed do
       {:ok, conn, [{:done, request.ref}]}
       # TODO: Notify that we are closed
     else
