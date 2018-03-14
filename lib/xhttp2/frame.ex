@@ -280,17 +280,27 @@ defmodule XHTTP2.Frame do
     decode_settings_params(payload, _acc = [])
   end
 
-  defp decode_settings_params(<<>>, acc), do: Enum.reverse(acc)
+  defp decode_settings_params(<<>>, acc) do
+    Enum.reverse(acc)
+  end
 
-  defp decode_settings_params(<<identifier::16, value::32, rest::binary>>, acc),
-    do: decode_settings_params(rest, [decode_settings_param(identifier, value) | acc])
+  defp decode_settings_params(<<identifier::16, value::32, rest::binary>>, acc) do
+    # From http://httpwg.org/specs/rfc7540.html#SettingValues:
+    # An endpoint that receives a SETTINGS frame with any unknown or unsupported identifier MUST
+    # ignore that setting.
+    acc =
+      case identifier do
+        0x01 -> [{:header_table_size, value} | acc]
+        0x02 -> [{:enable_push, value == 1} | acc]
+        0x03 -> [{:max_concurrent_streams, value} | acc]
+        0x04 -> [{:initial_window_size, value} | acc]
+        0x05 -> [{:max_frame_size, value} | acc]
+        0x06 -> [{:max_header_list_size, value} | acc]
+        _other -> acc
+      end
 
-  defp decode_settings_param(0x01, value), do: {:header_table_size, value}
-  defp decode_settings_param(0x02, value), do: {:enable_push, value == 1}
-  defp decode_settings_param(0x03, value), do: {:max_concurrent_streams, value}
-  defp decode_settings_param(0x04, value), do: {:initial_window_size, value}
-  defp decode_settings_param(0x05, value), do: {:max_frame_size, value}
-  defp decode_settings_param(0x06, value), do: {:max_header_list_size, value}
+    decode_settings_params(rest, acc)
+  end
 
   ## Encoding
 
