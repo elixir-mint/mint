@@ -21,6 +21,10 @@ defmodule XHTTP2.Conn do
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
 
+  @default_transport_opts %{
+    ssl: [verify: :verify_peer]
+  }
+
   @forced_transport_opts [
     packet: :raw,
     mode: :binary,
@@ -110,8 +114,8 @@ defmodule XHTTP2.Conn do
     transport = get_transport(opts, :ssl)
 
     transport_opts =
-      opts
-      |> Keyword.get(:transport_opts, [])
+      Map.get(@default_transport_opts, transport, [])
+      |> Keyword.merge(Keyword.get(opts, :transport_opts, []))
       |> Keyword.merge(@forced_transport_opts)
 
     with {:ok, socket} <-

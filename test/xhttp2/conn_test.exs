@@ -15,7 +15,9 @@ defmodule XHTTP2.ConnTest do
       {:ok, server} = TestServer.start()
       port = TestServer.port(server)
       TestServer.start_accepting(server)
-      {:ok, conn} = Conn.connect("localhost", port, transport: :ssl)
+
+      {:ok, conn} =
+        Conn.connect("localhost", port, transport: :ssl, transport_opts: [verify: :verify_none])
 
       on_exit(fn ->
         TestServer.stop(server)
