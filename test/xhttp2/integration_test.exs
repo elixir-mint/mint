@@ -10,7 +10,9 @@ defmodule XHTTP2.IntegrationTest do
   setup context do
     case context.connect do
       {host, port} ->
-        assert {:ok, %Conn{} = conn} = Conn.connect(host, port)
+        assert {:ok, %Conn{} = conn} =
+                 Conn.connect(host, port, transport_opts: [verify: :verify_none])
+
         [conn: conn]
 
       _other ->
@@ -195,4 +197,6 @@ defmodule XHTTP2.IntegrationTest do
       other -> other
     end
   end
+
+  # TODO: certificate verification; badssl.com does not seem to support HTTP2
 end

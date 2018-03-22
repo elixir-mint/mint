@@ -19,7 +19,14 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "ssl, path, long body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: :ssl,
+               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+             )
+
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/50000", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -31,7 +38,14 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "keep alive - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: :ssl,
+               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+             )
+
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -41,7 +55,14 @@ defmodule XHTTP1.IntegrationTest do
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "SEE ALSO"
 
-    assert {:ok, conn} = Conn.connect("httpbin.org", 443, transport: :ssl)
+    assert {:ok, conn} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: :ssl,
+               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+             )
+
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -141,5 +162,41 @@ defmodule XHTTP1.IntegrationTest do
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
     assert byte_size(merge_body(responses, request)) == 1024
+  end
+
+  test "ssl, bad certificate - badssl.com" do
+    assert {:error, {:tls_alert, 'unknown ca'}} =
+             Conn.connect(
+               "untrusted-root.badssl.com",
+               443,
+               transport: :ssl,
+               transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+             )
+
+    assert {:ok, _conn} =
+             Conn.connect(
+               "untrusted-root.badssl.com",
+               443,
+               transport: :ssl,
+               transport_opts: [verify: :verify_none]
+             )
+  end
+
+  test "ssl, bad hostname - badssl.com" do
+    assert {:error, {:tls_alert, 'handshake failure'}} =
+             Conn.connect(
+               "wrong.host.badssl.com",
+               443,
+               transport: :ssl,
+               transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+             )
+
+    assert {:ok, _conn} =
+             Conn.connect(
+               "wrong.host.badssl.com",
+               443,
+               transport: :ssl,
+               transport_opts: [verify: :verify_none]
+             )
   end
 end
