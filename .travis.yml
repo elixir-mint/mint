@@ -1,7 +1,14 @@
 language: elixir
 sudo: false
-elixir: 1.6.1
-otp_release: 20.2
+matrix:
+  include:
+  - elixir: 1.6.4
+    otp_release: 20.2
+  - elixir: 1.6.4
+    otp_release: 19.3
+  - elixir: 1.5.3
+    otp_release: 18.3
 notifications:
   recipients:
     - eric.meadows.jonsson@gmail.com
+    - an.leopardi@gmail.com
