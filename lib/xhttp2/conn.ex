@@ -238,9 +238,6 @@ defmodule XHTTP2.Conn do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
-    client_settings = settings(stream_id: 0, params: client_settings_params)
-    server_settings_ack = settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack))
-
     conn = %__MODULE__{
       hostname: hostname,
       port: port,
@@ -251,9 +248,12 @@ defmodule XHTTP2.Conn do
     }
 
     with :ok <- inet_opts(transport, socket),
+         client_settings = settings(stream_id: 0, params: client_settings_params),
          :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
+         server_settings_ack =
+           settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack)),
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
