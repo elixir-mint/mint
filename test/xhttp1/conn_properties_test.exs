@@ -7,7 +7,7 @@ defmodule XHTTP1.ConnPropertiesTest do
 
   setup do
     {:ok, port} = TestServer.start()
-    assert {:ok, conn} = Conn.connect("localhost", port, transport: :gen_tcp)
+    assert {:ok, conn} = Conn.connect("localhost", port, transport: XHTTP.Transport.TCP)
     [conn: conn]
   end
 

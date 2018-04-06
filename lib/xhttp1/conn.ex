@@ -23,7 +23,7 @@ defmodule XHTTP1.Conn do
   require Logger
 
   @default_transport_opts %{
-    ssl: [verify: :verify_peer]
+    XHTTP.Transport.SSL => [verify: :verify_peer]
   }
 
   @forced_transport_opts [
@@ -70,7 +70,7 @@ defmodule XHTTP1.Conn do
           {:ok, t()}
           | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = get_transport(opts, :gen_tcp)
+    transport = get_transport(opts, XHTTP.Transport.TCP)
 
     transport_opts =
       Map.get(@default_transport_opts, transport, [])
@@ -79,7 +79,7 @@ defmodule XHTTP1.Conn do
 
     # TODO: Also ALPN negotiate HTTP1?
 
-    case transport.connect(String.to_charlist(hostname), port, transport_opts) do
+    case transport.connect(hostname, port, transport_opts) do
       {:ok, socket} ->
         initiate_connection(socket, hostname, transport)
 
@@ -91,7 +91,7 @@ defmodule XHTTP1.Conn do
   @doc false
   def initiate_connection(socket, hostname, transport) do
     with :ok <- inet_opts(transport, socket),
-         :ok <- transport_to_inet(transport).setopts(socket, active: true) do
+         :ok <- transport.setopts(socket, active: true) do
       {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
     else
       error ->

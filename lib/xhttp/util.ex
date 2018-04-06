@@ -1,10 +1,8 @@
 defmodule XHTTP.Util do
   def inet_opts(transport, socket) do
-    inet = transport_to_inet(transport)
-
-    with {:ok, opts} <- inet.getopts(socket, [:sndbuf, :recbuf, :buffer]),
+    with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),
-         :ok <- inet.setopts(socket, buffer: buffer) do
+         :ok <- transport.setopts(socket, buffer: buffer) do
       :ok
     else
       error ->
@@ -13,15 +11,12 @@ defmodule XHTTP.Util do
     end
   end
 
-  def transport_to_inet(:gen_tcp), do: :inet
-  def transport_to_inet(:ssl), do: :ssl
-
   def get_transport(opts, default) do
     transport = Keyword.get(opts, :transport, default)
 
-    if transport not in [:gen_tcp, :ssl] do
+    if transport not in [XHTTP.Transport.TCP, XHTTP.Transport.SSL] do
       raise ArgumentError,
-            "the :transport option must be either :gen_tcp or :ssl, got: #{inspect(transport)}"
+            "the :transport option must be either TCP or SSL, got: #{inspect(transport)}"
     end
 
     transport

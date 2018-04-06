@@ -22,7 +22,7 @@ defmodule XHTTP2.Conn do
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
 
   @default_transport_opts %{
-    ssl: [verify: :verify_peer]
+    XHTTP.Transport.SSL => [verify: :verify_peer]
   }
 
   @forced_transport_opts [
@@ -111,7 +111,7 @@ defmodule XHTTP2.Conn do
 
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = get_transport(opts, :ssl)
+    transport = get_transport(opts, XHTTP.Transport.SSL)
 
     transport_opts =
       Map.get(@default_transport_opts, transport, [])
@@ -257,7 +257,7 @@ defmodule XHTTP2.Conn do
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport_to_inet(transport).setopts(socket, active: true) do
+         :ok <- transport.setopts(socket, active: true) do
       {:ok, conn}
     else
       error ->
@@ -269,7 +269,7 @@ defmodule XHTTP2.Conn do
   ## Helpers
 
   defp connect_and_negotiate_protocol(hostname, port, transport, transport_opts) do
-    with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts),
+    with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(socket) do
       if protocol == "h2" do
         {:ok, socket}
