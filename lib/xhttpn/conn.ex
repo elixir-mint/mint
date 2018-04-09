@@ -8,7 +8,7 @@ defmodule XHTTPN.Conn do
   @default_protocols [:http1, :http2]
 
   @default_transport_opts %{
-    ssl: [verify: :verify_peer]
+    XHTTP.Transport.SSL => [verify: :verify_peer]
   }
 
   @transport_opts [
@@ -38,17 +38,17 @@ defmodule XHTTPN.Conn do
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 
   defp negotiate(hostname, port, opts) do
-    transport = get_transport(opts, :ssl)
+    transport = get_transport(opts, XHTTP.Transport.SSL)
 
     transport_opts =
       Map.get(@default_transport_opts, transport, [])
       |> Keyword.merge(Keyword.get(opts, :transport_opts, []))
       |> Keyword.merge(@transport_opts)
 
-    with {:ok, socket} <- transport.connect(String.to_charlist(hostname), port, transport_opts) do
+    with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
       case transport do
-        :gen_tcp -> http1_with_upgrade(socket, hostname, port, opts)
-        :ssl -> alpn_negotiate(socket, hostname, port, transport, opts)
+        XHTTP.Transport.TCP -> http1_with_upgrade(socket, hostname, port, opts)
+        XHTTP.Transport.SSL -> alpn_negotiate(socket, hostname, port, transport, opts)
       end
     end
   end

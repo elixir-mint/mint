@@ -17,7 +17,12 @@ defmodule XHTTP2.ConnTest do
       TestServer.start_accepting(server)
 
       {:ok, conn} =
-        Conn.connect("localhost", port, transport: :ssl, transport_opts: [verify: :verify_none])
+        Conn.connect(
+          "localhost",
+          port,
+          transport: XHTTP.Transport.SSL,
+          transport_opts: [verify: :verify_none]
+        )
 
       on_exit(fn ->
         TestServer.stop(server)
@@ -28,7 +33,7 @@ defmodule XHTTP2.ConnTest do
   end
 
   test "using an unknown transport raises an error" do
-    message = "the :transport option must be either :gen_tcp or :ssl, got: :some_transport"
+    message = "the :transport option must be either TCP or SSL, got: :some_transport"
 
     assert_raise ArgumentError, message, fn ->
       Conn.connect("localhost", 80, transport: :some_transport)

@@ -10,7 +10,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "httpbin.org",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [cacertfile: "test/support/cacerts.pem"]
                )
 
@@ -31,7 +31,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "httpbin.org",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  protocols: [:http2],
                  transport_opts: [cacertfile: "test/support/cacerts.pem"]
                )
@@ -44,7 +44,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "nghttp2.org",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  protocols: [:http1],
                  transport_opts: [verify: :verify_none]
                )
@@ -65,7 +65,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "nghttp2.org",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
 
@@ -91,7 +91,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "untrusted-root.badssl.com",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
                )
 
@@ -99,7 +99,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "untrusted-root.badssl.com",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
     end
@@ -109,7 +109,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "wrong.host.badssl.com",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
                )
 
@@ -117,7 +117,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "wrong.host.badssl.com",
                  443,
-                 transport: :ssl,
+                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
     end
