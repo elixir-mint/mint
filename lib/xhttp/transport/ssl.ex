@@ -12,13 +12,25 @@ defmodule XHTTP.Transport.SSL do
   defdelegate negotiated_protocol(socket), to: :ssl
 
   @impl true
-  defdelegate send(socket, payload), to: :ssl
+  def send(socket, payload) do
+    with :ok <- :ssl.send(socket, payload) do
+      {:ok, socket}
+    end
+  end
 
   @impl true
-  defdelegate close(socket), to: :ssl
+  def close(socket) do
+    with :ok <- :ssl.close(socket) do
+      {:ok, socket}
+    end
+  end
 
   @impl true
-  defdelegate recv(socket, bytes), to: :ssl
+  def recv(socket, bytes) do
+    with {:ok, data} <- :ssl.recv(socket, bytes) do
+      {:ok, data, socket}
+    end
+  end
 
   @impl true
   defdelegate setopts(socket, opts), to: :ssl

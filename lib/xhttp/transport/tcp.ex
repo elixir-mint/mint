@@ -9,13 +9,25 @@ defmodule XHTTP.Transport.TCP do
   end
 
   @impl true
-  defdelegate send(socket, payload), to: :gen_tcp
+  def send(socket, payload) do
+    with :ok <- :gen_tcp.send(socket, payload) do
+      {:ok, socket}
+    end
+  end
 
   @impl true
-  defdelegate close(socket), to: :gen_tcp
+  def close(socket) do
+    with :ok <- :gen_tcp.close(socket) do
+      {:ok, socket}
+    end
+  end
 
   @impl true
-  defdelegate recv(socket, bytes), to: :gen_tcp
+  def recv(socket, bytes) do
+    with {:ok, data} <- :gen_tcp.recv(socket, bytes) do
+      {:ok, data, socket}
+    end
+  end
 
   @impl true
   defdelegate setopts(socket, opts), to: :inet
