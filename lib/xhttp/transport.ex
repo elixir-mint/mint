@@ -6,8 +6,7 @@ defmodule XHTTP.Transport do
   @callback connect(host :: String.t(), port :: :inet.port_number(), opts :: keyword()) ::
               {:ok, state()} | error()
 
-  @callback negotiated_protocol(state()) ::
-              {:ok, protocol :: binary()} | {:error, reason :: term()}
+  @callback negotiated_protocol(state()) :: {:ok, protocol :: binary()} | error()
 
   @callback send(state(), payload :: iodata()) :: {:ok, state()} | error()
 
