@@ -37,7 +37,7 @@ defmodule XHTTP2.Conn do
   defstruct [
     # Transport things.
     :transport,
-    :socket,
+    :transport_state,
 
     # Host things.
     :hostname,
@@ -88,7 +88,7 @@ defmodule XHTTP2.Conn do
 
   @opaque t() :: %__MODULE__{
             transport: module(),
-            socket: term(),
+            transport_state: XHTTP.Transport.state(),
             state: :open | :closed | :went_away,
             buffer: binary(),
             window_size: pos_integer(),
@@ -118,9 +118,9 @@ defmodule XHTTP2.Conn do
       |> Keyword.merge(Keyword.get(opts, :transport_opts, []))
       |> Keyword.merge(@forced_transport_opts)
 
-    with {:ok, socket} <-
+    with {:ok, transport_state} <-
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
-         do: initiate_connection(socket, hostname, port, transport, opts)
+         do: initiate_connection(transport_state, hostname, port, transport, opts)
   end
 
   @spec open?(t()) :: boolean()
@@ -209,17 +209,21 @@ defmodule XHTTP2.Conn do
         when response: term()
   def stream(conn, message)
 
-  def stream(%__MODULE__{socket: socket} = conn, {error_tag, socket, reason})
+  def stream(
+        %__MODULE__{transport_state: transport_state} = conn,
+        {error_tag, transport_state, reason}
+      )
       when error_tag in [:tcp_error, :ssl_error] do
     {:error, %{conn | state: :closed}, reason, []}
   end
 
-  def stream(%__MODULE__{socket: socket} = conn, {closed_tag, socket})
+  def stream(%__MODULE__{transport_state: transport_state} = conn, {closed_tag, transport_state})
       when closed_tag in [:tcp_closed, :ssl_closed] do
     {:error, %{conn | state: :closed}, :closed, []}
   end
 
-  def stream(%__MODULE__{socket: socket} = conn, {tag, socket, data}) when tag in [:tcp, :ssl] do
+  def stream(%__MODULE__{transport_state: transport_state} = conn, {tag, transport_state, data})
+      when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
     {:ok, conn, Enum.reverse(responses)}
   catch
@@ -234,7 +238,7 @@ defmodule XHTTP2.Conn do
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   @doc false
-  def initiate_connection(socket, hostname, port, transport, opts) do
+  def initiate_connection(transport_state, hostname, port, transport, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
@@ -242,26 +246,30 @@ defmodule XHTTP2.Conn do
       hostname: hostname,
       port: port,
       transport: transport,
-      socket: socket,
+      transport_state: transport_state,
       scheme: Keyword.get(opts, :scheme, "https"),
       state: :open
     }
 
-    with :ok <- inet_opts(transport, socket),
+    with :ok <- inet_opts(transport, transport_state),
          client_settings = settings(stream_id: 0, params: client_settings_params),
-         :ok <- transport.send(socket, [@connection_preface, Frame.encode(client_settings)]),
+         preface = [@connection_preface, Frame.encode(client_settings)],
+         {:ok, transport_state} <- transport.send(transport_state, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
-         {:ok, server_settings, buffer} <- receive_server_settings(transport, socket),
+         {:ok, server_settings, buffer, transport_state} <-
+           receive_server_settings(transport, transport_state),
          server_settings_ack =
            settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack)),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
+         {:ok, transport_state} <-
+           transport.send(transport_state, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
+         conn = put_in(conn.transport_state, transport_state),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport.setopts(socket, active: true) do
+         :ok <- transport.setopts(transport_state, active: true) do
       {:ok, conn}
     else
       error ->
-        transport.close(socket)
+        transport.close(transport_state)
         error
     end
   end
@@ -269,32 +277,32 @@ defmodule XHTTP2.Conn do
   ## Helpers
 
   defp connect_and_negotiate_protocol(hostname, port, transport, transport_opts) do
-    with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
-         {:ok, protocol} <- transport.negotiated_protocol(socket) do
+    with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts),
+         {:ok, protocol} <- transport.negotiated_protocol(transport_state) do
       if protocol == "h2" do
-        {:ok, socket}
+        {:ok, transport_state}
       else
         {:error, {:bad_alpn_protocol, protocol}}
       end
     end
   end
 
-  defp receive_server_settings(transport, socket) do
-    case recv_next_frame(transport, socket, _buffer = "") do
-      {:ok, settings(), _buffer} = result -> result
+  defp receive_server_settings(transport, transport_state) do
+    case recv_next_frame(transport, transport_state, _buffer = "") do
+      {:ok, settings(), _buffer, _transport_state} = result -> result
       {:ok, _frame, _buffer} -> {:error, :protocol_error}
       {:error, _reason} = error -> error
     end
   end
 
-  defp recv_next_frame(transport, socket, buffer) do
+  defp recv_next_frame(transport, transport_state, buffer) do
     case Frame.decode_next(buffer, @default_max_frame_size) do
-      {:ok, _frame, _rest} = result ->
-        result
+      {:ok, frame, rest} ->
+        {:ok, frame, rest, transport_state}
 
       :more ->
-        with {:ok, data} <- transport.recv(socket, 0) do
-          recv_next_frame(transport, socket, buffer <> data)
+        with {:ok, data, transport_state} <- transport.recv(transport_state, 0) do
+          recv_next_frame(transport, transport_state, buffer <> data)
         end
 
       {:error, {kind, _info}} when kind in [:frame_size_error, :protocol_error] ->
@@ -328,7 +336,7 @@ defmodule XHTTP2.Conn do
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
 
     payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
-    send!(conn, payload)
+    conn = send!(conn, payload)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
@@ -399,7 +407,7 @@ defmodule XHTTP2.Conn do
 
       true ->
         frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
-        send!(conn, Frame.encode(frame))
+        conn = send!(conn, Frame.encode(frame))
         conn = update_in(conn.streams[stream_id].window_size, &(&1 - data_size))
         conn = update_in(conn.window_size, &(&1 - data_size))
 
@@ -428,7 +436,7 @@ defmodule XHTTP2.Conn do
 
   defp send_ping(conn, payload) do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)
-    send!(conn, Frame.encode(frame))
+    conn = send!(conn, Frame.encode(frame))
     ref = make_ref()
     conn = update_in(conn.ping_queue, &:queue.in({ref, payload}, &1))
     {conn, ref}
@@ -437,7 +445,7 @@ defmodule XHTTP2.Conn do
   defp send_settings(conn, settings) do
     validate_settings!(settings)
     frame = settings(stream_id: 0, params: settings)
-    send!(conn, Frame.encode(frame))
+    conn = send!(conn, Frame.encode(frame))
     conn = update_in(conn.client_settings_queue, &:queue.in(settings, &1))
     conn
   end
@@ -603,7 +611,7 @@ defmodule XHTTP2.Conn do
 
     assert_stream_in_state(conn, stream, [:open, :half_closed_local])
 
-    refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
+    conn = refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
 
     responses = [{:data, stream.ref, data} | responses]
 
@@ -704,7 +712,7 @@ defmodule XHTTP2.Conn do
     else
       conn = apply_server_settings(conn, params)
       frame = settings(flags: set_flag(:settings, :ack), params: [])
-      send!(conn, Frame.encode(frame))
+      conn = send!(conn, Frame.encode(frame))
       {conn, responses}
     end
   end
@@ -786,7 +794,7 @@ defmodule XHTTP2.Conn do
       handle_ping_ack(conn, opaque_data, responses)
     else
       ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
-      send!(conn, Frame.encode(ack))
+      conn = send!(conn, Frame.encode(ack))
       {conn, responses}
     end
   end
@@ -889,15 +897,16 @@ defmodule XHTTP2.Conn do
     frame =
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
-    send!(conn, Frame.encode(frame))
-    conn.transport.close(conn.socket)
+    conn = send!(conn, Frame.encode(frame))
+    {:ok, transport_state} = conn.transport.close(conn.transport_state)
     conn = put_in(conn.state, :closed)
+    conn = put_in(conn.transport_state, transport_state)
     throw({:xhttp, conn, error_code})
   end
 
   defp close_stream!(conn, stream_id, error_code) do
     frame = rst_stream(stream_id: stream_id, error_code: error_code)
-    send!(conn, Frame.encode(frame))
+    conn = send!(conn, Frame.encode(frame))
     put_in(conn.streams[stream_id].state, :closed)
   end
 
@@ -914,9 +923,9 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp send!(%__MODULE__{transport: transport, socket: socket} = conn, bytes) do
-    case transport.send(socket, bytes) do
-      :ok -> :ok
+  defp send!(%__MODULE__{transport: transport, transport_state: transport_state} = conn, bytes) do
+    case transport.send(transport_state, bytes) do
+      {:ok, transport_state} -> put_in(conn.transport_state, transport_state)
       {:error, reason} -> throw({:xhttp, conn, reason})
     end
   end

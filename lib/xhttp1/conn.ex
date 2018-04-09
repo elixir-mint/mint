@@ -52,9 +52,9 @@ defmodule XHTTP1.Conn do
   # TODO: Currently we keep the Host on the conn but we could also supply
   # it on each request so you can use multiple Hosts on a single conn
   defstruct [
-    :socket,
     :host,
     :request,
+    :transport_state,
     :transport,
     requests: :queue.new(),
     state: :closed,
@@ -80,8 +80,8 @@ defmodule XHTTP1.Conn do
     # TODO: Also ALPN negotiate HTTP1?
 
     case transport.connect(hostname, port, transport_opts) do
-      {:ok, socket} ->
-        initiate_connection(socket, hostname, transport)
+      {:ok, transport_state} ->
+        initiate_connection(transport_state, hostname, transport)
 
       {:error, reason} ->
         {:error, reason}
@@ -89,13 +89,20 @@ defmodule XHTTP1.Conn do
   end
 
   @doc false
-  def initiate_connection(socket, hostname, transport) do
-    with :ok <- inet_opts(transport, socket),
-         :ok <- transport.setopts(socket, active: true) do
-      {:ok, %Conn{socket: socket, host: hostname, transport: transport, state: :open}}
+  def initiate_connection(transport_state, hostname, transport) do
+    with :ok <- inet_opts(transport, transport_state),
+         :ok <- transport.setopts(transport_state, active: true) do
+      conn = %Conn{
+        transport: transport,
+        transport_state: transport_state,
+        host: hostname,
+        state: :open
+      }
+
+      {:ok, conn}
     else
       error ->
-        transport.close(socket)
+        transport.close(transport_state)
         error
     end
   end
@@ -132,18 +139,14 @@ defmodule XHTTP1.Conn do
     {:error, :request_body_is_streaming}
   end
 
-  def request(
-        %Conn{socket: socket, host: host, transport: transport} = conn,
-        method,
-        path,
-        headers,
-        body
-      ) do
+  def request(%Conn{} = conn, method, path, headers, body) do
+    %Conn{host: host, transport: transport, transport_state: transport_state} = conn
     method = normalize_method(method)
     iodata = Request.encode(method, path, host, headers, body)
 
-    case transport.send(socket, iodata) do
-      :ok ->
+    case transport.send(transport_state, iodata) do
+      {:ok, transport_state} ->
+        conn = %Conn{conn | transport_state: transport_state}
         request_ref = make_ref()
         state = if body == :stream, do: :stream_request, else: :status
         request = new_request(request_ref, state, method)
@@ -179,12 +182,9 @@ defmodule XHTTP1.Conn do
     {:ok, put_in(conn.request.state, :status)}
   end
 
-  def stream_request_body(
-        %Conn{request: %{state: :stream_request}, transport: transport, socket: socket} = conn,
-        body
-      ) do
-    case transport.send(socket, body) do
-      :ok -> {:ok, conn}
+  def stream_request_body(%Conn{request: %{state: :stream_request}} = conn, body) do
+    case conn.transport.send(conn.transport_state, body) do
+      {:ok, transport_state} -> {:ok, %Conn{conn | transport_state: transport_state}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -219,14 +219,20 @@ defmodule XHTTP1.Conn do
     {:error, :request_body_not_streamed}
   end
 
-  def stream(%Conn{socket: socket, buffer: buffer, request: nil} = conn, {tag, socket, data})
+  def stream(
+        %Conn{transport_state: transport_state, buffer: buffer, request: nil} = conn,
+        {tag, transport_state, data}
+      )
       when tag in [:tcp, :ssl] do
     # TODO: Figure out if we should keep buffering even though there are no
     # requests in flight
     {:ok, put_in(conn.buffer, buffer <> data), []}
   end
 
-  def stream(%Conn{socket: socket, buffer: buffer, request: request} = conn, {tag, socket, data})
+  def stream(
+        %Conn{transport_state: transport_state, buffer: buffer, request: request} = conn,
+        {tag, transport_state, data}
+      )
       when tag in [:tcp, :ssl] do
     data = buffer <> data
 
@@ -239,7 +245,10 @@ defmodule XHTTP1.Conn do
       {:error, request.ref, reason}
   end
 
-  def stream(%Conn{socket: socket, request: request} = conn, {tag, socket})
+  def stream(
+        %Conn{transport_state: transport_state, request: request} = conn,
+        {tag, transport_state}
+      )
       when tag in [:tcp_closed, :ssl_closed] do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
@@ -252,7 +261,7 @@ defmodule XHTTP1.Conn do
     end
   end
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
+  def stream(%Conn{transport_state: transport_state} = conn, {tag, transport_state, reason})
       when tag in [:tcp_error, :ssl_error] do
     conn = put_in(conn.state, :closed)
     {:error, conn, reason}
@@ -508,8 +517,8 @@ defmodule XHTTP1.Conn do
       Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
-    :ok = conn.transport.close(conn.socket)
-    %{conn | state: :closed}
+    {:ok, transport_state} = conn.transport.close(conn.transport_state)
+    %{conn | state: :closed, transport_state: transport_state}
   end
 
   # TODO: We should probably error if both transfer-encoding and content-length

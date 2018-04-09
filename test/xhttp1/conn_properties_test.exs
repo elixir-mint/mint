@@ -18,7 +18,9 @@ defmodule XHTTP1.ConnPropertiesTest do
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} =
+                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+
           {conn, responses ++ new_responses}
         end)
 
@@ -41,7 +43,9 @@ defmodule XHTTP1.ConnPropertiesTest do
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} =
+                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+
           {conn, responses ++ new_responses}
         end)
 
@@ -64,7 +68,9 @@ defmodule XHTTP1.ConnPropertiesTest do
     check all byte_chunks <- random_chunks(responses) do
       {_conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} = Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} =
+                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+
           {conn, responses ++ new_responses}
         end)
 
