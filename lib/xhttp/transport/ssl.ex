@@ -1,11 +1,13 @@
 defmodule XHTTP.Transport.SSL do
   @behaviour XHTTP.Transport
 
+  @default_ssl_opts [verify: :verify_peer]
+
   @impl true
   def connect(host, port, opts) do
     host
     |> String.to_charlist()
-    |> :ssl.connect(port, opts)
+    |> :ssl.connect(port, Keyword.merge(@default_ssl_opts, opts))
   end
 
   @impl true

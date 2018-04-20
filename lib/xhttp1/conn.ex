@@ -22,10 +22,6 @@ defmodule XHTTP1.Conn do
 
   require Logger
 
-  @default_transport_opts %{
-    XHTTP.Transport.SSL => [verify: :verify_peer]
-  }
-
   @forced_transport_opts [
     packet: :raw,
     mode: :binary,
@@ -73,8 +69,8 @@ defmodule XHTTP1.Conn do
     transport = get_transport(opts, XHTTP.Transport.TCP)
 
     transport_opts =
-      Map.get(@default_transport_opts, transport, [])
-      |> Keyword.merge(Keyword.get(opts, :transport_opts, []))
+      opts
+      |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@forced_transport_opts)
 
     # TODO: Also ALPN negotiate HTTP1?
