@@ -1,8 +1,19 @@
 %% Shims for functions introduced in recent Erlang/OTP releases,
 %% to enable use of XHTTP on older releases. The code in this module
-%% was taken directly from the Erlang/OTP project. The original license
-%% follows:
+%% was taken directly from the Erlang/OTP project.
 %%
+%% File: lib/public_key/src/public_key.erl
+%% Tag: OTP-20.3.4
+%% Commit: f2c1d537dc28ffbde5d42aedec70bf4c6574c3ea
+%% Changes from original file:
+%% - extracted pkix_verify_hostname/2 and /3, and any private
+%%   functions they depend upon
+%% - replaced local calls to other public functions in the
+%%   'public_key' module with fully qualified equivalents
+%% - replaced local type references with fully qualified equivalents
+%% 
+%% The original license follows:
+
 %% %CopyrightBegin%
 %%
 %% Copyright Ericsson AB 2013-2017. All Rights Reserved.
