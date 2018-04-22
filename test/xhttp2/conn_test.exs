@@ -12,7 +12,7 @@ defmodule XHTTP2.ConnTest do
     if context[:connect] == false do
       []
     else
-      {:ok, server} = TestServer.start()
+      {:ok, server} = TestServer.start_link()
       port = TestServer.port(server)
       TestServer.start_accepting(server)
 
@@ -23,10 +23,6 @@ defmodule XHTTP2.ConnTest do
           transport: XHTTP.Transport.SSL,
           transport_opts: [verify: :verify_none]
         )
-
-      on_exit(fn ->
-        TestServer.stop(server)
-      end)
 
       [conn: conn, server: server]
     end

@@ -31,8 +31,8 @@ defmodule XHTTP2.TestServer do
 
   ## API
 
-  def start(handshake_fun \\ &handshake/1) when is_function(handshake_fun, 1) do
-    GenServer.start(__MODULE__, handshake_fun)
+  def start_link(handshake_fun \\ &handshake/1) when is_function(handshake_fun, 1) do
+    GenServer.start_link(__MODULE__, handshake_fun)
   end
 
   def port(server) do
@@ -46,10 +46,6 @@ defmodule XHTTP2.TestServer do
 
   def start_accepting(server) do
     GenServer.cast(server, :start_accepting)
-  end
-
-  def stop(server) do
-    GenServer.stop(server)
   end
 
   ## Helpers
