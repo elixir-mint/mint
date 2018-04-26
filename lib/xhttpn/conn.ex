@@ -7,10 +7,6 @@ defmodule XHTTPN.Conn do
 
   @default_protocols [:http1, :http2]
 
-  @default_transport_opts %{
-    XHTTP.Transport.SSL => [verify: :verify_peer]
-  }
-
   @transport_opts [
     packet: :raw,
     mode: :binary,
@@ -41,8 +37,8 @@ defmodule XHTTPN.Conn do
     transport = get_transport(opts, XHTTP.Transport.SSL)
 
     transport_opts =
-      Map.get(@default_transport_opts, transport, [])
-      |> Keyword.merge(Keyword.get(opts, :transport_opts, []))
+      opts
+      |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
     with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
