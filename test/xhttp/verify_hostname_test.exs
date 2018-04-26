@@ -86,24 +86,20 @@ defmodule XHTTP.VerifyHostnameTest do
     end
   end
 
-  defp cn_cert(_) do
+  defp cn_cert(_context) do
     [cert: load_cert(@cn_cert)]
   end
 
-  defp subj_alt_name_cert(_) do
+  defp subj_alt_name_cert(_context) do
     [cert: load_cert(@subj_alt_name_cert)]
   end
 
-  defp subj_alt_name_ip_cert(_) do
+  defp subj_alt_name_ip_cert(_context) do
     [cert: load_cert(@subj_alt_name_ip_cert)]
   end
 
   defp load_cert(path) do
-    path
-    |> File.read!()
-    |> :public_key.pem_decode()
-    |> hd()
-    |> elem(1)
-    |> :public_key.pkix_decode_cert(:otp)
+    [{_, binary, _} | _] = path |> File.read!() |> :public_key.pem_decode()
+    :public_key.pkix_decode_cert(binary, :otp)
   end
 end

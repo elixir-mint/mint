@@ -52,34 +52,35 @@ defmodule XHTTP.Transport.SSL do
   defdelegate getopts(socket, opts), to: :ssl
 
   defp update_ssl_opts(opts, host_or_ip) do
-    with :verify_peer <- Keyword.get(opts, :verify),
-         nil <- Keyword.get(opts, :verify_fun),
-         true <- use_pkix_verify_hostname_shim?() do
+    verify = Keyword.get(opts, :verify)
+    verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
+
+    if verify == :verify_peer and not verify_fun_present? and use_pkix_verify_hostname_shim?() do
       Logger.debug("ssl application does not perform hostname verifaction; activating shim")
 
       reference_ids =
-        case Keyword.get(opts, :server_name_indication) do
-          nil ->
-            host_or_ip_cl = to_charlist(host_or_ip)
-            [dns_id: host_or_ip_cl, ip: host_or_ip_cl]
-
-          server_name ->
+        case Keyword.fetch(opts, :server_name_indication) do
+          {:ok, server_name} ->
             [dns_id: server_name]
+
+          :error ->
+            host_or_ip = to_charlist(host_or_ip)
+            [dns_id: host_or_ip, ip: host_or_ip]
         end
 
-      Keyword.merge(opts, verify_fun: {&verify_fun/3, reference_ids})
+      Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
     else
-      _ -> opts
+      opts
     end
   end
 
-  defp use_pkix_verify_hostname_shim? do
+  defp use_pkix_verify_hostname_shim?() do
     ssl_vsn() < @verify_hostname_ssl_vsn
   end
 
-  defp ssl_vsn do
-    for i <- :application.get_key(:ssl, :vsn) |> elem(1) |> :string.tokens('.'),
-        do: List.to_integer(i)
+  defp ssl_vsn() do
+    {:ok, vsn} = :application.get_key(:ssl, :vsn)
+    vsn |> :string.tokens('.') |> Enum.map(&List.to_integer/1)
   end
 
   defp verify_fun(_, {:bad_cert, _} = reason, _), do: {:fail, reason}
