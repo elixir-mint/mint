@@ -53,7 +53,7 @@ defmodule XHTTP1.IntegrationTest do
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "SEE ALSO"
+    assert merge_body(responses, request) =~ "Other Utilities"
 
     assert {:ok, conn} =
              Conn.connect(
@@ -70,7 +70,7 @@ defmodule XHTTP1.IntegrationTest do
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, _} = headers
-    assert merge_body(responses, request) =~ "SEE ALSO"
+    assert merge_body(responses, request) =~ "Other Utilities"
   end
 
   test "POST body - httpbin.org" do
@@ -113,17 +113,13 @@ defmodule XHTTP1.IntegrationTest do
     assert {:ok, conn, [_status, _headers | responses3]} = receive_stream(conn)
     assert {:ok, _conn, [_status, _headers | responses4]} = receive_stream(conn)
 
-    assert merge_body(responses1, request1) =~
-             "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses1, request1) =~ "A simple HTTP Request &amp; Response Service"
 
-    assert merge_body(responses2, request2) =~
-             "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses2, request2) =~ "A simple HTTP Request &amp; Response Service"
 
-    assert merge_body(responses3, request3) =~
-             "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses3, request3) =~ "A simple HTTP Request &amp; Response Service"
 
-    assert merge_body(responses4, request4) =~
-             "Testing an HTTP Library can become difficult sometimes"
+    assert merge_body(responses4, request4) =~ "A simple HTTP Request &amp; Response Service"
   end
 
   # TODO: Figure out what is happening here. Server is responding without
