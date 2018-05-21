@@ -49,3 +49,19 @@ The pooling API is not yet implemented, see [#32](https://github.com/ericmj/xhtt
 ## Contributing
 
 XHTTP has not yet reached an initial 0.1.0 release and the current goal is to reach a minimal first release. Because of this XHTTP is still in a lot of flux and we want to focus on changes only required for getting to 0.1.0. If you wish to contribute check out the [issue list]((https://github.com/ericmj/xhttp/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
+
+## License
+
+Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
