@@ -2,6 +2,8 @@
 
 Functional HTTP client for Elixir with support for HTTP/1 and HTTP/2.
 
+This library is not yet production ready, but we do appreciate contributions and testers.
+
 XHTTP contains two main APIs, a stateless connection API, and a stateful multi-host pooling API.
 
 ## Connection API
