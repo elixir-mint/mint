@@ -48,7 +48,7 @@ The pooling API is not yet implemented, see [#32](https://github.com/ericmj/xhtt
 
 ## Contributing
 
-XHTTP has not yet reached an initial 0.1.0 release and the current goal is to reach a minimal first release. Because of this XHTTP is still in a lot of flux and we want to focus on changes only required for getting to 0.1.0. If you wish to contribute check out the [issue list]((https://github.com/ericmj/xhttp/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
+XHTTP has not yet reached an initial 0.1.0 release and the current goal is to reach a minimal first release. Because of this XHTTP is still in a lot of flux and we want to focus on changes only required for getting to 0.1.0. If you wish to contribute check out the [issue list](https://github.com/ericmj/xhttp/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
 
 ## License
 
