@@ -1,15 +1,50 @@
-defmodule XHTTP.VerifyHostnameTest do
+defmodule XHTTP.Transport.SSLTest do
   use ExUnit.Case, async: true
+
+  # Based on https://bugs.erlang.org/browse/ERL-542
+  @wildcard_san Path.expand("../../support/xhttp/wildcard_san.pem", __DIR__)
+
+  describe "wildcard in SAN" do
+    setup [:wildcard_san_cert]
+
+    test "custom match fun for wildcard in SAN", %{cert: cert} do
+      assert {:valid, _} =
+               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'outlook.office365.com')
+
+      assert {:valid, _} =
+               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'Outlook.office365.COM')
+
+      assert {:valid, _} =
+               XHTTP.Transport.SSL.verify_fun(
+                 cert,
+                 :valid_peer,
+                 dns_id: 'test.outlook.office365.com'
+               )
+
+      assert {:valid, _} =
+               XHTTP.Transport.SSL.verify_fun(
+                 cert,
+                 :valid_peer,
+                 uri_id: 'https://outlook.office365.com'
+               )
+
+      assert {:fail, {:bad_cert, :hostname_check_failed}} =
+               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'live.com')
+
+      assert {:fail, {:bad_cert, :hostname_check_failed}} =
+               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'out.look.office365.com')
+    end
+  end
 
   # These certificates and the test cases that use them were taken from
   # the `public_key` library test suite in Erlang/OTP 20.3
-  @cn_cert Path.expand("../support/xhttp/pkix_verify_hostname_cn.pem", __DIR__)
+  @cn_cert Path.expand("../../support/xhttp/pkix_verify_hostname_cn.pem", __DIR__)
   @subj_alt_name_cert Path.expand(
-                        "../support/xhttp/pkix_verify_hostname_subjAltName.pem",
+                        "../../support/xhttp/pkix_verify_hostname_subjAltName.pem",
                         __DIR__
                       )
   @subj_alt_name_ip_cert Path.expand(
-                           "../support/xhttp/pkix_verify_hostname_subjAltName_IP.pem",
+                           "../../support/xhttp/pkix_verify_hostname_subjAltName_IP.pem",
                            __DIR__
                          )
 
@@ -96,6 +131,10 @@ defmodule XHTTP.VerifyHostnameTest do
 
   defp subj_alt_name_ip_cert(_context) do
     [cert: load_cert(@subj_alt_name_ip_cert)]
+  end
+
+  defp wildcard_san_cert(_context) do
+    [cert: load_cert(@wildcard_san)]
   end
 
   defp load_cert(path) do

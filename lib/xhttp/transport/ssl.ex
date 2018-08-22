@@ -5,10 +5,6 @@ defmodule XHTTP.Transport.SSL do
 
   @default_ssl_opts [verify: :verify_peer]
 
-  # Hostname check was enabled in the ssl application in OTP-20.0-rc2:
-  # https://github.com/erlang/otp/blob/d106c5fffb3832fffbdf99cca905390fe15d489f/lib/ssl/vsn.mk
-  @verify_hostname_ssl_vsn [8, 2]
-
   @impl true
   def connect(host, port, opts) do
     ssl_opts =
@@ -55,9 +51,7 @@ defmodule XHTTP.Transport.SSL do
     verify = Keyword.get(opts, :verify)
     verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
 
-    if verify == :verify_peer and not verify_fun_present? and use_pkix_verify_hostname_shim?() do
-      Logger.debug("ssl application does not perform hostname verifaction; activating shim")
-
+    if verify == :verify_peer and not verify_fun_present? do
       reference_ids =
         case Keyword.fetch(opts, :server_name_indication) do
           {:ok, server_name} ->
@@ -74,24 +68,37 @@ defmodule XHTTP.Transport.SSL do
     end
   end
 
-  defp use_pkix_verify_hostname_shim?() do
-    ssl_vsn() < @verify_hostname_ssl_vsn
-  end
+  def verify_fun(_, {:bad_cert, _} = reason, _), do: {:fail, reason}
+  def verify_fun(_, {:extension, _}, state), do: {:unknown, state}
+  def verify_fun(_, :valid, state), do: {:valid, state}
 
-  defp ssl_vsn() do
-    {:ok, vsn} = :application.get_key(:ssl, :vsn)
-    vsn |> :string.tokens('.') |> Enum.map(&List.to_integer/1)
-  end
-
-  defp verify_fun(_, {:bad_cert, _} = reason, _), do: {:fail, reason}
-  defp verify_fun(_, {:extension, _}, state), do: {:unknown, state}
-  defp verify_fun(_, :valid, state), do: {:valid, state}
-
-  defp verify_fun(cert, :valid_peer, state) do
-    if :xhttp_shims.pkix_verify_hostname(cert, state) do
+  def verify_fun(cert, :valid_peer, state) do
+    if :xhttp_shims.pkix_verify_hostname(cert, state, match_fun: &match_fun/2) do
       {:valid, state}
     else
       {:fail, {:bad_cert, :hostname_check_failed}}
     end
   end
+
+  # Wildcard domain handling for DNS ID entries in the subjectAltName X.509
+  # extension. Note that this is a subset of the wildcard patterns implemented
+  # by OTP when matching against the subject CN attribute, but this is the only
+  # wildcard usage defined by the CA/Browser Forum's Baseline Requirements, and
+  # therefore the only pattern used in commercially issued certificates.
+  defp match_fun({:dns_id, reference}, {:dNSName, [?*, ?. | presented]}) do
+    case domain_without_host(reference) do
+      '' ->
+        :default
+
+      domain ->
+        # TODO: replace with `:string.casefold/1` eventually
+        :string.to_lower(domain) == :string.to_lower(presented)
+    end
+  end
+
+  defp match_fun(_reference, _presented), do: :default
+
+  defp domain_without_host([]), do: []
+  defp domain_without_host([?. | domain]), do: domain
+  defp domain_without_host([_ | more]), do: domain_without_host(more)
 end
