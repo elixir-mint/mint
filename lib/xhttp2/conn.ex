@@ -73,7 +73,10 @@ defmodule XHTTP2.Conn do
 
     # Headers being processed (when headers are split into multiple frames with CONTINUATIONS, all
     # the continuation frames must come one right after the other).
-    headers_being_processed: nil
+    headers_being_processed: nil,
+
+    # Private store
+    private: %{}
   ]
 
   ## Types
@@ -229,6 +232,37 @@ defmodule XHTTP2.Conn do
 
   def stream(%__MODULE__{}, _message) do
     :unknown
+  end
+
+  @doc """
+  Assigns a new private key and value in the connection.
+
+  This storage is meant to be used to associate metadata with the connection,
+  it can be useful when handling multiple connections.
+  """
+  @spec put_private(t(), atom(), term()) :: t()
+  def put_private(%__MODULE__{private: private} = conn, key, value) when is_atom(key) do
+    %{conn | private: Map.put(private, key, value)}
+  end
+
+  @doc """
+  Get a value from the private store.
+
+  Also see `put_private/3`.
+  """
+  @spec get_private(t(), atom(), term()) :: term()
+  def get_private(%__MODULE__{private: private}, key, default \\ nil) when is_atom(key) do
+    Map.get(private, key, default)
+  end
+
+  @doc """
+  Delete a value in the private store.
+
+  Also see `put_private/3`.
+  """
+  @spec delete_private(t(), atom()) :: t()
+  def delete_private(%__MODULE__{private: private} = conn, key) when is_atom(key) do
+    %{conn | private: Map.delete(private, key)}
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5

@@ -54,7 +54,8 @@ defmodule XHTTP1.Conn do
     :transport,
     requests: :queue.new(),
     state: :closed,
-    buffer: ""
+    buffer: "",
+    private: %{}
   ]
 
   @doc """
@@ -265,6 +266,37 @@ defmodule XHTTP1.Conn do
 
   def stream(%Conn{}, _other) do
     :unknown
+  end
+
+  @doc """
+  Assigns a new private key and value in the connection.
+
+  This storage is meant to be used to associate metadata with the connection,
+  it can be useful when handling multiple connections.
+  """
+  @spec put_private(t(), atom(), term()) :: t()
+  def put_private(%Conn{private: private} = conn, key, value) when is_atom(key) do
+    %{conn | private: Map.put(private, key, value)}
+  end
+
+  @doc """
+  Get a value from the private store.
+
+  Also see `put_private/3`.
+  """
+  @spec get_private(t(), atom(), term()) :: term()
+  def get_private(%Conn{private: private}, key, default \\ nil) when is_atom(key) do
+    Map.get(private, key, default)
+  end
+
+  @doc """
+  Delete a value in the private store.
+
+  Also see `put_private/3`.
+  """
+  @spec delete_private(t(), atom()) :: t()
+  def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
+    %{conn | private: Map.delete(private, key)}
   end
 
   defp decode(:status, %{request: request} = conn, data, responses) do
