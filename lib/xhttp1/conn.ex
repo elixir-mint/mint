@@ -22,28 +22,21 @@ defmodule XHTTP1.Conn do
 
   require Logger
 
+  @behaviour XHTTP.ConnBehaviour
+
+  @opaque t() :: %Conn{}
+
+  @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
+  @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
+  @type response() :: XHTTP.ConnBehaviour.response()
+  @type status() :: XHTTP.ConnBehaviour.response()
+  @type headers() :: XHTTP.ConnBehaviour.headers()
+
   @forced_transport_opts [
     packet: :raw,
     mode: :binary,
     active: false
   ]
-
-  @opaque t() :: %Conn{}
-
-  @type request_ref() :: reference()
-  @type tcp_message() ::
-          {:tcp | :ssl, :gen_tcp.socket(), binary()}
-          | {:tcp_closed | :ssl_closed, :gen_tcp.socket()}
-          | {:tcp_error | :ssl_error, :gen_tcp.socket(), term()}
-  @type response() ::
-          {:status, request_ref(), status()}
-          | {:headers, request_ref(), headers()}
-          | {:data, request_ref(), binary()}
-          | {:done, request_ref()}
-  @type http_version() :: {non_neg_integer(), non_neg_integer()}
-  @type status() :: non_neg_integer()
-  @type reason() :: String.t()
-  @type headers() :: [{String.t(), String.t()}]
 
   # TODO: Currently we keep the Host on the conn but we could also supply
   # it on each request so you can use multiple Hosts on a single conn
@@ -63,9 +56,8 @@ defmodule XHTTP1.Conn do
 
   The connection will be in `active: true` mode.
   """
-  @spec connect(hostname :: String.t(), port :: :inet.port_number(), opts :: Keyword.t()) ::
-          {:ok, t()}
-          | {:error, term()}
+  @impl true
+  @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = get_transport(opts, XHTTP.Transport.TCP)
 
@@ -78,7 +70,7 @@ defmodule XHTTP1.Conn do
 
     case transport.connect(hostname, port, transport_opts) do
       {:ok, transport_state} ->
-        initiate_connection(transport_state, hostname, transport)
+        initiate_connection(transport, transport_state, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -86,7 +78,15 @@ defmodule XHTTP1.Conn do
   end
 
   @doc false
-  def initiate_connection(transport_state, hostname, transport) do
+  @impl true
+  @spec initiate_connection(
+          module(),
+          XHTTP.Transport.state(),
+          String.t(),
+          :inet.port_number(),
+          Keyword.t()
+        ) :: {:ok, t()} | {:error, term()}
+  def initiate_connection(transport, transport_state, hostname, _port, _opts) do
     with :ok <- inet_opts(transport, transport_state),
          :ok <- transport.setopts(transport_state, active: true) do
       conn = %Conn{
@@ -110,6 +110,7 @@ defmodule XHTTP1.Conn do
   Should be called between every request to check that server has not
   closed the connection.
   """
+  @impl true
   @spec open?(t()) :: boolean()
   def open?(%Conn{state: state}), do: state == :open
 
@@ -121,25 +122,27 @@ defmodule XHTTP1.Conn do
   server supports pipelining and that the request is safe to pipeline.
 
   If `:stream` is given as `body` the request body should be be streamed with
-  `stream_request_body/2`.
+  `stream_request_body/3`.
   """
+  @impl true
   @spec request(
           t(),
           method :: atom | String.t(),
           path :: String.t(),
           headers(),
-          body :: iodata() | :stream
+          body :: iodata() | nil | :stream
         ) ::
           {:ok, t(), request_ref()}
-          | {:error, term()}
+          | {:error, t(), term()}
+  def request(conn, method, path, headers, body \\ nil)
+
   def request(%Conn{request: %{state: :stream_request}}, _method, _path, _headers, _body) do
     {:error, :request_body_is_streaming}
   end
 
   def request(%Conn{} = conn, method, path, headers, body) do
     %Conn{host: host, transport: transport, transport_state: transport_state} = conn
-    method = normalize_method(method)
-    iodata = Request.encode(method, path, host, headers, body)
+    iodata = Request.encode(method, path, host, headers, body || "")
 
     case transport.send(transport_state, iodata) do
       {:ok, transport_state} ->
@@ -157,12 +160,15 @@ defmodule XHTTP1.Conn do
           {:ok, conn, request_ref}
         end
 
+      {:error, :closed} ->
+        {:error, %{conn | state: :closed}, :closed}
+
       {:error, reason} ->
-        {:error, reason}
+        {:error, conn, reason}
     end
   catch
     :throw, {:xhttp, reason} ->
-      {:error, reason}
+      {:error, conn, reason}
   end
 
   @doc """
@@ -174,15 +180,18 @@ defmodule XHTTP1.Conn do
   Users should send the appropriate request headers to indicate the length of
   the message body.
   """
-  @spec stream_request_body(t(), body :: iodata() | :eof) :: {:ok, t()} | {:error, term()}
-  def stream_request_body(%Conn{request: %{state: :stream_request}} = conn, :eof) do
+  @impl true
+  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
+          {:ok, t()} | {:error, t(), term()}
+  def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, :eof) do
     {:ok, put_in(conn.request.state, :status)}
   end
 
-  def stream_request_body(%Conn{request: %{state: :stream_request}} = conn, body) do
+  def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, body) do
     case conn.transport.send(conn.transport_state, body) do
       {:ok, transport_state} -> {:ok, %Conn{conn | transport_state: transport_state}}
-      {:error, reason} -> {:error, reason}
+      {:error, :closed} -> {:error, %{conn | state: :closed}, :closed}
+      {:error, reason} -> {:error, conn, reason}
     end
   end
 
@@ -208,12 +217,13 @@ defmodule XHTTP1.Conn do
   If requests are pipelined multiple responses may be returned, use the request
   reference `t:request_ref/0` to distinguish them.
   """
+  @impl true
   @spec stream(t(), tcp_message()) ::
           {:ok, t(), [response()]}
-          | {:error, t(), term()}
+          | {:error, t(), term(), [response()]}
           | :unknown
-  def stream(%Conn{request: %{state: :stream_request}}, _message) do
-    {:error, :request_body_not_streamed}
+  def stream(%Conn{request: %{state: :stream_request}} = conn, _message) do
+    {:error, conn, :request_body_not_streamed, []}
   end
 
   def stream(
@@ -234,12 +244,15 @@ defmodule XHTTP1.Conn do
     data = buffer <> data
 
     case decode(request.state, conn, data, []) do
-      {:ok, conn, responses} -> {:ok, conn, Enum.reverse(responses)}
-      other -> other
+      {:ok, conn, responses} ->
+        {:ok, conn, Enum.reverse(responses)}
+
+      {:error, conn, reason} ->
+        conn.transport.close(transport_state)
+        conn = put_in(conn.state, :closed)
+        # TODO: Include responses that were successfully decoded before the error
+        {:error, conn, reason, []}
     end
-  catch
-    :throw, {:xhttp, reason} ->
-      {:error, request.ref, reason}
   end
 
   def stream(
@@ -251,10 +264,10 @@ defmodule XHTTP1.Conn do
     conn = request_done(conn)
 
     if request && request.body == :until_closed do
+      conn = put_in(conn.state, :closed)
       {:ok, conn, [{:done, request.ref}]}
-      # TODO: Notify that we are closed
     else
-      {:error, conn, :closed}
+      {:error, conn, :closed, []}
     end
   end
 
@@ -274,6 +287,7 @@ defmodule XHTTP1.Conn do
   This storage is meant to be used to associate metadata with the connection,
   it can be useful when handling multiple connections.
   """
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(%Conn{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
@@ -284,6 +298,7 @@ defmodule XHTTP1.Conn do
 
   Also see `put_private/3`.
   """
+  @impl true
   @spec get_private(t(), atom(), term()) :: term()
   def get_private(%Conn{private: private}, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
@@ -294,6 +309,7 @@ defmodule XHTTP1.Conn do
 
   Also see `put_private/3`.
   """
+  @impl true
   @spec delete_private(t(), atom()) :: t()
   def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
@@ -312,7 +328,7 @@ defmodule XHTTP1.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_status_line}
+        {:error, conn, :invalid_status_line}
     end
   end
 
@@ -330,8 +346,11 @@ defmodule XHTTP1.Conn do
     case Response.decode_header(data) do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
-        request = store_header(request, name, value)
-        decode_headers(conn, request, rest, responses, headers)
+
+        case store_header(request, name, value) do
+          {:ok, request} -> decode_headers(conn, request, rest, responses, headers)
+          {:error, reason} -> {:error, conn, reason}
+        end
 
       {:ok, :eof, rest} ->
         responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
@@ -345,7 +364,7 @@ defmodule XHTTP1.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_header}
+        {:error, conn, :invalid_header}
     end
   end
 
@@ -396,7 +415,7 @@ defmodule XHTTP1.Conn do
         decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
       _other ->
-        {:error, :invalid_chunk_size}
+        {:error, conn, :invalid_chunk_size}
     end
   end
 
@@ -427,7 +446,7 @@ defmodule XHTTP1.Conn do
         {:ok, conn, responses}
 
       _other ->
-        {:error, :missing_crlf_after_chunk}
+        {:error, conn, :missing_crlf_after_chunk}
     end
   end
 
@@ -468,7 +487,7 @@ defmodule XHTTP1.Conn do
         {:ok, conn, responses}
 
       :error ->
-        {:error, :invalid_trailer_header}
+        {:error, conn, :invalid_trailer_header}
     end
   end
 
@@ -497,23 +516,24 @@ defmodule XHTTP1.Conn do
     do: [{:data, request_ref, new_data} | responses]
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
-    %{request | content_length: Parse.content_length_header(value)}
+    {:ok, %{request | content_length: Parse.content_length_header(value)}}
   end
 
   defp store_header(%{connection: connection} = request, "connection", value) do
-    %{request | connection: connection ++ Parse.connection_header(value)}
+    {:ok, %{request | connection: connection ++ Parse.connection_header(value)}}
   end
 
   defp store_header(%{transfer_encoding: transfer_encoding} = request, "transfer-encoding", value) do
-    %{request | transfer_encoding: transfer_encoding ++ Parse.transfer_encoding_header(value)}
+    {:ok,
+     %{request | transfer_encoding: transfer_encoding ++ Parse.transfer_encoding_header(value)}}
   end
 
-  defp store_header(_request, name, _value) when name in ~w(content-length) do
-    throw({:xhttp, :invalid_response})
+  defp store_header(_request, "content-length", _value) do
+    {:error, :invalid_response}
   end
 
   defp store_header(request, _name, _value) do
-    request
+    {:ok, request}
   end
 
   defp request_done(%{request: request} = conn) do
@@ -579,9 +599,6 @@ defmodule XHTTP1.Conn do
   defp message_body(%{body: body}) do
     body
   end
-
-  defp normalize_method(atom) when is_atom(atom), do: atom |> Atom.to_string() |> String.upcase()
-  defp normalize_method(binary) when is_binary(binary), do: String.upcase(binary)
 
   defp new_request(ref, state, method) do
     %{

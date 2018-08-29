@@ -89,9 +89,9 @@ defmodule XHTTP1.IntegrationTest do
     headers = [{"content-length", "4"}]
     assert {:ok, conn} = Conn.connect("httpbin.org", 80)
     assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", headers, :stream)
-    assert {:ok, conn} = Conn.stream_request_body(conn, "BO")
-    assert {:ok, conn} = Conn.stream_request_body(conn, "DY")
-    assert {:ok, conn} = Conn.stream_request_body(conn, :eof)
+    assert {:ok, conn} = Conn.stream_request_body(conn, request, "BO")
+    assert {:ok, conn} = Conn.stream_request_body(conn, request, "DY")
+    assert {:ok, conn} = Conn.stream_request_body(conn, request, :eof)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
