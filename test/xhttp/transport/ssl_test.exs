@@ -1,6 +1,24 @@
 defmodule XHTTP.Transport.SSLTest do
   use ExUnit.Case, async: true
 
+  describe "default ciphers" do
+    test "no RSA key exchange" do
+      # E.g. TLS_RSA_WITH_AES_256_GCM_SHA384 (old and new OTP variants)
+      refute {:rsa, :aes_256_gcm, :aead, :sha384} in XHTTP.Transport.SSL.default_ciphers()
+      refute {:rsa, :aes_256_gcm, :null, :sha384} in XHTTP.Transport.SSL.default_ciphers()
+    end
+
+    test "no AES CBC" do
+      # E.g. TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+      refute {:ecdhe_rsa, :aes_256_cbc, :sha} in XHTTP.Transport.SSL.default_ciphers()
+    end
+
+    test "no 3DES" do
+      # E.g. TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA
+      refute {:ecdhe_rsa, :"3des_ede_cbc", :sha} in XHTTP.Transport.SSL.default_ciphers()
+    end
+  end
+
   # Based on https://bugs.erlang.org/browse/ERL-542
   @wildcard_san Path.expand("../../support/xhttp/wildcard_san.pem", __DIR__)
 
