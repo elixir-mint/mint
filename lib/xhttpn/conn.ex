@@ -33,6 +33,12 @@ defmodule XHTTPN.Conn do
 
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 
+  def put_private(conn, key, value), do: conn_module(conn).put_private(conn, key, value)
+
+  def get_private(conn, key, default \\ nil), do: conn_module(conn).get_private(conn, key, default)
+
+  def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
+
   defp negotiate(hostname, port, opts) do
     transport = get_transport(opts, XHTTP.Transport.SSL)
 
