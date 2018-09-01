@@ -164,11 +164,12 @@ defmodule XHTTP1.ConnTest do
   end
 
   test "error with multiple content-length headers", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, _ref} = Conn.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
 
-    assert {:error, ^ref, :invalid_response} =
+    assert {:error, conn, :invalid_response, []} =
              Conn.stream(conn, {:tcp, conn.transport_state, response})
+    refute Conn.open?(conn)
   end
 
   test "pipeline", %{conn: conn} do

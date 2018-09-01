@@ -11,6 +11,8 @@ defmodule XHTTP2.Conn do
 
   require Logger
 
+  @behaviour XHTTP.ConnBehaviour
+
   ## Constants
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -81,8 +83,12 @@ defmodule XHTTP2.Conn do
 
   ## Types
 
+  @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
+  @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
+  @type response() :: XHTTP.ConnBehaviour.response()
+  @type status() :: XHTTP.ConnBehaviour.response()
+  @type headers() :: XHTTP.ConnBehaviour.headers()
   @type settings() :: Keyword.t()
-  @type request_id() :: reference()
   @type stream_id() :: pos_integer()
 
   @opaque t() :: %__MODULE__{
@@ -107,7 +113,7 @@ defmodule XHTTP2.Conn do
           }
 
   ## Public interface
-
+  @impl true
   @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = get_transport(opts, XHTTP.Transport.SSL)
@@ -119,14 +125,23 @@ defmodule XHTTP2.Conn do
 
     with {:ok, transport_state} <-
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
-         do: initiate_connection(transport_state, hostname, port, transport, opts)
+         do: initiate_connection(transport, transport_state, hostname, port, opts)
   end
 
+  @impl true
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
 
-  @spec request(t(), String.t(), String.t(), list(), iodata() | nil | :stream) ::
-          {:ok, t(), request_id()} | {:error, t(), term()}
+  @impl true
+  @spec request(
+          t(),
+          method :: atom | String.t(),
+          path :: String.t(),
+          headers(),
+          body :: iodata() | nil | :stream
+        ) ::
+          {:ok, t(), request_ref()}
+          | {:error, t(), term()}
   def request(%__MODULE__{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
@@ -159,7 +174,8 @@ defmodule XHTTP2.Conn do
     :throw, {:xhttp, conn, error} -> {:error, conn, error}
   end
 
-  @spec stream_request_body(t(), request_id(), iodata() | :eof) ::
+  @impl true
+  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(%__MODULE__{} = conn, ref, chunk) when is_reference(ref) do
     stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
@@ -174,7 +190,7 @@ defmodule XHTTP2.Conn do
     {:ok, conn}
   end
 
-  @spec ping(t(), <<_::8>>) :: {:ok, t(), request_id()} | {:error, t(), term()}
+  @spec ping(t(), <<_::8>>) :: {:ok, t(), request_ref()} | {:error, t(), term()}
   def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
@@ -201,11 +217,11 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  @spec stream(t(), term()) ::
-          {:ok, t(), [response]}
-          | {:error, t(), reason :: term(), [response]}
+  @impl true
+  @spec stream(t(), tcp_message()) ::
+          {:ok, t(), [response()]}
+          | {:error, t(), term(), [response()]}
           | :unknown
-        when response: term()
   def stream(conn, message)
 
   def stream(
@@ -240,6 +256,7 @@ defmodule XHTTP2.Conn do
   This storage is meant to be used to associate metadata with the connection,
   it can be useful when handling multiple connections.
   """
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(%__MODULE__{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
@@ -250,6 +267,7 @@ defmodule XHTTP2.Conn do
 
   Also see `put_private/3`.
   """
+  @impl true
   @spec get_private(t(), atom(), term()) :: term()
   def get_private(%__MODULE__{private: private}, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
@@ -260,6 +278,7 @@ defmodule XHTTP2.Conn do
 
   Also see `put_private/3`.
   """
+  @impl true
   @spec delete_private(t(), atom()) :: t()
   def delete_private(%__MODULE__{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
@@ -268,7 +287,15 @@ defmodule XHTTP2.Conn do
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   @doc false
-  def initiate_connection(transport_state, hostname, port, transport, opts) do
+  @impl true
+  @spec initiate_connection(
+          module(),
+          XHTTP.Transport.state(),
+          String.t(),
+          :inet.port_number(),
+          Keyword.t()
+        ) :: {:ok, t()} | {:error, term()}
+  def initiate_connection(transport, transport_state, hostname, port, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
@@ -693,7 +720,7 @@ defmodule XHTTP2.Conn do
       {:error, :missing_status_header, conn} ->
         conn = close_stream!(conn, stream.id, :protocol_error)
         reason = {:protocol_error, :missing_status_header}
-        responses = [{:closed, stream.ref, reason} | responses]
+        responses = [{:error, stream.ref, reason} | responses]
         {conn, responses}
     end
   end
@@ -727,7 +754,7 @@ defmodule XHTTP2.Conn do
     rst_stream(stream_id: stream_id, error_code: error_code) = frame
     stream = fetch_stream!(conn, stream_id)
     conn = put_in(conn.streams[stream_id].state, :closed)
-    {conn, [{:closed, stream.ref, {:rst_stream, error_code}} | responses]}
+    {conn, [{:error, stream.ref, {:rst_stream, error_code}} | responses]}
   end
 
   # SETTINGS
@@ -862,7 +889,7 @@ defmodule XHTTP2.Conn do
         conn = update_in(conn.open_stream_count, &(&1 - 1))
         conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
         conn = put_in(conn.state, :went_away)
-        response = {:closed, stream.ref, {:goaway, error_code, debug_data}}
+        response = {:error, stream.ref, {:goaway, error_code, debug_data}}
         {conn, [response | responses]}
       end)
 
@@ -896,7 +923,7 @@ defmodule XHTTP2.Conn do
     case conn.streams[stream_id].window_size do
       ws when ws + wsi > @max_window_size ->
         conn = close_stream!(conn, stream_id, :flow_control_error)
-        {conn, [{:closed, stream.ref, :flow_control_error} | responses]}
+        {conn, [{:error, stream.ref, :flow_control_error} | responses]}
 
       ws ->
         conn = put_in(conn.streams[stream_id].window_size, ws + wsi)
@@ -956,6 +983,7 @@ defmodule XHTTP2.Conn do
   defp send!(%__MODULE__{transport: transport, transport_state: transport_state} = conn, bytes) do
     case transport.send(transport_state, bytes) do
       {:ok, transport_state} -> put_in(conn.transport_state, transport_state)
+      {:error, :closed} -> throw({:xhttp, %{conn | state: :closed}, :closed})
       {:error, reason} -> throw({:xhttp, conn, reason})
     end
   end

@@ -5,6 +5,8 @@ defmodule XHTTPN.Conn do
 
   import XHTTP.Util
 
+  @behaviour XHTTP.ConnBehaviour
+
   @default_protocols [:http1, :http2]
 
   @transport_opts [
@@ -24,12 +26,16 @@ defmodule XHTTPN.Conn do
     end
   end
 
+  def initiate_connection(transport, transport_state, hostname, port, opts),
+    do: alpn_negotiate(transport, transport_state, hostname, port, opts)
+
   def open?(conn), do: conn_module(conn).open?(conn)
 
-  def request(conn, method, path, headers, body),
+  def request(conn, method, path, headers, body \\ nil),
     do: conn_module(conn).request(conn, method, path, headers, body)
 
-  def stream_request_body(conn, body), do: conn_module(conn).stream_request_body(conn, body)
+  def stream_request_body(conn, ref, body),
+    do: conn_module(conn).stream_request_body(conn, ref, body)
 
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 
@@ -50,26 +56,27 @@ defmodule XHTTPN.Conn do
     with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
       case transport do
         XHTTP.Transport.TCP -> http1_with_upgrade(socket, hostname, port, opts)
-        XHTTP.Transport.SSL -> alpn_negotiate(socket, hostname, port, transport, opts)
+        XHTTP.Transport.SSL -> alpn_negotiate(transport, socket, hostname, port, opts)
       end
     end
   end
 
   defp http1_with_upgrade(_socket, _hostname, _port, _opts) do
     # TODO
+    # Since this can be unreliable it should be an option to do upgrade from HTTP1
   end
 
-  defp alpn_negotiate(socket, hostname, port, transport, opts) do
+  defp alpn_negotiate(transport, socket, hostname, port, opts) do
     case transport.negotiated_protocol(socket) do
       {:ok, "http/1.1"} ->
-        XHTTP1.Conn.initiate_connection(socket, hostname, transport)
+        XHTTP1.Conn.initiate_connection(transport, socket, hostname, port, opts)
 
       {:ok, "h2"} ->
-        XHTTP2.Conn.initiate_connection(socket, hostname, port, transport, opts)
+        XHTTP2.Conn.initiate_connection(transport, socket, hostname, port, opts)
 
       {:error, :protocol_not_negotiated} ->
         # Assume HTTP1 if ALPN is not supported
-        {:ok, XHTTP1.Conn.initiate_connection(socket, hostname, transport)}
+        {:ok, XHTTP1.Conn.initiate_connection(transport, socket, hostname, port, opts)}
 
       {:ok, protocol} ->
         {:error, {:bad_alpn_protocol, protocol}}
