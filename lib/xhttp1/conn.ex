@@ -57,7 +57,7 @@ defmodule XHTTP1.Conn do
   The connection will be in `active: true` mode.
   """
   @impl true
-  @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
+  @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = get_transport(opts, XHTTP.Transport.TCP)
 
@@ -84,7 +84,7 @@ defmodule XHTTP1.Conn do
           XHTTP.Transport.state(),
           String.t(),
           :inet.port_number(),
-          Keyword.t()
+          keyword()
         ) :: {:ok, t()} | {:error, term()}
   def initiate_connection(transport, transport_state, hostname, _port, _opts) do
     with :ok <- inet_opts(transport, transport_state),
