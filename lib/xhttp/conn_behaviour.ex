@@ -15,31 +15,39 @@ defmodule XHTTP.ConnBehaviour do
           | {:done, request_ref()}
           | {:error, request_ref(), term()}
   @type status() :: non_neg_integer()
-  @type reason() :: String.conn()
-  @type headers() :: [{String.conn(), String.conn()}]
+  @type reason() :: String.t()
+  @type headers() :: [{String.t(), String.t()}]
 
-  @callback connect(String.conn(), :inet.port_number(), Keyword.conn()) :: {:ok, conn()} | {:error, term()}
+  @callback connect(String.t(), :inet.port_number(), keyword()) ::
+              {:ok, conn()} | {:error, term()}
 
-  @callback initiate_connection(module(), XHTTP.Transport.state(), String.conn(), :inet.port_number(), Keyword.conn()) ::  {:ok, conn()} | {:error, term()}
+  @callback initiate_connection(
+              module(),
+              XHTTP.Transport.state(),
+              String.t(),
+              :inet.port_number(),
+              keyword()
+            ) :: {:ok, conn()} | {:error, term()}
 
   @callback open?(conn()) :: boolean()
 
   @callback request(
-          conn(),
-          String.conn(),
-          String.conn(),
-          headers(),
-          iodata() | nil | :stream
-        ) ::
-          {:ok, conn(), request_ref()}
-          | {:error, conn(), term()}
+              conn(),
+              String.t(),
+              String.t(),
+              headers(),
+              iodata() | nil | :stream
+            ) ::
+              {:ok, conn(), request_ref()}
+              | {:error, conn(), term()}
 
-  @callback stream_request_body(conn(), request_ref(), iodata() | :eof) :: {:ok, conn()} | {:error, conn(), term()}
+  @callback stream_request_body(conn(), request_ref(), iodata() | :eof) ::
+              {:ok, conn()} | {:error, conn(), term()}
 
   @callback stream(conn(), tcp_message()) ::
-          {:ok, conn(), [response()]}
-          | {:error, conn(), term(), [response()]}
-          | :unknown
+              {:ok, conn(), [response()]}
+              | {:error, conn(), term(), [response()]}
+              | :unknown
 
   @callback put_private(conn(), atom(), term()) :: conn()
 
