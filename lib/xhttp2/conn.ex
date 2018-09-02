@@ -88,7 +88,7 @@ defmodule XHTTP2.Conn do
   @type response() :: XHTTP.ConnBehaviour.response()
   @type status() :: XHTTP.ConnBehaviour.response()
   @type headers() :: XHTTP.ConnBehaviour.headers()
-  @type settings() :: Keyword.t()
+  @type settings() :: keyword()
   @type stream_id() :: pos_integer()
 
   @opaque t() :: %__MODULE__{
@@ -114,7 +114,7 @@ defmodule XHTTP2.Conn do
 
   ## Public interface
   @impl true
-  @spec connect(String.t(), :inet.port_number(), Keyword.t()) :: {:ok, t()} | {:error, term()}
+  @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
     transport = get_transport(opts, XHTTP.Transport.SSL)
 
@@ -293,7 +293,7 @@ defmodule XHTTP2.Conn do
           XHTTP.Transport.state(),
           String.t(),
           :inet.port_number(),
-          Keyword.t()
+          keyword()
         ) :: {:ok, t()} | {:error, term()}
   def initiate_connection(transport, transport_state, hostname, port, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
