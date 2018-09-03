@@ -1,5 +1,24 @@
 defmodule XHTTP.Transport.SSLTest do
   use ExUnit.Case, async: true
+  alias XHTTP.Transport.SSL
+
+  describe "default ciphers" do
+    test "no RSA key exchange" do
+      # E.g. TLS_RSA_WITH_AES_256_GCM_SHA384 (old and new OTP variants)
+      refute {:rsa, :aes_256_gcm, :aead, :sha384} in SSL.default_ciphers()
+      refute {:rsa, :aes_256_gcm, :null, :sha384} in SSL.default_ciphers()
+    end
+
+    test "no AES CBC" do
+      # E.g. TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+      refute {:ecdhe_rsa, :aes_256_cbc, :sha} in SSL.default_ciphers()
+    end
+
+    test "no 3DES" do
+      # E.g. TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA
+      refute {:ecdhe_rsa, :"3des_ede_cbc", :sha} in SSL.default_ciphers()
+    end
+  end
 
   # Based on https://bugs.erlang.org/browse/ERL-542
   @wildcard_san Path.expand("../../support/xhttp/wildcard_san.pem", __DIR__)
@@ -8,31 +27,29 @@ defmodule XHTTP.Transport.SSLTest do
     setup [:wildcard_san_cert]
 
     test "custom match fun for wildcard in SAN", %{cert: cert} do
-      assert {:valid, _} =
-               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'outlook.office365.com')
+      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: 'outlook.office365.com')
+
+      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: 'Outlook.office365.COM')
 
       assert {:valid, _} =
-               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'Outlook.office365.COM')
-
-      assert {:valid, _} =
-               XHTTP.Transport.SSL.verify_fun(
+               SSL.verify_fun(
                  cert,
                  :valid_peer,
                  dns_id: 'test.outlook.office365.com'
                )
 
       assert {:valid, _} =
-               XHTTP.Transport.SSL.verify_fun(
+               SSL.verify_fun(
                  cert,
                  :valid_peer,
                  uri_id: 'https://outlook.office365.com'
                )
 
       assert {:fail, {:bad_cert, :hostname_check_failed}} =
-               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'live.com')
+               SSL.verify_fun(cert, :valid_peer, dns_id: 'live.com')
 
       assert {:fail, {:bad_cert, :hostname_check_failed}} =
-               XHTTP.Transport.SSL.verify_fun(cert, :valid_peer, dns_id: 'out.look.office365.com')
+               SSL.verify_fun(cert, :valid_peer, dns_id: 'out.look.office365.com')
     end
   end
 
