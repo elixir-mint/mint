@@ -169,6 +169,7 @@ defmodule XHTTP1.ConnTest do
 
     assert {:error, conn, :invalid_response, []} =
              Conn.stream(conn, {:tcp, conn.transport_state, response})
+
     refute Conn.open?(conn)
   end
 
