@@ -386,13 +386,16 @@ defmodule XHTTP.Transport.SSL do
     ]
   end
 
-  def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites())
+  def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
 
-  defp get_valid_suites(suites, valid \\ [])
-  defp get_valid_suites([], valid), do: valid
   for {kex, cipher, mac} <- @blacklisted_ciphers do
-    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid), do: get_valid_suites(rest, valid)
-    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid), do: get_valid_suites(rest, valid)
+    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid),
+      do: get_valid_suites(rest, valid)
+
+    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid),
+      do: get_valid_suites(rest, valid)
   end
+
   defp get_valid_suites([suit | rest], valid), do: get_valid_suites(rest, [suit | valid])
+  defp get_valid_suites([], valid), do: valid
 end
