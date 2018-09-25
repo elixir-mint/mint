@@ -59,7 +59,7 @@ defmodule XHTTP1.Conn do
   @impl true
   @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    transport = get_transport(opts, XHTTP.Transport.TCP)
+    transport = get_transport(opts, XHTTP.Transport.SSL)
 
     transport_opts =
       opts

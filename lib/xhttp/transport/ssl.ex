@@ -1,6 +1,4 @@
 defmodule XHTTP.Transport.SSL do
-  require Logger
-
   @behaviour XHTTP.Transport
 
   # From RFC7540 appendix A

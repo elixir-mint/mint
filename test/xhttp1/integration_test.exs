@@ -6,7 +6,7 @@ defmodule XHTTP1.IntegrationTest do
   @moduletag :integration
 
   test "200 response - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -74,7 +74,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "POST body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
     assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", [], "BODY")
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -87,7 +87,7 @@ defmodule XHTTP1.IntegrationTest do
 
   test "POST body streaming - httpbin.org" do
     headers = [{"content-length", "4"}]
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
     assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", headers, :stream)
     assert {:ok, conn} = Conn.stream_request_body(conn, request, "BO")
     assert {:ok, conn} = Conn.stream_request_body(conn, request, "DY")
@@ -102,7 +102,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "pipelining - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
     assert {:ok, conn, request1} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, request2} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, request3} = Conn.request(conn, "GET", "/", [], nil)
@@ -130,7 +130,7 @@ defmodule XHTTP1.IntegrationTest do
   # $ curl -vv httpbin.org/stream-bytes/0
   @tag :skip
   test "chunked no chunks - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/stream-bytes/0", [], nil)
 
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
@@ -139,7 +139,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "chunked single chunk - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
 
     assert {:ok, conn, request} =
              Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=1024", [], nil)
@@ -150,7 +150,7 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "chunked multiple chunks - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80)
+    assert {:ok, conn} = Conn.connect("httpbin.org", 80, transport: XHTTP.Transport.TCP)
 
     assert {:ok, conn, request} =
              Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=100", [], nil)

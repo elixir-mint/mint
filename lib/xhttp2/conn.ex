@@ -566,7 +566,7 @@ defmodule XHTTP2.Conn do
   defp handle_new_data(%__MODULE__{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
-        Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
+        # Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
         assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
@@ -679,6 +679,10 @@ defmodule XHTTP2.Conn do
     else
       {conn, responses}
     end
+  end
+
+  defp refill_client_windows(conn, _stream_id, 0) do
+    conn
   end
 
   defp refill_client_windows(conn, stream_id, data_size) do
