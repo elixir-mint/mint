@@ -4,10 +4,6 @@ defmodule XHTTP.Util do
          buffer = calculate_buffer(opts),
          :ok <- transport.setopts(socket, buffer: buffer) do
       :ok
-    else
-      error ->
-        transport.close(socket)
-        error
     end
   end
 
