@@ -1,5 +1,8 @@
 language: elixir
-sudo: false
+
+services:
+  - docker
+
 matrix:
   include:
   - elixir: 1.7.2
@@ -12,6 +15,20 @@ matrix:
     otp_release: 18.3
   - elixir: 1.5.3
     otp_release: 17.5
+
+env:
+  - DOCKER_COMPOSE_VERSION=1.22.0
+
+script:
+  - docker-compose up --detach
+  - mix test --include proxy
+
+before_install:
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+
 notifications:
   recipients:
     - eric.meadows.jonsson@gmail.com
