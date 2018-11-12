@@ -52,7 +52,8 @@ defmodule XHTTP1.TestHelpers do
         maybe_done(conn, new_responses, responses)
 
       {tag, _socket} = message when tag in [:tcp_closed, :ssl_closed] ->
-        assert {:error, _conn, :closed} = Conn.stream(conn, message)
+        assert {:ok, conn, new_responses} = Conn.stream(conn, message)
+        maybe_done(conn, new_responses, responses)
 
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
         assert {:error, _conn, _reason} = Conn.stream(conn, message)

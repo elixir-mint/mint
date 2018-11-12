@@ -5,8 +5,8 @@ defmodule XHTTP1.Request do
 
   @user_agent "xhttp/0.1.0"
 
-  def encode(method, target, host, headers, body) do
-    headers = add_default_headers(headers, host, body)
+  def encode(method, target, host, proxy_auth, headers, body) do
+    headers = add_default_headers(headers, host, proxy_auth, body)
 
     [
       encode_request_line(method, target),
@@ -21,9 +21,10 @@ defmodule XHTTP1.Request do
     [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 
-  defp add_default_headers(headers, host, body) do
+  defp add_default_headers(headers, host, proxy_auth, body) do
     headers
     |> add_content_length(body)
+    |> put_new_header("proxy-authorization", proxy_auth)
     |> put_new_header("user-agent", @user_agent)
     |> put_new_header("host", host)
   end
@@ -35,6 +36,10 @@ defmodule XHTTP1.Request do
   defp add_content_length(headers, body) do
     length = body |> IO.iodata_length() |> Integer.to_string()
     put_new_header(headers, "content-length", length)
+  end
+
+  defp put_new_header(headers, _name, nil) do
+    headers
   end
 
   defp put_new_header(headers, name, value) do

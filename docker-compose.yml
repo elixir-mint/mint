@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  proxy:
+    image: "dannydirect/tinyproxy"
+    command: ANY
+    ports:
+      - "8888:8888"
