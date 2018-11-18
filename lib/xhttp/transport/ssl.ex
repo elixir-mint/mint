@@ -283,12 +283,12 @@ defmodule XHTTP.Transport.SSL do
     {:psk, :aes_256, :ccm_8}
   ]
 
-  @default_versions [:"tlsv1.2", :"tlsv1.1", :tlsv1]
+  @default_versions [:"tlsv1.2"]
 
   Record.defrecordp(
     :certificate,
-    :OTPCertificate,
-    Record.extract(:OTPCertificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
+    :Certificate,
+    Record.extract(:Certificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
   )
 
   Record.defrecordp(
@@ -389,6 +389,8 @@ defmodule XHTTP.Transport.SSL do
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
   defp default_ssl_opts(host) do
+    # TODO: Add revocation check
+
     [
       ciphers: default_ciphers(),
       server_name_indication: String.to_charlist(host),
@@ -409,34 +411,44 @@ defmodule XHTTP.Transport.SSL do
   end
 
   defp add_partial_chain_fun(opts) do
-    case Keyword.fetch(opts, :cacertfile) do
-      {:ok, path} ->
-        cacerts = decode_cacertfile(path)
-        fun = &partial_chain(cacerts, &1)
-        Keyword.put(opts, :partial_chain, fun)
+    if Keyword.has_key?(opts, :partial_chain) do
+      case Keyword.fetch(opts, :cacerts) do
+        {:ok, cacerts} ->
+          cacerts = decode_cacerts(cacerts)
+          fun = &partial_chain(cacerts, &1)
+          Keyword.put(opts, :partial_chain, fun)
 
-      :error ->
-        cacerts = Keyword.fetch!(opts, :cacerts)
-        cacerts = decode_cacerts(cacerts)
-        fun = &partial_chain(cacerts, &1)
-        Keyword.put(opts, :partial_chain, fun)
+        :error ->
+          path = Keyword.fetch!(opts, :cacertfile)
+          cacerts = decode_cacertfile(path)
+          fun = &partial_chain(cacerts, &1)
+          Keyword.put(opts, :partial_chain, fun)
+      end
+    else
+      opts
     end
   end
 
   defp decode_cacertfile(path) do
     # TODO: Cache this?
+
     path
     |> File.read!()
     |> :public_key.pem_decode()
+    |> Enum.filter(&match?({:Certificate, _, :not_encrypted}, &1))
+    |> Enum.map(&:public_key.pem_entry_decode/1)
   end
 
   defp decode_cacerts(certs) do
     # TODO: Cache this?
-    Enum.map(certs, &:public_key.pkix_decode_cert(&1, :otp))
+
+    Enum.map(certs, &:public_key.pkix_decode_cert(&1, :plain))
   end
 
   def partial_chain(cacerts, certs) do
-    certs = Enum.map(certs, &{&1, :public_key.pkix_decode_cert(&1, :otp)})
+    # TODO: Shim this with OTP 21.1 implementation?
+
+    certs = Enum.map(certs, &{&1, :public_key.pkix_decode_cert(&1, :plain)})
 
     trusted =
       Enum.find_value(certs, fn {der, cert} ->
@@ -464,11 +476,13 @@ defmodule XHTTP.Transport.SSL do
   def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
 
   for {kex, cipher, mac} <- @blacklisted_ciphers do
-    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid),
-      do: get_valid_suites(rest, valid)
+    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid) do
+      get_valid_suites(rest, valid)
+    end
 
-    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid),
-      do: get_valid_suites(rest, valid)
+    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid) do
+      get_valid_suites(rest, valid)
+    end
   end
 
   defp get_valid_suites([suit | rest], valid), do: get_valid_suites(rest, [suit | valid])
