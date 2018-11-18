@@ -8,7 +8,7 @@ XHTTP contains two main APIs, a stateless connection API, and a stateful multi-h
 
 ## Connection API
 
-The two connection API exists in two modules, `XHTTP1.Conn` and `XHTTP2.Conn` with implementations for HTTP/1 and HTTP/2 respectively. `XHTTPN.Conn` uses the same API but with version negotation between the HTTP/1 and 2.
+The two connection API exists in two modules, `XHTTP1.Conn` and `XHTTP2.Conn` with implementations for HTTP/1 and HTTP/2 respectively. `XHTTPN.Conn` uses the same API but with version negotiation between the HTTP/1 and 2.
 
 This API represents a connection with a single `%Conn{}` struct and are started by running:
 

@@ -1,5 +1,6 @@
 defmodule XHTTP.Transport.SSL do
   require Logger
+  require Record
 
   @behaviour XHTTP.Transport
 
@@ -282,12 +283,28 @@ defmodule XHTTP.Transport.SSL do
     {:psk, :aes_256, :ccm_8}
   ]
 
+  @default_versions [:"tlsv1.2", :"tlsv1.1", :tlsv1]
+
+  Record.defrecordp(
+    :certificate,
+    :OTPCertificate,
+    Record.extract(:OTPCertificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
+  )
+
+  Record.defrecordp(
+    :tbs_certificate,
+    :OTPTBSCertificate,
+    Record.extract(:OTPTBSCertificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
+  )
+
   @impl true
   def connect(host, port, opts) do
     ssl_opts =
-      default_ssl_opts()
+      default_ssl_opts(host)
       |> Keyword.merge(opts)
-      |> update_ssl_opts(host)
+      |> add_cacerts()
+      |> add_partial_chain_fun()
+      |> add_verify_fun(host)
 
     host
     |> String.to_charlist()
@@ -324,21 +341,13 @@ defmodule XHTTP.Transport.SSL do
   @impl true
   defdelegate getopts(socket, opts), to: :ssl
 
-  defp update_ssl_opts(opts, host_or_ip) do
+  defp add_verify_fun(opts, host_or_ip) do
     verify = Keyword.get(opts, :verify)
     verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
 
     if verify == :verify_peer and not verify_fun_present? do
-      reference_ids =
-        case Keyword.fetch(opts, :server_name_indication) do
-          {:ok, server_name} ->
-            [dns_id: server_name]
-
-          :error ->
-            host_or_ip = to_charlist(host_or_ip)
-            [dns_id: host_or_ip, ip: host_or_ip]
-        end
-
+      host_or_ip = String.to_charlist(host_or_ip)
+      reference_ids = [dns_id: host_or_ip, ip: host_or_ip]
       Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
     else
       opts
@@ -379,11 +388,77 @@ defmodule XHTTP.Transport.SSL do
   defp domain_without_host([?. | domain]), do: domain
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
-  defp default_ssl_opts() do
+  defp default_ssl_opts(host) do
     [
+      ciphers: default_ciphers(),
+      server_name_indication: String.to_charlist(host),
+      versions: @default_versions,
       verify: :verify_peer,
-      ciphers: default_ciphers()
+      depth: 4,
+      secure_renegotiate: true,
+      reuse_sessions: true
     ]
+  end
+
+  defp add_cacerts(opts) do
+    if Keyword.has_key?(opts, :cacertfile) || Keyword.has_key?(opts, :cacerts) do
+      opts
+    else
+      Keyword.put(opts, :cacertfile, CAStore.file_path())
+    end
+  end
+
+  defp add_partial_chain_fun(opts) do
+    case Keyword.fetch(opts, :cacertfile) do
+      {:ok, path} ->
+        cacerts = decode_cacertfile(path)
+        fun = &partial_chain(cacerts, &1)
+        Keyword.put(opts, :partial_chain, fun)
+
+      :error ->
+        cacerts = Keyword.fetch!(opts, :cacerts)
+        cacerts = decode_cacerts(cacerts)
+        fun = &partial_chain(cacerts, &1)
+        Keyword.put(opts, :partial_chain, fun)
+    end
+  end
+
+  defp decode_cacertfile(path) do
+    # TODO: Cache this?
+    path
+    |> File.read!()
+    |> :public_key.pem_decode()
+  end
+
+  defp decode_cacerts(certs) do
+    # TODO: Cache this?
+    Enum.map(certs, &:public_key.pkix_decode_cert(&1, :otp))
+  end
+
+  def partial_chain(cacerts, certs) do
+    certs = Enum.map(certs, &{&1, :public_key.pkix_decode_cert(&1, :otp)})
+
+    trusted =
+      Enum.find_value(certs, fn {der, cert} ->
+        trusted? =
+          Enum.find(cacerts, fn cacert ->
+            extract_public_key_info(cacert) == extract_public_key_info(cert)
+          end)
+
+        if trusted?, do: der
+      end)
+
+    if trusted do
+      {:trusted_ca, trusted}
+    else
+      :unknown_ca
+    end
+  end
+
+  defp extract_public_key_info(cert) do
+    cert
+    |> certificate(:tbsCertificate)
+    |> tbs_certificate(:subjectPublicKeyInfo)
   end
 
   def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])

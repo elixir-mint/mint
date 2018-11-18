@@ -10,8 +10,7 @@ defmodule XHTTPN.IntegrationTest do
                Conn.connect(
                  "httpbin.org",
                  443,
-                 transport: XHTTP.Transport.SSL,
-                 transport_opts: [cacertfile: "test/support/cacerts.pem"]
+                 transport: XHTTP.Transport.SSL
                )
 
       assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/1", [], nil)
@@ -32,8 +31,7 @@ defmodule XHTTPN.IntegrationTest do
                  "httpbin.org",
                  443,
                  transport: XHTTP.Transport.SSL,
-                 protocols: [:http2],
-                 transport_opts: [cacertfile: "test/support/cacerts.pem"]
+                 protocols: [:http2]
                )
     end
   end
@@ -92,7 +90,7 @@ defmodule XHTTPN.IntegrationTest do
                  "untrusted-root.badssl.com",
                  443,
                  transport: XHTTP.Transport.SSL,
-                 transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+                 transport_opts: [log_alert: false]
                )
 
       assert {:ok, _conn} =
@@ -110,7 +108,7 @@ defmodule XHTTPN.IntegrationTest do
                  "wrong.host.badssl.com",
                  443,
                  transport: XHTTP.Transport.SSL,
-                 transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+                 transport_opts: [log_alert: false]
                )
 
       assert {:ok, _conn} =
