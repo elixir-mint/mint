@@ -297,6 +297,10 @@ defmodule XHTTP.Transport.SSL do
     Record.extract(:OTPTBSCertificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
   )
 
+  # TODO: Document how to enable revocation checking:
+  #       crl_check: true
+  #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
+
   @impl true
   def connect(host, port, opts) do
     ssl_opts =
