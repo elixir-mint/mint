@@ -412,6 +412,8 @@ defmodule XHTTP.Transport.SSL do
 
   defp add_partial_chain_fun(opts) do
     if Keyword.has_key?(opts, :partial_chain) do
+      opts
+    else
       case Keyword.fetch(opts, :cacerts) do
         {:ok, cacerts} ->
           cacerts = decode_cacerts(cacerts)
@@ -424,8 +426,6 @@ defmodule XHTTP.Transport.SSL do
           fun = &partial_chain(cacerts, &1)
           Keyword.put(opts, :partial_chain, fun)
       end
-    else
-      opts
     end
   end
 
