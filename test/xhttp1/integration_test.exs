@@ -23,8 +23,7 @@ defmodule XHTTP1.IntegrationTest do
              Conn.connect(
                "httpbin.org",
                443,
-               transport: XHTTP.Transport.SSL,
-               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+               transport: XHTTP.Transport.SSL
              )
 
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/50000", [], nil)
@@ -37,13 +36,48 @@ defmodule XHTTP1.IntegrationTest do
     assert byte_size(merge_body(responses, request)) == 50000
   end
 
+  test "ssl with cacerts - httpbin.org" do
+    cacerts =
+      "test/support/empty_cacerts.pem"
+      |> File.read!()
+      |> :public_key.pem_decode()
+      |> Enum.map(&:public_key.pem_entry_decode/1)
+
+    assert {:error, {:tls_alert, 'unknown ca'}} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: XHTTP.Transport.SSL,
+               transport_opts: [cacerts: cacerts, log_alert: false]
+             )
+  end
+
+  test "ssl with missing CA cacertfile - httpbin.org" do
+    assert {:error, {:tls_alert, 'unknown ca'}} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: XHTTP.Transport.SSL,
+               transport_opts: [cacertfile: "test/support/empty_cacerts.pem", log_alert: false]
+             )
+  end
+
+  test "ssl with missing CA cacerts - httpbin.org" do
+    assert {:error, {:tls_alert, 'unknown ca'}} =
+             Conn.connect(
+               "httpbin.org",
+               443,
+               transport: XHTTP.Transport.SSL,
+               transport_opts: [cacerts: [], log_alert: false]
+             )
+  end
+
   test "keep alive - httpbin.org" do
     assert {:ok, conn} =
              Conn.connect(
                "httpbin.org",
                443,
-               transport: XHTTP.Transport.SSL,
-               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+               transport: XHTTP.Transport.SSL
              )
 
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
@@ -59,8 +93,7 @@ defmodule XHTTP1.IntegrationTest do
              Conn.connect(
                "httpbin.org",
                443,
-               transport: XHTTP.Transport.SSL,
-               transport_opts: [cacertfile: "test/support/cacerts.pem"]
+               transport: XHTTP.Transport.SSL
              )
 
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
@@ -166,7 +199,7 @@ defmodule XHTTP1.IntegrationTest do
                "untrusted-root.badssl.com",
                443,
                transport: XHTTP.Transport.SSL,
-               transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+               transport_opts: [log_alert: false]
              )
 
     assert {:ok, _conn} =
@@ -184,7 +217,7 @@ defmodule XHTTP1.IntegrationTest do
                "wrong.host.badssl.com",
                443,
                transport: XHTTP.Transport.SSL,
-               transport_opts: [cacertfile: "test/support/cacerts.pem", log_alert: false]
+               transport_opts: [log_alert: false]
              )
 
     assert {:ok, _conn} =

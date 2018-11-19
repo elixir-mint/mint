@@ -1,5 +1,6 @@
 defmodule XHTTP.Transport.SSL do
   require Logger
+  require Record
 
   @behaviour XHTTP.Transport
 
@@ -282,12 +283,32 @@ defmodule XHTTP.Transport.SSL do
     {:psk, :aes_256, :ccm_8}
   ]
 
+  @default_versions [:"tlsv1.2"]
+
+  Record.defrecordp(
+    :certificate,
+    :Certificate,
+    Record.extract(:Certificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
+  )
+
+  Record.defrecordp(
+    :tbs_certificate,
+    :OTPTBSCertificate,
+    Record.extract(:OTPTBSCertificate, from_lib: "public_key/include/OTP-PUB-KEY.hrl")
+  )
+
+  # TODO: Document how to enable revocation checking:
+  #       crl_check: true
+  #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
+
   @impl true
   def connect(host, port, opts) do
     ssl_opts =
-      default_ssl_opts()
+      default_ssl_opts(host)
       |> Keyword.merge(opts)
-      |> update_ssl_opts(host)
+      |> add_cacerts()
+      |> add_partial_chain_fun()
+      |> add_verify_fun(host)
 
     host
     |> String.to_charlist()
@@ -324,21 +345,13 @@ defmodule XHTTP.Transport.SSL do
   @impl true
   defdelegate getopts(socket, opts), to: :ssl
 
-  defp update_ssl_opts(opts, host_or_ip) do
+  defp add_verify_fun(opts, host_or_ip) do
     verify = Keyword.get(opts, :verify)
     verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
 
     if verify == :verify_peer and not verify_fun_present? do
-      reference_ids =
-        case Keyword.fetch(opts, :server_name_indication) do
-          {:ok, server_name} ->
-            [dns_id: server_name]
-
-          :error ->
-            host_or_ip = to_charlist(host_or_ip)
-            [dns_id: host_or_ip, ip: host_or_ip]
-        end
-
+      host_or_ip = String.to_charlist(host_or_ip)
+      reference_ids = [dns_id: host_or_ip, ip: host_or_ip]
       Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
     else
       opts
@@ -379,21 +392,101 @@ defmodule XHTTP.Transport.SSL do
   defp domain_without_host([?. | domain]), do: domain
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
-  defp default_ssl_opts() do
+  defp default_ssl_opts(host) do
+    # TODO: Add revocation check
+
     [
+      ciphers: default_ciphers(),
+      server_name_indication: String.to_charlist(host),
+      versions: @default_versions,
       verify: :verify_peer,
-      ciphers: default_ciphers()
+      depth: 4,
+      secure_renegotiate: true,
+      reuse_sessions: true
     ]
+  end
+
+  defp add_cacerts(opts) do
+    if Keyword.has_key?(opts, :cacertfile) || Keyword.has_key?(opts, :cacerts) do
+      opts
+    else
+      Keyword.put(opts, :cacertfile, CAStore.file_path())
+    end
+  end
+
+  defp add_partial_chain_fun(opts) do
+    if Keyword.has_key?(opts, :partial_chain) do
+      opts
+    else
+      case Keyword.fetch(opts, :cacerts) do
+        {:ok, cacerts} ->
+          cacerts = decode_cacerts(cacerts)
+          fun = &partial_chain(cacerts, &1)
+          Keyword.put(opts, :partial_chain, fun)
+
+        :error ->
+          path = Keyword.fetch!(opts, :cacertfile)
+          cacerts = decode_cacertfile(path)
+          fun = &partial_chain(cacerts, &1)
+          Keyword.put(opts, :partial_chain, fun)
+      end
+    end
+  end
+
+  defp decode_cacertfile(path) do
+    # TODO: Cache this?
+
+    path
+    |> File.read!()
+    |> :public_key.pem_decode()
+    |> Enum.filter(&match?({:Certificate, _, :not_encrypted}, &1))
+    |> Enum.map(&:public_key.pem_entry_decode/1)
+  end
+
+  defp decode_cacerts(certs) do
+    # TODO: Cache this?
+
+    Enum.map(certs, &:public_key.pkix_decode_cert(&1, :plain))
+  end
+
+  def partial_chain(cacerts, certs) do
+    # TODO: Shim this with OTP 21.1 implementation?
+
+    certs = Enum.map(certs, &{&1, :public_key.pkix_decode_cert(&1, :plain)})
+
+    trusted =
+      Enum.find_value(certs, fn {der, cert} ->
+        trusted? =
+          Enum.find(cacerts, fn cacert ->
+            extract_public_key_info(cacert) == extract_public_key_info(cert)
+          end)
+
+        if trusted?, do: der
+      end)
+
+    if trusted do
+      {:trusted_ca, trusted}
+    else
+      :unknown_ca
+    end
+  end
+
+  defp extract_public_key_info(cert) do
+    cert
+    |> certificate(:tbsCertificate)
+    |> tbs_certificate(:subjectPublicKeyInfo)
   end
 
   def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
 
   for {kex, cipher, mac} <- @blacklisted_ciphers do
-    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid),
-      do: get_valid_suites(rest, valid)
+    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid) do
+      get_valid_suites(rest, valid)
+    end
 
-    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid),
-      do: get_valid_suites(rest, valid)
+    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid) do
+      get_valid_suites(rest, valid)
+    end
   end
 
   defp get_valid_suites([suit | rest], valid), do: get_valid_suites(rest, [suit | valid])
