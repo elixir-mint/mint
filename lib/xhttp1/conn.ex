@@ -45,8 +45,6 @@ defmodule XHTTP1.Conn do
     :request,
     :transport_state,
     :transport,
-    :proxy_uri,
-    :proxy_auth,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -61,7 +59,6 @@ defmodule XHTTP1.Conn do
   @impl true
   @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
   def connect(hostname, port, opts \\ []) do
-    {proxy_hostname, proxy_port} = proxy_hostname_port(hostname, port, opts)
     transport = get_transport(opts, XHTTP.Transport.TCP)
 
     transport_opts =
@@ -71,7 +68,7 @@ defmodule XHTTP1.Conn do
 
     # TODO: Also ALPN negotiate HTTP1?
 
-    case transport.connect(proxy_hostname, proxy_port, transport_opts) do
+    case transport.connect(hostname, port, transport_opts) do
       {:ok, transport_state} ->
         initiate_connection(transport, transport_state, hostname, port, opts)
 
@@ -95,9 +92,7 @@ defmodule XHTTP1.Conn do
       conn = %Conn{
         transport: transport,
         transport_state: transport_state,
-        host: proxy_host(hostname, port, opts),
-        proxy_uri: proxy_uri(transport, hostname, port, opts),
-        proxy_auth: proxy_auth(opts),
+        host: hostname,
         state: :open
       }
 
@@ -147,8 +142,7 @@ defmodule XHTTP1.Conn do
 
   def request(%Conn{} = conn, method, path, headers, body) do
     %Conn{host: host, transport: transport, transport_state: transport_state} = conn
-    path = proxy_path(conn.proxy_uri, path)
-    iodata = Request.encode(method, path, host, conn.proxy_auth, headers, body || "")
+    iodata = Request.encode(method, path, host, headers, body || "")
 
     case transport.send(transport_state, iodata) do
       {:ok, transport_state} ->

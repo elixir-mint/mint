@@ -1,16 +1,16 @@
-defmodule XHTTP1.ProxyTest do
+defmodule XHTTP.UnsafeProxyTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTP1.Conn
+  alias XHTTP.UnsafeProxyConn, as: Conn
+  alias XHTTP.Transport.TCP
 
   @moduletag :proxy
 
-  test "200 response - httpbin.org" do
-    assert {:ok, conn} = Conn.connect("httpbin.org", 80, proxy: {"localhost", 8888})
+  test "200 response - http://httpbin.org" do
+    assert {:ok, conn} = Conn.connect(XHTTP1.Conn, {TCP, "localhost", 8888}, {:http, "httpbin.org", 80})
     assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
-    assert conn.buffer == ""
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
