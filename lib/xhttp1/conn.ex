@@ -70,23 +70,22 @@ defmodule XHTTP1.Conn do
 
     case transport.connect(hostname, port, transport_opts) do
       {:ok, transport_state} ->
-        initiate_connection(transport, transport_state, hostname, port, opts)
+        initiate(transport, transport_state, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  @doc false
   @impl true
-  @spec initiate_connection(
+  @spec initiate(
           module(),
           XHTTP.Transport.state(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate_connection(transport, transport_state, hostname, port, opts) do
+  def initiate(transport, transport_state, hostname, _port, _opts) do
     with :ok <- inet_opts(transport, transport_state),
          :ok <- transport.setopts(transport_state, active: true) do
       conn = %Conn{

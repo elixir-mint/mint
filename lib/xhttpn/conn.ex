@@ -26,7 +26,7 @@ defmodule XHTTPN.Conn do
     end
   end
 
-  def initiate_connection(transport, transport_state, hostname, port, opts),
+  def initiate(transport, transport_state, hostname, port, opts),
     do: alpn_negotiate(transport, transport_state, hostname, port, opts)
 
   def open?(conn), do: conn_module(conn).open?(conn)
@@ -70,14 +70,14 @@ defmodule XHTTPN.Conn do
   defp alpn_negotiate(transport, socket, hostname, port, opts) do
     case transport.negotiated_protocol(socket) do
       {:ok, "http/1.1"} ->
-        XHTTP1.Conn.initiate_connection(transport, socket, hostname, port, opts)
+        XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)
 
       {:ok, "h2"} ->
-        XHTTP2.Conn.initiate_connection(transport, socket, hostname, port, opts)
+        XHTTP2.Conn.initiate(transport, socket, hostname, port, opts)
 
       {:error, :protocol_not_negotiated} ->
         # Assume HTTP1 if ALPN is not supported
-        {:ok, XHTTP1.Conn.initiate_connection(transport, socket, hostname, port, opts)}
+        {:ok, XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)}
 
       {:ok, protocol} ->
         {:error, {:bad_alpn_protocol, protocol}}
