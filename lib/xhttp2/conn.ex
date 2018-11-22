@@ -22,14 +22,6 @@ defmodule XHTTP2.Conn do
 
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
-
-  @forced_transport_opts [
-    packet: :raw,
-    mode: :binary,
-    active: false,
-    alpn_advertised_protocols: ["h2"]
-  ]
-
   ## Connection
 
   defstruct [
@@ -121,11 +113,22 @@ defmodule XHTTP2.Conn do
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(@forced_transport_opts)
+      |> Keyword.merge(transport_opts())
 
     with {:ok, transport_state} <-
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
          do: initiate(transport, transport_state, hostname, port, opts)
+  end
+
+  @impl true
+  @spec transport_opts() :: Keyword.t()
+  def transport_opts() do
+    [
+      packet: :raw,
+      mode: :binary,
+      active: false,
+      alpn_advertised_protocols: ["h2"]
+    ]
   end
 
   @impl true

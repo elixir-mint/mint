@@ -29,6 +29,10 @@ defmodule XHTTP.UnsafeProxyConn do
     end
   end
 
+  def transport_opts() do
+    raise "transport_opts/0 does not apply for #{inspect(__MODULE__)}"
+  end
+
   def initiate(_transport, _transport_state, _hostname, _port, _opts) do
     raise "initiate/5 does not apply for #{inspect(__MODULE__)}"
   end
