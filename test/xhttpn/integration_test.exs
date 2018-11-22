@@ -8,9 +8,9 @@ defmodule XHTTPN.IntegrationTest do
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                Conn.connect(
+                 :https,
                  "httpbin.org",
-                 443,
-                 transport: XHTTP.Transport.SSL
+                 443
                )
 
       assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/1", [], nil)
@@ -28,9 +28,9 @@ defmodule XHTTPN.IntegrationTest do
     test "SSL - fail to select HTTP2" do
       assert {:error, {:tls_alert, 'no application protocol'}} =
                Conn.connect(
+                 :https,
                  "httpbin.org",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  protocols: [:http2]
                )
     end
@@ -40,9 +40,9 @@ defmodule XHTTPN.IntegrationTest do
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                Conn.connect(
+                 :https,
                  "nghttp2.org",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  protocols: [:http1],
                  transport_opts: [verify: :verify_none]
                )
@@ -61,9 +61,9 @@ defmodule XHTTPN.IntegrationTest do
     test "SSL - select HTTP2" do
       assert {:ok, conn} =
                Conn.connect(
+                 :https,
                  "nghttp2.org",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
 
@@ -87,17 +87,17 @@ defmodule XHTTPN.IntegrationTest do
     test "bad certificate - badssl.com" do
       assert {:error, {:tls_alert, 'unknown ca'}} =
                Conn.connect(
+                 :https,
                  "untrusted-root.badssl.com",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  transport_opts: [log_alert: false]
                )
 
       assert {:ok, _conn} =
                Conn.connect(
+                 :https,
                  "untrusted-root.badssl.com",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
     end
@@ -105,17 +105,17 @@ defmodule XHTTPN.IntegrationTest do
     test "bad hostname - badssl.com" do
       assert {:error, {:tls_alert, 'handshake failure'}} =
                Conn.connect(
+                 :https,
                  "wrong.host.badssl.com",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  transport_opts: [log_alert: false]
                )
 
       assert {:ok, _conn} =
                Conn.connect(
+                 :https,
                  "wrong.host.badssl.com",
                  443,
-                 transport: XHTTP.Transport.SSL,
                  transport_opts: [verify: :verify_none]
                )
     end

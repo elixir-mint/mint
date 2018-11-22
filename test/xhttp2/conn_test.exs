@@ -18,21 +18,13 @@ defmodule XHTTP2.ConnTest do
 
       {:ok, conn} =
         Conn.connect(
+          :https,
           "localhost",
           port,
-          transport: XHTTP.Transport.SSL,
           transport_opts: [verify: :verify_none]
         )
 
       [conn: conn, server: server]
-    end
-  end
-
-  test "using an unknown transport raises an error" do
-    message = "the :transport option must be either TCP or SSL, got: :some_transport"
-
-    assert_raise ArgumentError, message, fn ->
-      Conn.connect("localhost", 80, transport: :some_transport)
     end
   end
 

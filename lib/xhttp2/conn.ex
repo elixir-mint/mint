@@ -75,6 +75,7 @@ defmodule XHTTP2.Conn do
 
   ## Types
 
+  @type scheme :: :http | :https | module()
   @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
   @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
   @type response() :: XHTTP.ConnBehaviour.response()
@@ -105,10 +106,9 @@ defmodule XHTTP2.Conn do
           }
 
   ## Public interface
-  @impl true
-  @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
-  def connect(hostname, port, opts \\ []) do
-    transport = get_transport(opts, XHTTP.Transport.SSL)
+  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
+  def connect(scheme, hostname, port, opts \\ []) do
+    transport = scheme_to_transport(scheme)
 
     transport_opts =
       opts

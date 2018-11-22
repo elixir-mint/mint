@@ -5,7 +5,7 @@ defmodule XHTTP1.ConnTest do
 
   setup do
     {:ok, port} = TestServer.start()
-    assert {:ok, conn} = Conn.connect("localhost", port, transport: XHTTP.Transport.TCP)
+    assert {:ok, conn} = Conn.connect(:http, "localhost", port)
     [conn: conn]
   end
 
