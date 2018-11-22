@@ -9,13 +9,6 @@ defmodule XHTTPN.Conn do
 
   @default_protocols [:http1, :http2]
 
-  @transport_opts [
-    packet: :raw,
-    mode: :binary,
-    active: false,
-    alpn_advertised_protocols: ["http/1.1", "h2"]
-  ]
-
   def connect(hostname, port, opts \\ []) do
     {protocols, opts} = Keyword.pop(opts, :protocols, @default_protocols)
 
@@ -24,6 +17,16 @@ defmodule XHTTPN.Conn do
       [:http2] -> XHTTP2.Conn.connect(hostname, port, opts)
       [:http1, :http2] -> negotiate(hostname, port, opts)
     end
+  end
+
+  # This function knows about XHTTP1.Conn / XHTTP2.Conn internals
+  def transport_opts() do
+    [
+      packet: :raw,
+      mode: :binary,
+      active: false,
+      alpn_advertised_protocols: ["http/1.1", "h2"]
+    ]
   end
 
   def initiate(transport, transport_state, hostname, port, opts),
@@ -52,7 +55,7 @@ defmodule XHTTPN.Conn do
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(@transport_opts)
+      |> Keyword.merge(transport_opts())
 
     with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
       case transport do

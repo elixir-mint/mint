@@ -32,12 +32,6 @@ defmodule XHTTP1.Conn do
   @type status() :: XHTTP.ConnBehaviour.response()
   @type headers() :: XHTTP.ConnBehaviour.headers()
 
-  @forced_transport_opts [
-    packet: :raw,
-    mode: :binary,
-    active: false
-  ]
-
   # TODO: Currently we keep the Host on the conn but we could also supply
   # it on each request so you can use multiple Hosts on a single conn
   defstruct [
@@ -64,7 +58,7 @@ defmodule XHTTP1.Conn do
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(@forced_transport_opts)
+      |> Keyword.merge(transport_opts())
 
     # TODO: Also ALPN negotiate HTTP1?
 
@@ -75,6 +69,16 @@ defmodule XHTTP1.Conn do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @impl true
+  @spec transport_opts() :: Keyword.t()
+  def transport_opts() do
+    [
+      packet: :raw,
+      mode: :binary,
+      active: false
+    ]
   end
 
   @impl true

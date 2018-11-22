@@ -18,8 +18,7 @@ defmodule XHTTP.ConnBehaviour do
   @type reason() :: String.t()
   @type headers() :: [{String.t(), String.t()}]
 
-  @callback connect(String.t(), :inet.port_number(), keyword()) ::
-              {:ok, conn()} | {:error, term()}
+  @callback transport_opts() :: Keyword.t()
 
   @callback initiate(
               module(),
