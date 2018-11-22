@@ -7,16 +7,9 @@ defmodule XHTTP.Util do
     end
   end
 
-  def get_transport(opts, default) do
-    transport = Keyword.get(opts, :transport, default)
-
-    if transport not in [XHTTP.Transport.TCP, XHTTP.Transport.SSL] do
-      raise ArgumentError,
-            "the :transport option must be either TCP or SSL, got: #{inspect(transport)}"
-    end
-
-    transport
-  end
+  def scheme_to_transport(:http), do: XHTTP.Transport.TCP
+  def scheme_to_transport(:https), do: XHTTP.Transport.SSL
+  def scheme_to_transport(module) when is_atom(module), do: module
 
   defp calculate_buffer(opts) do
     Keyword.fetch!(opts, :buffer)

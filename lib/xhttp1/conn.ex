@@ -26,6 +26,7 @@ defmodule XHTTP1.Conn do
 
   @opaque t() :: %Conn{}
 
+  @type scheme :: :http | :https | module()
   @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
   @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
   @type response() :: XHTTP.ConnBehaviour.response()
@@ -50,10 +51,9 @@ defmodule XHTTP1.Conn do
 
   The connection will be in `active: true` mode.
   """
-  @impl true
-  @spec connect(String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
-  def connect(hostname, port, opts \\ []) do
-    transport = get_transport(opts, XHTTP.Transport.TCP)
+  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
+  def connect(scheme, hostname, port, opts \\ []) do
+    transport = scheme_to_transport(scheme)
 
     transport_opts =
       opts

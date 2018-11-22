@@ -11,7 +11,7 @@ defmodule XHTTP2.IntegrationTest do
     case context.connect do
       {host, port} ->
         assert {:ok, %Conn{} = conn} =
-                 Conn.connect(host, port, transport_opts: [verify: :verify_none])
+                 Conn.connect(:https, host, port, transport_opts: [verify: :verify_none])
 
         [conn: conn]
 

@@ -1,6 +1,7 @@
 defmodule XHTTP.UnsafeProxyConn do
   @behaviour XHTTP.ConnBehaviour
 
+  import XHTTP.Util
   alias XHTTP.UnsafeProxyConn, as: Conn
 
   defstruct [
@@ -12,11 +13,15 @@ defmodule XHTTP.UnsafeProxyConn do
   ]
 
   def connect(module, proxy, host, opts \\ []) do
-    {proxy_transport, proxy_hostname, proxy_port} = proxy
+    {proxy_scheme, proxy_hostname, proxy_port} = proxy
     {scheme, hostname, port} = host
-    opts = Keyword.put(opts, :transport, proxy_transport)
 
-    with {:ok, state} <- module.connect(proxy_hostname, proxy_port, opts) do
+    transport = scheme_to_transport(proxy_scheme)
+    transport_opts = module.transport_opts()
+    opts = Keyword.update(opts, :transport_opts, transport_opts, &Keyword.merge(&1, transport_opts))
+
+    with {:ok, transport_state} <- transport.connect(proxy_hostname, proxy_port, opts),
+         {:ok, state} <- module.initiate(transport, transport_state, hostname, port, opts) do
       conn = %Conn{
         scheme: scheme,
         hostname: hostname,
