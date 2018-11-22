@@ -51,7 +51,8 @@ defmodule XHTTP1.Conn do
 
   The connection will be in `active: true` mode.
   """
-  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) :: {:ok, t()} | {:error, term()}
+  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
+          {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
     transport = scheme_to_transport(scheme)
 

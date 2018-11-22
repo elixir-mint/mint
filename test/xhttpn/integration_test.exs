@@ -27,12 +27,7 @@ defmodule XHTTPN.IntegrationTest do
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, {:tls_alert, 'no application protocol'}} =
-               Conn.connect(
-                 :https,
-                 "httpbin.org",
-                 443,
-                 protocols: [:http2]
-               )
+               Conn.connect(:https, "httpbin.org", 443, protocols: [:http2])
     end
   end
 
