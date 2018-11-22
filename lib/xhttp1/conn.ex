@@ -75,11 +75,7 @@ defmodule XHTTP1.Conn do
   @impl true
   @spec transport_opts() :: Keyword.t()
   def transport_opts() do
-    [
-      packet: :raw,
-      mode: :binary,
-      active: false
-    ]
+    []
   end
 
   @impl true

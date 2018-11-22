@@ -124,12 +124,7 @@ defmodule XHTTP2.Conn do
   @impl true
   @spec transport_opts() :: Keyword.t()
   def transport_opts() do
-    [
-      packet: :raw,
-      mode: :binary,
-      active: false,
-      alpn_advertised_protocols: ["h2"]
-    ]
+    [alpn_advertised_protocols: ["h2"]]
   end
 
   @impl true
