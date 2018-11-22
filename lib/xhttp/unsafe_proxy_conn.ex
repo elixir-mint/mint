@@ -15,14 +15,14 @@ defmodule XHTTP.UnsafeProxyConn do
   def connect(module, proxy, host, opts \\ []) do
     {proxy_scheme, proxy_hostname, proxy_port} = proxy
     {scheme, hostname, port} = host
-
     transport = scheme_to_transport(proxy_scheme)
-    transport_opts = module.transport_opts()
 
-    opts =
-      Keyword.update(opts, :transport_opts, transport_opts, &Keyword.merge(&1, transport_opts))
+    transport_opts =
+      opts
+      |> Keyword.get(:transport_opts, [])
+      |> Keyword.merge(module.transport_opts())
 
-    with {:ok, transport_state} <- transport.connect(proxy_hostname, proxy_port, opts),
+    with {:ok, transport_state} <- transport.connect(proxy_hostname, proxy_port, transport_opts),
          {:ok, state} <- module.initiate(transport, transport_state, hostname, port, opts) do
       conn = %Conn{
         scheme: scheme,
