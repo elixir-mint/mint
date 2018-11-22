@@ -61,9 +61,8 @@ defmodule XHTTP1.RequestTest do
     end
 
     test "invalid header value" do
-      assert catch_throw(
-               Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil)
-             ) == {:xhttp, {:invalid_header_value, "foo", "bar\r\n"}}
+      assert catch_throw(Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil)) ==
+               {:xhttp, {:invalid_header_value, "foo", "bar\r\n"}}
     end
   end
 

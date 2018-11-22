@@ -18,7 +18,9 @@ defmodule XHTTP.UnsafeProxyConn do
 
     transport = scheme_to_transport(proxy_scheme)
     transport_opts = module.transport_opts()
-    opts = Keyword.update(opts, :transport_opts, transport_opts, &Keyword.merge(&1, transport_opts))
+
+    opts =
+      Keyword.update(opts, :transport_opts, transport_opts, &Keyword.merge(&1, transport_opts))
 
     with {:ok, transport_state} <- transport.connect(proxy_hostname, proxy_port, opts),
          {:ok, state} <- module.initiate(transport, transport_state, hostname, port, opts) do
@@ -48,6 +50,7 @@ defmodule XHTTP.UnsafeProxyConn do
 
   def request(%Conn{module: module, state: state} = conn, method, path, headers, body \\ nil) do
     path = request_line(conn, path)
+
     case module.request(state, method, path, headers, body) do
       {:ok, state, request} -> {:ok, %{conn | state: state}, request}
       {:error, state, reason} -> {:error, %{conn | state: state}, reason}
