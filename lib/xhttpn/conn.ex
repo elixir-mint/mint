@@ -19,14 +19,8 @@ defmodule XHTTPN.Conn do
     end
   end
 
-  # This function knows about XHTTP1.Conn / XHTTP2.Conn internals
   def transport_opts() do
-    [
-      packet: :raw,
-      mode: :binary,
-      active: false,
-      alpn_advertised_protocols: ["http/1.1", "h2"]
-    ]
+    [alpn_advertised_protocols: ["http/1.1", "h2"]]
   end
 
   def initiate(transport, transport_state, hostname, port, opts),

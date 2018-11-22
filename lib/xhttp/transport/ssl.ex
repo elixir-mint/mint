@@ -283,6 +283,12 @@ defmodule XHTTP.Transport.SSL do
     {:psk, :aes_256, :ccm_8}
   ]
 
+  @transport_opts [
+    packet: :raw,
+    mode: :binary,
+    active: false
+  ]
+
   @default_versions [:"tlsv1.2"]
 
   Record.defrecordp(
@@ -306,6 +312,7 @@ defmodule XHTTP.Transport.SSL do
     ssl_opts =
       default_ssl_opts(host)
       |> Keyword.merge(opts)
+      |> Keyword.merge(@transport_opts)
       |> add_cacerts()
       |> add_partial_chain_fun()
       |> add_verify_fun(host)

@@ -1,8 +1,16 @@
 defmodule XHTTP.Transport.TCP do
   @behaviour XHTTP.Transport
 
+  @transport_opts [
+    packet: :raw,
+    mode: :binary,
+    active: false
+  ]
+
   @impl true
   def connect(host, port, opts) do
+    opts = Keyword.merge(opts, @transport_opts)
+
     host
     |> String.to_charlist()
     |> :gen_tcp.connect(port, opts)
