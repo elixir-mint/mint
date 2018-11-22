@@ -38,14 +38,7 @@ defmodule XHTTPN.IntegrationTest do
 
   describe "nghttp2.org" do
     test "SSL - select HTTP1" do
-      assert {:ok, conn} =
-               Conn.connect(
-                 :https,
-                 "nghttp2.org",
-                 443,
-                 protocols: [:http1],
-                 transport_opts: [verify: :verify_none]
-               )
+      assert {:ok, conn} = Conn.connect(:https, "nghttp2.org", 443, protocols: [:http1])
 
       assert {:ok, conn, request} = Conn.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = XHTTP1.TestHelpers.receive_stream(conn)
@@ -59,13 +52,7 @@ defmodule XHTTPN.IntegrationTest do
     end
 
     test "SSL - select HTTP2" do
-      assert {:ok, conn} =
-               Conn.connect(
-                 :https,
-                 "nghttp2.org",
-                 443,
-                 transport_opts: [verify: :verify_none]
-               )
+      assert {:ok, conn} = Conn.connect(:https, "nghttp2.org", 443)
 
       assert {:ok, conn, request} = Conn.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = XHTTP2.TestHelpers.receive_stream(conn)
