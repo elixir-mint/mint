@@ -5,6 +5,7 @@ defmodule XHTTP2.Conn do
   import XHTTP2.Frame, except: [encode: 1, decode_next: 1]
 
   alias XHTTP2.{
+    Conn,
     Frame,
     HPACK
   }
@@ -84,7 +85,7 @@ defmodule XHTTP2.Conn do
   @type settings() :: keyword()
   @type stream_id() :: pos_integer()
 
-  @opaque t() :: %__MODULE__{
+  @opaque t() :: %Conn{
             transport: module(),
             transport_state: XHTTP.Transport.state(),
             state: :open | :closed | :went_away,
@@ -129,7 +130,7 @@ defmodule XHTTP2.Conn do
 
   @impl true
   @spec open?(t()) :: boolean()
-  def open?(%__MODULE__{state: state}), do: state == :open
+  def open?(%Conn{state: state}), do: state == :open
 
   @impl true
   @spec request(
@@ -141,7 +142,7 @@ defmodule XHTTP2.Conn do
         ) ::
           {:ok, t(), request_ref()}
           | {:error, t(), term()}
-  def request(%__MODULE__{} = conn, method, path, headers, body \\ nil)
+  def request(%Conn{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
       {":method", method},
@@ -176,7 +177,7 @@ defmodule XHTTP2.Conn do
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
-  def stream_request_body(%__MODULE__{} = conn, ref, chunk) when is_reference(ref) do
+  def stream_request_body(%Conn{} = conn, ref, chunk) when is_reference(ref) do
     stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
 
     conn =
@@ -190,7 +191,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec ping(t(), <<_::8>>) :: {:ok, t(), request_ref()} | {:error, t(), term()}
-  def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8))
+  def ping(%Conn{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
     {:ok, conn, ref}
@@ -199,7 +200,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec put_settings(t(), keyword()) :: {:ok, t()} | {:error, t(), reason :: term()}
-  def put_settings(%__MODULE__{} = conn, settings) when is_list(settings) do
+  def put_settings(%Conn{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
   catch
@@ -207,7 +208,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec get_setting(t(), atom()) :: term()
-  def get_setting(%__MODULE__{} = conn, name) do
+  def get_setting(%Conn{} = conn, name) do
     case name do
       :enable_push -> conn.enable_push
       :max_concurrent_streams -> conn.server_max_concurrent_streams
@@ -224,28 +225,33 @@ defmodule XHTTP2.Conn do
   def stream(conn, message)
 
   def stream(
-        %__MODULE__{transport_state: transport_state} = conn,
+        %Conn{transport_state: transport_state} = conn,
         {error_tag, transport_state, reason}
       )
       when error_tag in [:tcp_error, :ssl_error] do
     {:error, %{conn | state: :closed}, reason, []}
   end
 
-  def stream(%__MODULE__{transport_state: transport_state} = conn, {closed_tag, transport_state})
+  def stream(%Conn{transport_state: transport_state} = conn, {closed_tag, transport_state})
       when closed_tag in [:tcp_closed, :ssl_closed] do
     {:error, %{conn | state: :closed}, :closed, []}
   end
 
-  def stream(%__MODULE__{transport_state: transport_state} = conn, {tag, transport_state, data})
+  def stream(
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        {tag, transport_state, data}
+      )
       when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+    _ = transport.setopts(transport_state, active: :once)
     {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error, []}
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
   end
 
-  def stream(%__MODULE__{}, _message) do
+  def stream(%Conn{transport: transport, transport_state: transport_state}, _message) do
+    _ = transport.setopts(transport_state, active: :once)
     :unknown
   end
 
@@ -257,7 +263,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
-  def put_private(%__MODULE__{private: private} = conn, key, value) when is_atom(key) do
+  def put_private(%Conn{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
   end
 
@@ -268,7 +274,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
-  def get_private(%__MODULE__{private: private}, key, default \\ nil) when is_atom(key) do
+  def get_private(%Conn{private: private}, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
   end
 
@@ -279,7 +285,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
-  def delete_private(%__MODULE__{private: private} = conn, key) when is_atom(key) do
+  def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
   end
 
@@ -298,7 +304,7 @@ defmodule XHTTP2.Conn do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
-    conn = %__MODULE__{
+    conn = %Conn{
       hostname: hostname,
       port: port,
       transport: transport,
@@ -321,7 +327,7 @@ defmodule XHTTP2.Conn do
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.transport_state, transport_state),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport.setopts(transport_state, active: true) do
+         :ok <- transport.setopts(transport_state, active: :once) do
       {:ok, conn}
     else
       error ->
@@ -366,7 +372,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp open_stream(%__MODULE__{server_max_concurrent_streams: mcs} = conn) do
+  defp open_stream(%Conn{server_max_concurrent_streams: mcs} = conn) do
     if conn.open_stream_count >= mcs do
       throw({:xhttp, conn, {:max_concurrent_streams_reached, mcs}})
     end
@@ -562,7 +568,7 @@ defmodule XHTTP2.Conn do
 
   ## Frame handling
 
-  defp handle_new_data(%__MODULE__{} = conn, data, responses) do
+  defp handle_new_data(%Conn{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
         Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
@@ -979,7 +985,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp send!(%__MODULE__{transport: transport, transport_state: transport_state} = conn, bytes) do
+  defp send!(%Conn{transport: transport, transport_state: transport_state} = conn, bytes) do
     case transport.send(transport_state, bytes) do
       {:ok, transport_state} -> put_in(conn.transport_state, transport_state)
       {:error, :closed} -> throw({:xhttp, %{conn | state: :closed}, :closed})

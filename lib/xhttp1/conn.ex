@@ -48,8 +48,6 @@ defmodule XHTTP1.Conn do
 
   @doc """
   Establishes a connection and returns a `%Conn{}` with the connection state.
-
-  The connection will be in `active: true` mode.
   """
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
@@ -88,7 +86,7 @@ defmodule XHTTP1.Conn do
         ) :: {:ok, t()} | {:error, term()}
   def initiate(transport, transport_state, hostname, _port, _opts) do
     with :ok <- inet_opts(transport, transport_state),
-         :ok <- transport.setopts(transport_state, active: true) do
+         :ok <- transport.setopts(transport_state, active: :once) do
       conn = %Conn{
         transport: transport,
         transport_state: transport_state,
@@ -227,24 +225,26 @@ defmodule XHTTP1.Conn do
   end
 
   def stream(
-        %Conn{transport_state: transport_state, buffer: buffer, request: nil} = conn,
+        %Conn{transport: transport, transport_state: transport_state, request: nil} = conn,
         {tag, transport_state, data}
       )
       when tag in [:tcp, :ssl] do
     # TODO: Figure out if we should keep buffering even though there are no
     # requests in flight
-    {:ok, put_in(conn.buffer, buffer <> data), []}
+    _ = transport.setopts(transport_state, active: :once)
+    {:ok, put_in(conn.buffer, conn.buffer <> data), []}
   end
 
   def stream(
-        %Conn{transport_state: transport_state, buffer: buffer, request: request} = conn,
+        %Conn{transport: transport, transport_state: transport_state, request: request} = conn,
         {tag, transport_state, data}
       )
       when tag in [:tcp, :ssl] do
-    data = buffer <> data
+    data = conn.buffer <> data
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
+        _ = transport.setopts(transport_state, active: :once)
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, conn, reason} ->
@@ -277,7 +277,8 @@ defmodule XHTTP1.Conn do
     {:error, conn, reason}
   end
 
-  def stream(%Conn{}, _other) do
+  def stream(%Conn{transport: transport, transport_state: transport_state}, _other) do
+    _ = transport.setopts(transport_state, active: :once)
     :unknown
   end
 
