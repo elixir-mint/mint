@@ -21,7 +21,7 @@ defmodule XHTTP.ConnBehaviour do
   @callback connect(String.t(), :inet.port_number(), keyword()) ::
               {:ok, conn()} | {:error, term()}
 
-  @callback initiate_connection(
+  @callback initiate(
               module(),
               XHTTP.Transport.state(),
               String.t(),

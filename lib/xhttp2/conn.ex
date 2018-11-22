@@ -125,7 +125,7 @@ defmodule XHTTP2.Conn do
 
     with {:ok, transport_state} <-
            connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
-         do: initiate_connection(transport, transport_state, hostname, port, opts)
+         do: initiate(transport, transport_state, hostname, port, opts)
   end
 
   @impl true
@@ -288,14 +288,14 @@ defmodule XHTTP2.Conn do
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   @doc false
   @impl true
-  @spec initiate_connection(
+  @spec initiate(
           module(),
           XHTTP.Transport.state(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate_connection(transport, transport_state, hostname, port, opts) do
+  def initiate(transport, transport_state, hostname, port, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
