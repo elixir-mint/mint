@@ -52,14 +52,10 @@ defmodule XHTTP1.Conn do
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
-    transport = scheme_to_transport(scheme)
-
-    transport_opts =
-      opts
-      |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(transport_opts())
-
     # TODO: Also ALPN negotiate HTTP1?
+
+    transport = scheme_to_transport(scheme)
+    transport_opts = Keyword.get(opts, :transport_opts, [])
 
     case transport.connect(hostname, port, transport_opts) do
       {:ok, transport_state} ->
@@ -71,9 +67,42 @@ defmodule XHTTP1.Conn do
   end
 
   @impl true
-  @spec transport_opts() :: Keyword.t()
-  def transport_opts() do
-    []
+  @spec upgrade_transport(
+          t(),
+          new_transport :: module(),
+          hostname :: String.t(),
+          port :: non_neg_integer(),
+          opts :: keyword()
+        ) :: {:ok, t()} | {:error, term()}
+  def upgrade_transport(
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        new_transport,
+        hostname,
+        port,
+        opts
+      ) do
+    with {:ok, {transport, state}} <-
+           new_transport.upgrade(transport_state, transport, hostname, port, opts) do
+      {:ok, %{conn | transport: transport, transport_state: state}}
+    end
+  end
+
+  @impl true
+  @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
+  def get_transport(%Conn{transport: transport, transport_state: transport_state}) do
+    {transport, transport_state}
+  end
+
+  @impl true
+  @spec put_transport(t(), {module(), XHTTP.Transport.state()}) :: t()
+  def put_transport(%Conn{transport: transport} = conn, {transport, transport_state}) do
+    %{conn | transport_state: transport_state}
+  end
+
+  @impl true
+  @spec transport_socket(t()) :: port()
+  def transport_socket(%Conn{transport: transport, transport_state: transport_state}) do
+    transport.socket(transport_state)
   end
 
   @impl true
@@ -221,45 +250,70 @@ defmodule XHTTP1.Conn do
           | {:error, t(), term(), [response()]}
           | :unknown
   def stream(%Conn{request: %{state: :stream_request}} = conn, _message) do
+    # TODO: Close connection
     {:error, conn, :request_body_not_streamed, []}
   end
 
   def stream(
-        %Conn{transport: transport, transport_state: transport_state, request: nil} = conn,
-        {tag, transport_state, data}
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        {tag, socket, data}
       )
       when tag in [:tcp, :ssl] do
-    # TODO: Figure out if we should keep buffering even though there are no
-    # requests in flight
-    _ = transport.setopts(transport_state, active: :once)
-    {:ok, put_in(conn.buffer, conn.buffer <> data), []}
+    if transport.socket(transport_state) == socket do
+      result = handle_data(conn, data)
+      _ = transport.setopts(transport_state, active: :once)
+      result
+    else
+      :unknown
+    end
+  end
+
+  def stream(%Conn{transport: transport, transport_state: transport_state} = conn, {tag, socket})
+      when tag in [:tcp_closed, :ssl_closed] do
+    if transport.socket(transport_state) == socket do
+      handle_close(conn)
+    else
+      :unknown
+    end
   end
 
   def stream(
-        %Conn{transport: transport, transport_state: transport_state, request: request} = conn,
-        {tag, transport_state, data}
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        {tag, socket, reason}
       )
-      when tag in [:tcp, :ssl] do
+      when tag in [:tcp_error, :ssl_error] do
+    if transport.socket(transport_state) == socket do
+      handle_error(conn, reason)
+    else
+      :unknown
+    end
+  end
+
+  def stream(%Conn{}, _message) do
+    :unknown
+  end
+
+  defp handle_data(%Conn{request: nil} = conn, data) do
+    # TODO: Figure out if we should keep buffering even though there are no
+    # requests in flight
+    {:ok, put_in(conn.buffer, conn.buffer <> data), []}
+  end
+
+  defp handle_data(%Conn{request: request} = conn, data) do
     data = conn.buffer <> data
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
-        _ = transport.setopts(transport_state, active: :once)
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, conn, reason} ->
-        conn.transport.close(transport_state)
         conn = put_in(conn.state, :closed)
         # TODO: Include responses that were successfully decoded before the error
         {:error, conn, reason, []}
     end
   end
 
-  def stream(
-        %Conn{transport_state: transport_state, request: request} = conn,
-        {tag, transport_state}
-      )
-      when tag in [:tcp_closed, :ssl_closed] do
+  defp handle_close(%Conn{request: request} = conn) do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
 
@@ -271,15 +325,9 @@ defmodule XHTTP1.Conn do
     end
   end
 
-  def stream(%Conn{transport_state: transport_state} = conn, {tag, transport_state, reason})
-      when tag in [:tcp_error, :ssl_error] do
+  defp handle_error(conn, reason) do
     conn = put_in(conn.state, :closed)
-    {:error, conn, reason}
-  end
-
-  def stream(%Conn{transport: transport, transport_state: transport_state}, _other) do
-    _ = transport.setopts(transport_state, active: :once)
-    :unknown
+    {:error, conn, reason, []}
   end
 
   @doc """

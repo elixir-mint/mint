@@ -7,20 +7,42 @@ defmodule XHTTPN.Conn do
 
   @behaviour XHTTP.ConnBehaviour
 
+  # TODO: Since we don't support http1 upgrade to http2 we should default to only
+  #       http1 when not using https.
+
   @default_protocols [:http1, :http2]
+  @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
 
   def connect(scheme, hostname, port, opts \\ []) do
     {protocols, opts} = Keyword.pop(opts, :protocols, @default_protocols)
 
     case Enum.sort(protocols) do
-      [:http1] -> XHTTP1.Conn.connect(scheme, hostname, port, opts)
-      [:http2] -> XHTTP2.Conn.connect(scheme, hostname, port, opts)
-      [:http1, :http2] -> negotiate(scheme, hostname, port, opts)
+      [:http1] ->
+        XHTTP1.Conn.connect(scheme, hostname, port, opts)
+
+      [:http2] ->
+        XHTTP2.Conn.connect(scheme, hostname, port, opts)
+
+      [:http1, :http2] ->
+        transport = scheme_to_transport(scheme)
+        transport_connect(transport, hostname, port, opts)
     end
   end
 
-  def transport_opts() do
-    [alpn_advertised_protocols: ["http/1.1", "h2"]]
+  def upgrade_transport(conn, new_transport, hostname, port, opts) do
+    conn_module(conn).upgrade_transport(conn, new_transport, hostname, port, opts)
+  end
+
+  def get_transport(conn) do
+    conn_module(conn).get_transport(conn)
+  end
+
+  def put_transport(conn, transport) do
+    conn_module(conn).put_transport(conn, transport)
+  end
+
+  def transport_socket(conn) do
+    conn_module(conn).transport_socket(conn)
   end
 
   def initiate(transport, transport_state, hostname, port, opts),
@@ -43,26 +65,24 @@ defmodule XHTTPN.Conn do
 
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
-  defp negotiate(scheme, hostname, port, opts) do
-    transport = scheme_to_transport(scheme)
+  defp transport_connect(XHTTP.Transport.TCP, hostname, port, opts) do
+    # TODO: http1 upgrade? Should be explicit since support is not clear
+    XHTTP1.Conn.connect(:http, hostname, port, opts)
+  end
 
+  defp transport_connect(XHTTP.Transport.SSL, hostname, port, opts) do
+    negotiate(XHTTP.Transport.SSL, hostname, port, opts)
+  end
+
+  defp negotiate(transport, hostname, port, opts) do
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(transport_opts())
+      |> Keyword.merge(@transport_opts)
 
     with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
-      case transport do
-        XHTTP.Transport.TCP -> http1_with_upgrade(transport, socket, hostname, port, opts)
-        XHTTP.Transport.SSL -> alpn_negotiate(transport, socket, hostname, port, opts)
-      end
+      alpn_negotiate(transport, socket, hostname, port, opts)
     end
-  end
-
-  defp http1_with_upgrade(_transport, _socket, _hostname, _port, _opts) do
-    # TODO
-    # NOTE: Since this can be unreliable it should be an option to do upgrade from HTTP1
-    raise "not implemented yet"
   end
 
   defp alpn_negotiate(transport, socket, hostname, port, opts) do
@@ -75,7 +95,7 @@ defmodule XHTTPN.Conn do
 
       {:error, :protocol_not_negotiated} ->
         # Assume HTTP1 if ALPN is not supported
-        {:ok, XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)}
+        XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)
 
       {:ok, protocol} ->
         {:error, {:bad_alpn_protocol, protocol}}

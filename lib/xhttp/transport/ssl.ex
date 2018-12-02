@@ -308,18 +308,24 @@ defmodule XHTTP.Transport.SSL do
   #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
 
   @impl true
-  def connect(host, port, opts) do
-    ssl_opts =
-      default_ssl_opts(host)
-      |> Keyword.merge(opts)
-      |> Keyword.merge(@transport_opts)
-      |> add_cacerts()
-      |> add_partial_chain_fun()
-      |> add_verify_fun(host)
+  def connect(hostname, port, opts) do
+    # TODO: Timeout
 
-    host
+    hostname
     |> String.to_charlist()
-    |> :ssl.connect(port, ssl_opts)
+    |> :ssl.connect(port, ssl_opts(hostname, opts))
+  end
+
+  @impl true
+  def upgrade(socket, XHTTP.Transport.TCP, hostname, _port, opts) do
+    case :ssl.connect(socket, ssl_opts(hostname, opts)) do
+      {:ok, socket} -> {:ok, {__MODULE__, socket}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def upgrade(_socket, XHTTP.Transport.SSL, _opts) do
+    raise "nested SSL sessions are not supported"
   end
 
   @impl true
@@ -351,6 +357,18 @@ defmodule XHTTP.Transport.SSL do
 
   @impl true
   defdelegate getopts(socket, opts), to: :ssl
+
+  @impl true
+  def socket(socket), do: socket
+
+  defp ssl_opts(hostname, opts) do
+    default_ssl_opts(hostname)
+    |> Keyword.merge(opts)
+    |> Keyword.merge(@transport_opts)
+    |> add_cacerts()
+    |> add_partial_chain_fun()
+    |> add_verify_fun(hostname)
+  end
 
   defp add_verify_fun(opts, host_or_ip) do
     verify = Keyword.get(opts, :verify)
@@ -484,6 +502,8 @@ defmodule XHTTP.Transport.SSL do
     |> tbs_certificate(:subjectPublicKeyInfo)
   end
 
+  # NOTE: Should this be private and moved to a different module?
+  @doc false
   def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
 
   for {kex, cipher, mac} <- @blacklisted_ciphers do

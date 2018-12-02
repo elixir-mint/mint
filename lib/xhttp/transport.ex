@@ -1,12 +1,20 @@
 defmodule XHTTP.Transport do
   @type state() :: term()
-
   @type error() :: {:error, reason :: term()}
 
   @callback connect(host :: String.t(), port :: :inet.port_number(), opts :: keyword()) ::
               {:ok, state()} | error()
 
-  @callback negotiated_protocol(state()) :: {:ok, protocol :: binary()} | error()
+  @callback upgrade(
+              state(),
+              old_transport :: module(),
+              hostname :: String.t(),
+              port :: non_neg_integer(),
+              opts :: keyword()
+            ) :: {:ok, {module(), state()}} | error()
+
+  @callback negotiated_protocol(state()) ::
+              {:ok, protocol :: binary()} | {:error, :protocol_not_negotiated}
 
   @callback send(state(), payload :: iodata()) :: {:ok, state()} | error()
 
@@ -18,5 +26,5 @@ defmodule XHTTP.Transport do
 
   @callback getopts(state(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
 
-  @optional_callbacks [negotiated_protocol: 1]
+  @callback socket(state()) :: port()
 end
