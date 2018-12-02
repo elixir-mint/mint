@@ -2,15 +2,29 @@ defmodule XHTTP.TunnelProxyConn do
   import XHTTP.Util
 
   def connect(proxy, host) do
+    with {:ok, conn} <- establish_proxy(proxy, host) do
+      initiate_host_connection(conn, host)
+    end
+  end
+
+  defp establish_proxy(proxy, host) do
     {proxy_scheme, proxy_hostname, proxy_port, proxy_opts} = proxy
-    {scheme, hostname, port, opts} = host
-    transport = scheme_to_transport(scheme)
+    {_scheme, hostname, port, _opts} = host
     path = "#{hostname}:#{port}"
 
     with {:ok, conn} <- XHTTPN.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
          {:ok, conn, ref} <- XHTTPN.Conn.request(conn, "CONNECT", path, []),
-         :ok <- receive_response(conn, ref),
-         {:ok, conn} = conn.__struct__.upgrade_transport(conn, transport, hostname, port, opts) do
+         :ok <- receive_response(conn, ref) do
+      {:ok, conn}
+    else
+      {:error, reason} -> {:error, {:proxy, reason}}
+    end
+  end
+
+  defp initiate_host_connection(conn, {scheme, hostname, port, opts}) do
+    transport = scheme_to_transport(scheme)
+
+    with {:ok, conn} = conn.__struct__.upgrade_transport(conn, transport, hostname, port, opts) do
       conn_transport = conn_to_transport(conn)
       XHTTPN.Conn.initiate(conn_transport, conn, hostname, port, opts)
     end
