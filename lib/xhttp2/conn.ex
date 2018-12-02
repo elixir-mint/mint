@@ -17,6 +17,7 @@ defmodule XHTTP2.Conn do
   ## Constants
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+  @transport_opts [alpn_advertised_protocols: ["h2"]]
 
   @default_window_size 65_535
   @max_window_size 2_147_483_647
@@ -115,17 +116,50 @@ defmodule XHTTP2.Conn do
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(transport_opts())
+      |> Keyword.merge(@transport_opts)
 
-    with {:ok, transport_state} <-
-           connect_and_negotiate_protocol(hostname, port, transport, transport_opts),
-         do: initiate(transport, transport_state, hostname, port, opts)
+    with {:ok, transport_state} <- negotiate(hostname, port, transport, transport_opts) do
+      initiate(transport, transport_state, hostname, port, opts)
+    end
   end
 
   @impl true
-  @spec transport_opts() :: Keyword.t()
-  def transport_opts() do
-    [alpn_advertised_protocols: ["h2"]]
+  @spec upgrade_transport(
+          t(),
+          new_transport :: module(),
+          hostname :: String.t(),
+          port :: non_neg_integer(),
+          opts :: keyword()
+        ) :: {:ok, t()} | {:error, term()}
+  def upgrade_transport(
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        new_transport,
+        hostname,
+        port,
+        opts
+      ) do
+    with {:ok, {transport, state}} <-
+           new_transport.upgrade(transport_state, transport, hostname, port, opts) do
+      {:ok, %{conn | transport: transport, transport_state: state}}
+    end
+  end
+
+  @impl true
+  @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
+  def get_transport(%Conn{transport: transport, transport_state: transport_state}) do
+    {transport, transport_state}
+  end
+
+  @impl true
+  @spec put_transport(t(), {module(), XHTTP.Transport.state()}) :: t()
+  def put_transport(%Conn{transport: transport} = conn, {transport, transport_state}) do
+    %{conn | transport_state: transport_state}
+  end
+
+  @impl true
+  @spec transport_socket(t()) :: port()
+  def transport_socket(%Conn{transport: transport, transport_state: transport_state}) do
+    transport.socket(transport_state)
   end
 
   @impl true
@@ -225,33 +259,44 @@ defmodule XHTTP2.Conn do
   def stream(conn, message)
 
   def stream(
-        %Conn{transport_state: transport_state} = conn,
-        {error_tag, transport_state, reason}
+        %Conn{transport: transport, transport_state: transport_state} = conn,
+        {tag, socket, reason}
       )
-      when error_tag in [:tcp_error, :ssl_error] do
-    {:error, %{conn | state: :closed}, reason, []}
+      when tag in [:tcp_error, :ssl_error] do
+    if transport.socket(transport_state) == socket do
+      {:error, %{conn | state: :closed}, reason, []}
+    else
+      :unknown
+    end
   end
 
-  def stream(%Conn{transport_state: transport_state} = conn, {closed_tag, transport_state})
-      when closed_tag in [:tcp_closed, :ssl_closed] do
-    {:error, %{conn | state: :closed}, :closed, []}
+  def stream(%Conn{transport: transport, transport_state: transport_state} = conn, {tag, socket})
+      when tag in [:tcp_closed, :ssl_closed] do
+    if transport.socket(transport_state) == socket do
+      {:error, %{conn | state: :closed}, :closed, []}
+    else
+      :unknown
+    end
   end
 
   def stream(
         %Conn{transport: transport, transport_state: transport_state} = conn,
-        {tag, transport_state, data}
+        {tag, socket, data}
       )
       when tag in [:tcp, :ssl] do
-    {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
-    _ = transport.setopts(transport_state, active: :once)
-    {:ok, conn, Enum.reverse(responses)}
+    if transport.socket(transport_state) == socket do
+      {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+      _ = transport.setopts(transport_state, active: :once)
+      {:ok, conn, Enum.reverse(responses)}
+    else
+      :unknown
+    end
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error, []}
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
   end
 
-  def stream(%Conn{transport: transport, transport_state: transport_state}, _message) do
-    _ = transport.setopts(transport_state, active: :once)
+  def stream(%Conn{}, _message) do
     :unknown
   end
 
@@ -338,7 +383,7 @@ defmodule XHTTP2.Conn do
 
   ## Helpers
 
-  defp connect_and_negotiate_protocol(hostname, port, transport, transport_opts) do
+  defp negotiate(hostname, port, transport, transport_opts) do
     with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(transport_state) do
       if protocol == "h2" do

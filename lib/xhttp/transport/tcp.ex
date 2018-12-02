@@ -9,12 +9,25 @@ defmodule XHTTP.Transport.TCP do
 
   @impl true
   def connect(host, port, opts) do
-    opts = Keyword.merge(opts, @transport_opts)
+    # TODO: Timeout
+
+    opts =
+      opts
+      |> Keyword.merge(@transport_opts)
+      |> Keyword.delete(:alpn_advertised_protocols)
 
     host
     |> String.to_charlist()
     |> :gen_tcp.connect(port, opts)
   end
+
+  @impl true
+  def upgrade(socket, _transport, _hostname, _port, _opts) do
+    {:ok, {__MODULE__, socket}}
+  end
+
+  @impl true
+  def negotiated_protocol(_socket), do: {:error, :protocol_not_negotiated}
 
   @impl true
   def send(socket, payload) do
@@ -42,4 +55,7 @@ defmodule XHTTP.Transport.TCP do
 
   @impl true
   defdelegate getopts(socket, opts), to: :inet
+
+  @impl true
+  def socket(socket), do: socket
 end
