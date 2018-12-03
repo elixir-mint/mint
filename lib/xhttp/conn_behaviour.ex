@@ -22,14 +22,6 @@ defmodule XHTTP.ConnBehaviour do
   #
   # @callback shutdown(conn(), :read | :write | :read_write) :: :ok | {:error, term()}
 
-  @callback upgrade_transport(
-              conn(),
-              new_transport :: module(),
-              hostname :: String.t(),
-              port :: non_neg_integer(),
-              opts :: keyword()
-            ) :: {:ok, conn()} | {:error, term()}
-
   @callback get_transport(conn()) :: {module(), XHTTP.Transport.state()}
 
   @callback put_transport(conn(), {module(), XHTTP.Transport.state()}) :: conn()

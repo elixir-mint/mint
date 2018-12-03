@@ -19,7 +19,7 @@ defmodule XHTTP.UnsafeProxyConn do
   @type response() :: XHTTP.ConnBehaviour.response()
   @type status() :: XHTTP.ConnBehaviour.response()
   @type headers() :: XHTTP.ConnBehaviour.headers()
-  @type host_triple :: {scheme(), hostname :: String.t(), port :: non_neg_integer()}
+  @type host_triple :: {scheme(), hostname :: String.t(), :inet.port_number()}
 
   @spec connect(host_triple(), host_triple(), opts :: Keyword.t()) ::
           {:ok, t()} | {:error, term()}
@@ -38,18 +38,6 @@ defmodule XHTTP.UnsafeProxyConn do
 
       {:ok, conn}
     end
-  end
-
-  @impl true
-  @spec upgrade_transport(
-          t(),
-          new_transport :: module(),
-          hostname :: String.t(),
-          port :: non_neg_integer(),
-          opts :: keyword()
-        ) :: {:ok, t()} | {:error, term()}
-  def upgrade_transport(%Conn{module: module, state: state}, new_transport, hostname, port, opts) do
-    module.upgrade_transport(state, new_transport, hostname, port, opts)
   end
 
   @impl true

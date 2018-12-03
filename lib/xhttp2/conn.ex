@@ -118,29 +118,35 @@ defmodule XHTTP2.Conn do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    with {:ok, transport_state} <- negotiate(hostname, port, transport, transport_opts) do
-      initiate(transport, transport_state, hostname, port, opts)
+    case negotiate(hostname, port, transport, transport_opts) do
+      {:ok, transport_state} ->
+        initiate(transport, transport_state, hostname, port, opts)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  @impl true
-  @spec upgrade_transport(
-          t(),
-          new_transport :: module(),
-          hostname :: String.t(),
-          port :: non_neg_integer(),
-          opts :: keyword()
+  @spec upgrade(
+          module(),
+          XHTTP.Transport.state(),
+          module(),
+          String.t(),
+          :inet.port_number(),
+          Keyword.t()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade_transport(
-        %Conn{transport: transport, transport_state: transport_state} = conn,
-        new_transport,
-        hostname,
-        port,
-        opts
-      ) do
-    with {:ok, {transport, state}} <-
-           new_transport.upgrade(transport_state, transport, hostname, port, opts) do
-      {:ok, %{conn | transport: transport, transport_state: state}}
+  def upgrade(old_transport, transport_state, new_transport, hostname, port, opts) do
+    transport_opts =
+      opts
+      |> Keyword.get(:transport_opts, [])
+      |> Keyword.merge(@transport_opts)
+
+    case new_transport.upgrade(transport_state, old_transport, hostname, port, transport_opts) do
+      {:ok, {new_transport, transport_state}} ->
+        initiate(new_transport, transport_state, hostname, port, opts)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -397,7 +403,7 @@ defmodule XHTTP2.Conn do
   defp receive_server_settings(transport, transport_state) do
     case recv_next_frame(transport, transport_state, _buffer = "") do
       {:ok, settings(), _buffer, _transport_state} = result -> result
-      {:ok, _frame, _buffer} -> {:error, :protocol_error}
+      {:ok, _frame, _buffer, _transport_state} -> {:error, :protocol_error}
       {:error, _reason} = error -> error
     end
   end

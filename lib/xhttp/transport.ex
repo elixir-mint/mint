@@ -9,7 +9,7 @@ defmodule XHTTP.Transport do
               state(),
               old_transport :: module(),
               hostname :: String.t(),
-              port :: non_neg_integer(),
+              :inet.port_number(),
               opts :: keyword()
             ) :: {:ok, {module(), state()}} | error()
 
@@ -27,4 +27,6 @@ defmodule XHTTP.Transport do
   @callback getopts(state(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
 
   @callback socket(state()) :: port()
+
+  @callback actual_transport(state()) :: module()
 end
