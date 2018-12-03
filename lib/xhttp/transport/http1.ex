@@ -10,7 +10,9 @@ defmodule XHTTP.Transport.HTTP1 do
 
   @impl true
   def upgrade(conn, new_transport, hostname, port, opts) do
-    with {:ok, conn} <- Conn.upgrade_transport(conn, new_transport, hostname, port, opts) do
+    {transport, state} = Conn.get_transport(conn)
+
+    with {:ok, conn} <- Conn.upgrade(transport, state, new_transport, hostname, port, opts) do
       {:ok, {__MODULE__, conn}}
     end
   end
@@ -64,5 +66,11 @@ defmodule XHTTP.Transport.HTTP1 do
   def socket(conn) do
     {transport, state} = Conn.get_transport(conn)
     transport.socket(state)
+  end
+
+  @impl true
+  def actual_transport(conn) do
+    {transport, state} = Conn.get_transport(conn)
+    transport.actual_transport(state)
   end
 end

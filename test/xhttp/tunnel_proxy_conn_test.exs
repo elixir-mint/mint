@@ -36,4 +36,36 @@ defmodule XHTTP.TunnelProxyConnTest do
     assert {:headers, ^request, headers} = headers
     assert merge_body(responses, request) =~ "httpbin"
   end
+
+  test "200 response with explicit http2 - https://http2.golang.org" do
+    assert {:ok, conn} =
+             XHTTP.TunnelProxyConn.connect(
+               {:http, "localhost", 8888, []},
+               {:https, "http2.golang.org", 443, [protocols: [:http2]]}
+             )
+
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+  end
+
+  test "200 response without explicit http2 - https://http2.golang.org" do
+    assert {:ok, conn} =
+             XHTTP.TunnelProxyConn.connect(
+               {:http, "localhost", 8888, []},
+               {:https, "http2.golang.org", 443, [protocols: [:http1, :http2]]}
+             )
+
+    assert {:ok, conn, request} = Conn.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+  end
 end

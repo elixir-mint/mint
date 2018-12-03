@@ -318,14 +318,23 @@ defmodule XHTTP.Transport.SSL do
 
   @impl true
   def upgrade(socket, XHTTP.Transport.TCP, hostname, _port, opts) do
+    # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
+    XHTTP.Transport.TCP.setopts(socket, active: false)
+
     case :ssl.connect(socket, ssl_opts(hostname, opts)) do
       {:ok, socket} -> {:ok, {__MODULE__, socket}}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def upgrade(_socket, XHTTP.Transport.SSL, _opts) do
+  def upgrade(_socket, XHTTP.Transport.SSL, _hostname, _port, _opts) do
     raise "nested SSL sessions are not supported"
+  end
+
+  def upgrade(state, transport, hostname, port, opts) do
+    socket = transport.socket(state)
+    transport = transport.actual_transport(state)
+    upgrade(socket, transport, hostname, port, opts)
   end
 
   @impl true
@@ -360,6 +369,9 @@ defmodule XHTTP.Transport.SSL do
 
   @impl true
   def socket(socket), do: socket
+
+  @impl true
+  def actual_transport(_socket), do: __MODULE__
 
   defp ssl_opts(hostname, opts) do
     default_ssl_opts(hostname)

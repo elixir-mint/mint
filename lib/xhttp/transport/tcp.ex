@@ -22,8 +22,8 @@ defmodule XHTTP.Transport.TCP do
   end
 
   @impl true
-  def upgrade(socket, _transport, _hostname, _port, _opts) do
-    {:ok, {__MODULE__, socket}}
+  def upgrade(socket, transport, _hostname, _port, _opts) do
+    {:ok, {transport, socket}}
   end
 
   @impl true
@@ -58,4 +58,7 @@ defmodule XHTTP.Transport.TCP do
 
   @impl true
   def socket(socket), do: socket
+
+  @impl true
+  def actual_transport(_socket), do: __MODULE__
 end
