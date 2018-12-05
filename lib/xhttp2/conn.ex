@@ -88,7 +88,7 @@ defmodule XHTTP2.Conn do
 
   @opaque t() :: %Conn{
             transport: module(),
-            socket: XHTTP.Transport.state(),
+            socket: XHTTP.Transport.socket(),
             state: :open | :closed | :went_away,
             buffer: binary(),
             window_size: pos_integer(),
@@ -129,7 +129,7 @@ defmodule XHTTP2.Conn do
 
   @spec upgrade(
           module(),
-          XHTTP.Transport.state(),
+          XHTTP.Transport.socket(),
           scheme(),
           String.t(),
           :inet.port_number(),
@@ -312,7 +312,7 @@ defmodule XHTTP2.Conn do
   @impl true
   @spec initiate(
           module(),
-          XHTTP.Transport.state(),
+          XHTTP.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -349,6 +349,12 @@ defmodule XHTTP2.Conn do
         transport.close(socket)
         error
     end
+  end
+
+  @impl true
+  @spec get_socket(t()) :: XHTTP.Transport.socket()
+  def get_socket(%Conn{socket: socket}) do
+    socket
   end
 
   ## Helpers

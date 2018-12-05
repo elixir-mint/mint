@@ -66,6 +66,8 @@ defmodule XHTTPN.Conn do
 
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
+  def get_socket(conn), do: conn_module(conn).get_socket(conn)
+
   defp transport_connect(XHTTP.Transport.TCP, hostname, port, opts) do
     # TODO: http1 upgrade? Should be explicit since support is not clear
     XHTTP1.Conn.connect(XHTTP.Transport.TCP, hostname, port, opts)

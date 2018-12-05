@@ -43,7 +43,7 @@ defmodule XHTTP.UnsafeProxyConn do
   @impl true
   @spec initiate(
           module(),
-          XHTTP.Transport.state(),
+          XHTTP.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -123,5 +123,11 @@ defmodule XHTTP.UnsafeProxyConn do
   defp request_line(%Conn{scheme: scheme, hostname: hostname, port: port}, path) do
     %URI{scheme: Atom.to_string(scheme), host: hostname, port: port, path: path}
     |> URI.to_string()
+  end
+
+  @impl true
+  @spec get_socket(t()) :: XHTTP.Transport.socket()
+  def get_socket(%Conn{module: module, state: state}) do
+    module.get_socket(state)
   end
 end

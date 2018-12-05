@@ -24,7 +24,7 @@ defmodule XHTTP.ConnBehaviour do
 
   @callback initiate(
               module(),
-              XHTTP.Transport.state(),
+              XHTTP.Transport.socket(),
               String.t(),
               :inet.port_number(),
               keyword()
@@ -55,4 +55,6 @@ defmodule XHTTP.ConnBehaviour do
   @callback get_private(conn(), atom(), term()) :: term()
 
   @callback delete_private(conn(), atom()) :: conn()
+
+  @callback get_socket(conn()) :: XHTTP.Transport.socket()
 end

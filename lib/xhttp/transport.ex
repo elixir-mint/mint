@@ -1,28 +1,28 @@
 defmodule XHTTP.Transport do
-  @type state() :: term()
+  @type socket() :: term()
   @type error() :: {:error, reason :: term()}
 
   @callback connect(host :: String.t(), port :: :inet.port_number(), opts :: keyword()) ::
-              {:ok, state()} | error()
+              {:ok, socket()} | error()
 
   @callback upgrade(
-              state(),
+              socket(),
               old_transport :: module(),
               hostname :: String.t(),
               :inet.port_number(),
               opts :: keyword()
-            ) :: {:ok, {module(), state()}} | error()
+            ) :: {:ok, {module(), socket()}} | error()
 
-  @callback negotiated_protocol(state()) ::
+  @callback negotiated_protocol(socket()) ::
               {:ok, protocol :: binary()} | {:error, :protocol_not_negotiated}
 
-  @callback send(state(), payload :: iodata()) :: :ok | error()
+  @callback send(socket(), payload :: iodata()) :: :ok | error()
 
-  @callback close(state()) :: :ok | error()
+  @callback close(socket()) :: :ok | error()
 
-  @callback recv(state(), bytes :: non_neg_integer()) :: {:ok, binary()} | error()
+  @callback recv(socket(), bytes :: non_neg_integer()) :: {:ok, binary()} | error()
 
-  @callback setopts(state(), opts :: keyword()) :: :ok | error()
+  @callback setopts(socket(), opts :: keyword()) :: :ok | error()
 
-  @callback getopts(state(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
+  @callback getopts(socket(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
 end
