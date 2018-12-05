@@ -1,7 +1,9 @@
 defmodule XHTTP.TunnelProxyConn do
+  import XHTTP.Util
+
   def connect(proxy, host) do
     with {:ok, conn} <- establish_proxy(proxy, host) do
-      upgrade_connection(conn, host)
+      upgrade_connection(conn, proxy, host)
     end
   end
 
@@ -19,9 +21,11 @@ defmodule XHTTP.TunnelProxyConn do
     end
   end
 
-  defp upgrade_connection(conn, {scheme, hostname, port, opts}) do
-    {transport, transport_state} = XHTTP1.Conn.get_transport(conn)
-    XHTTPN.Conn.upgrade(transport, transport_state, scheme, hostname, port, opts)
+  defp upgrade_connection(conn, proxy, {scheme, hostname, port, opts}) do
+    {proxy_scheme, _proxy_hostname, _proxy_port, _proxy_opts} = proxy
+    transport = scheme_to_transport(proxy_scheme)
+    socket = XHTTP1.Conn.get_socket(conn)
+    XHTTPN.Conn.upgrade(transport, socket, scheme, hostname, port, opts)
   end
 
   defp receive_response(conn, ref) do

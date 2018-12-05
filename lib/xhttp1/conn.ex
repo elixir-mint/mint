@@ -68,7 +68,7 @@ defmodule XHTTP1.Conn do
 
   @spec upgrade(
           module(),
-          XHTTP.Transport.state(),
+          XHTTP.Transport.socket(),
           scheme(),
           String.t(),
           :inet.port_number(),
@@ -89,15 +89,10 @@ defmodule XHTTP1.Conn do
     end
   end
 
-  @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
-  def get_transport(%Conn{transport: transport, socket: socket}) do
-    {transport, socket}
-  end
-
   @impl true
   @spec initiate(
           module(),
-          XHTTP.Transport.state(),
+          XHTTP.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -332,6 +327,12 @@ defmodule XHTTP1.Conn do
   @spec delete_private(t(), atom()) :: t()
   def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
+  end
+
+  @impl true
+  @spec get_socket(t()) :: XHTTP.Transport.socket()
+  def get_socket(%Conn{socket: socket}) do
+    socket
   end
 
   defp decode(:status, %{request: request} = conn, data, responses) do
