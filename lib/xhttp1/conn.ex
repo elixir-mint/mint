@@ -161,8 +161,7 @@ defmodule XHTTP1.Conn do
     iodata = Request.encode(method, path, host, headers, body || "")
 
     case transport.send(socket, iodata) do
-      {:ok, socket} ->
-        conn = %Conn{conn | socket: socket}
+      :ok ->
         request_ref = make_ref()
         state = if body == :stream, do: :stream_request, else: :status
         request = new_request(request_ref, state, method)
@@ -205,7 +204,7 @@ defmodule XHTTP1.Conn do
 
   def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, body) do
     case conn.transport.send(conn.socket, body) do
-      {:ok, socket} -> {:ok, %Conn{conn | socket: socket}}
+      :ok -> {:ok, conn}
       {:error, :closed} -> {:error, %{conn | state: :closed}, :closed}
       {:error, reason} -> {:error, conn, reason}
     end
@@ -585,8 +584,8 @@ defmodule XHTTP1.Conn do
       Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
-    {:ok, socket} = conn.transport.close(conn.socket)
-    %{conn | state: :closed, socket: socket}
+    :ok = conn.transport.close(conn.socket)
+    %{conn | state: :closed}
   end
 
   # TODO: We should probably error if both transfer-encoding and content-length
