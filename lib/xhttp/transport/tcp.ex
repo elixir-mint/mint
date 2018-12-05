@@ -55,10 +55,4 @@ defmodule XHTTP.Transport.TCP do
 
   @impl true
   defdelegate getopts(socket, opts), to: :inet
-
-  @impl true
-  def socket(socket), do: socket
-
-  @impl true
-  def actual_transport(_socket), do: __MODULE__
 end

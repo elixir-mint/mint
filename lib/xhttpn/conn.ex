@@ -46,14 +46,6 @@ defmodule XHTTPN.Conn do
     conn_module(conn).get_transport(conn)
   end
 
-  def put_transport(conn, transport) do
-    conn_module(conn).put_transport(conn, transport)
-  end
-
-  def transport_socket(conn) do
-    conn_module(conn).transport_socket(conn)
-  end
-
   def initiate(transport, transport_state, hostname, port, opts),
     do: alpn_negotiate(transport, transport_state, hostname, port, opts)
 

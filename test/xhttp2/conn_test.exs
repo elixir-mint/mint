@@ -34,13 +34,13 @@ defmodule XHTTP2.ConnTest do
 
   test "closed-socket messages are treated as errors", %{conn: conn} do
     assert {:error, %Conn{} = conn, :closed, []} =
-             Conn.stream(conn, {:ssl_closed, conn.transport_state})
+             Conn.stream(conn, {:ssl_closed, conn.socket})
 
     refute Conn.open?(conn)
   end
 
   test "socket error messages are treated as errors", %{conn: conn} do
-    message = {:ssl_error, conn.transport_state, :etimeout}
+    message = {:ssl_error, conn.socket, :etimeout}
     assert {:error, %Conn{} = conn, :etimeout, []} = Conn.stream(conn, message)
     refute Conn.open?(conn)
   end

@@ -25,8 +25,4 @@ defmodule XHTTP.Transport do
   @callback setopts(state(), opts :: keyword()) :: :ok | error()
 
   @callback getopts(state(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
-
-  @callback socket(state()) :: port()
-
-  @callback actual_transport(state()) :: module()
 end
