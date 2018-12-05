@@ -69,14 +69,15 @@ defmodule XHTTP1.Conn do
   @spec upgrade(
           module(),
           XHTTP.Transport.state(),
-          module(),
+          scheme(),
           String.t(),
           :inet.port_number(),
           Keyword.t()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, transport_state, new_transport, hostname, port, opts) do
+  def upgrade(old_transport, transport_state, scheme, hostname, port, opts) do
     # TODO: Also ALPN negotiate HTTP1?
 
+    new_transport = scheme_to_transport(scheme)
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
     case new_transport.upgrade(transport_state, old_transport, hostname, port, transport_opts) do

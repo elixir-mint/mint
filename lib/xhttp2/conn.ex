@@ -130,12 +130,14 @@ defmodule XHTTP2.Conn do
   @spec upgrade(
           module(),
           XHTTP.Transport.state(),
-          module(),
+          scheme(),
           String.t(),
           :inet.port_number(),
           Keyword.t()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, transport_state, new_transport, hostname, port, opts) do
+  def upgrade(old_transport, transport_state, scheme, hostname, port, opts) do
+    new_transport = scheme_to_transport(scheme)
+
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])

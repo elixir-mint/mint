@@ -27,7 +27,7 @@ defmodule XHTTP.UnsafeProxyConn do
     {proxy_scheme, proxy_hostname, proxy_port} = proxy
     {scheme, hostname, port} = host
 
-    with {:ok, state} <- XHTTPN.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, opts) do
+    with {:ok, state} <- XHTTP1.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, opts) do
       conn = %Conn{
         scheme: scheme,
         hostname: hostname,

@@ -10,8 +10,8 @@ defmodule XHTTP.TunnelProxyConn do
     {_scheme, hostname, port, _opts} = host
     path = "#{hostname}:#{port}"
 
-    with {:ok, conn} <- XHTTPN.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
-         {:ok, conn, ref} <- XHTTPN.Conn.request(conn, "CONNECT", path, []),
+    with {:ok, conn} <- XHTTP1.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
+         {:ok, conn, ref} <- XHTTP1.Conn.request(conn, "CONNECT", path, []),
          :ok <- receive_response(conn, ref) do
       {:ok, conn}
     else
@@ -20,12 +20,9 @@ defmodule XHTTP.TunnelProxyConn do
   end
 
   defp upgrade_connection(conn, {scheme, hostname, port, opts}) do
-    old_transport = conn_to_transport(conn)
-    XHTTPN.Conn.upgrade(old_transport, conn, scheme, hostname, port, opts)
+    {transport, transport_state} = XHTTP1.Conn.get_transport(conn)
+    XHTTPN.Conn.upgrade(transport, transport_state, scheme, hostname, port, opts)
   end
-
-  defp conn_to_transport(%XHTTP1.Conn{}), do: XHTTP.Transport.HTTP1
-  defp conn_to_transport(%XHTTP2.Conn{}), do: XHTTP.Transport.HTTP2
 
   defp receive_response(conn, ref) do
     # TODO: Timeout deadline
