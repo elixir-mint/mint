@@ -30,25 +30,13 @@ defmodule XHTTP.Transport.TCP do
   def negotiated_protocol(_socket), do: {:error, :protocol_not_negotiated}
 
   @impl true
-  def send(socket, payload) do
-    with :ok <- :gen_tcp.send(socket, payload) do
-      {:ok, socket}
-    end
-  end
+  defdelegate send(socket, payload), to: :gen_tcp
 
   @impl true
-  def close(socket) do
-    with :ok <- :gen_tcp.close(socket) do
-      {:ok, socket}
-    end
-  end
+  defdelegate close(socket), to: :gen_tcp
 
   @impl true
-  def recv(socket, bytes) do
-    with {:ok, data} <- :gen_tcp.recv(socket, bytes) do
-      {:ok, data, socket}
-    end
-  end
+  defdelegate recv(socket, bytes), to: :gen_tcp
 
   @impl true
   defdelegate setopts(socket, opts), to: :inet

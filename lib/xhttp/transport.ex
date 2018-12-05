@@ -16,11 +16,11 @@ defmodule XHTTP.Transport do
   @callback negotiated_protocol(state()) ::
               {:ok, protocol :: binary()} | {:error, :protocol_not_negotiated}
 
-  @callback send(state(), payload :: iodata()) :: {:ok, state()} | error()
+  @callback send(state(), payload :: iodata()) :: :ok | error()
 
-  @callback close(state()) :: {:ok, state()} | error()
+  @callback close(state()) :: :ok | error()
 
-  @callback recv(state(), bytes :: non_neg_integer()) :: {:ok, binary(), state()} | error()
+  @callback recv(state(), bytes :: non_neg_integer()) :: {:ok, binary()} | error()
 
   @callback setopts(state(), opts :: keyword()) :: :ok | error()
 

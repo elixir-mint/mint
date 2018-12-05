@@ -333,12 +333,12 @@ defmodule XHTTP2.Conn do
     with :ok <- inet_opts(transport, socket),
          client_settings = settings(stream_id: 0, params: client_settings_params),
          preface = [@connection_preface, Frame.encode(client_settings)],
-         {:ok, socket} <- transport.send(socket, preface),
+         :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
          server_settings_ack =
            settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack)),
-         {:ok, socket} <- transport.send(socket, Frame.encode(server_settings_ack)),
+         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
@@ -378,7 +378,7 @@ defmodule XHTTP2.Conn do
         {:ok, frame, rest, socket}
 
       :more ->
-        with {:ok, data, socket} <- transport.recv(socket, 0) do
+        with {:ok, data} <- transport.recv(socket, 0) do
           recv_next_frame(transport, socket, buffer <> data)
         end
 
@@ -975,9 +975,8 @@ defmodule XHTTP2.Conn do
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
     conn = send!(conn, Frame.encode(frame))
-    {:ok, socket} = conn.transport.close(conn.socket)
+    :ok = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    conn = put_in(conn.socket, socket)
     throw({:xhttp, conn, error_code})
   end
 
@@ -1002,7 +1001,7 @@ defmodule XHTTP2.Conn do
 
   defp send!(%Conn{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
-      {:ok, socket} -> put_in(conn.socket, socket)
+      :ok -> conn
       {:error, :closed} -> throw({:xhttp, %{conn | state: :closed}, :closed})
       {:error, reason} -> throw({:xhttp, conn, reason})
     end
