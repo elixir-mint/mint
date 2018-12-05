@@ -41,24 +41,6 @@ defmodule XHTTP.UnsafeProxyConn do
   end
 
   @impl true
-  @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
-  def get_transport(%Conn{module: module, state: state}) do
-    module.get_transport(state)
-  end
-
-  @impl true
-  @spec put_transport(t(), {module(), XHTTP.Transport.state()}) :: t()
-  def put_transport(%Conn{module: module, state: state}, transport) do
-    module.put_transport(state, transport)
-  end
-
-  @impl true
-  @spec transport_socket(t()) :: port()
-  def transport_socket(%Conn{module: module, state: state}) do
-    module.socket(state)
-  end
-
-  @impl true
   @spec initiate(
           module(),
           XHTTP.Transport.state(),

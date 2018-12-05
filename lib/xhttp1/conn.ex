@@ -38,7 +38,7 @@ defmodule XHTTP1.Conn do
   defstruct [
     :host,
     :request,
-    :transport_state,
+    :socket,
     :transport,
     requests: :queue.new(),
     state: :closed,
@@ -58,8 +58,8 @@ defmodule XHTTP1.Conn do
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
     case transport.connect(hostname, port, transport_opts) do
-      {:ok, transport_state} ->
-        initiate(transport, transport_state, hostname, port, opts)
+      {:ok, socket} ->
+        initiate(transport, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -74,37 +74,24 @@ defmodule XHTTP1.Conn do
           :inet.port_number(),
           Keyword.t()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, transport_state, scheme, hostname, port, opts) do
+  def upgrade(old_transport, socket, scheme, hostname, port, opts) do
     # TODO: Also ALPN negotiate HTTP1?
 
     new_transport = scheme_to_transport(scheme)
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    case new_transport.upgrade(transport_state, old_transport, hostname, port, transport_opts) do
-      {:ok, {new_transport, transport_state}} ->
-        initiate(new_transport, transport_state, hostname, port, opts)
+    case new_transport.upgrade(socket, old_transport, hostname, port, transport_opts) do
+      {:ok, {new_transport, socket}} ->
+        initiate(new_transport, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  @impl true
   @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
-  def get_transport(%Conn{transport: transport, transport_state: transport_state}) do
-    {transport, transport_state}
-  end
-
-  @impl true
-  @spec put_transport(t(), {module(), XHTTP.Transport.state()}) :: t()
-  def put_transport(%Conn{transport: transport} = conn, {transport, transport_state}) do
-    %{conn | transport_state: transport_state}
-  end
-
-  @impl true
-  @spec transport_socket(t()) :: port()
-  def transport_socket(%Conn{transport: transport, transport_state: transport_state}) do
-    transport.socket(transport_state)
+  def get_transport(%Conn{transport: transport, socket: socket}) do
+    {transport, socket}
   end
 
   @impl true
@@ -115,12 +102,12 @@ defmodule XHTTP1.Conn do
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate(transport, transport_state, hostname, _port, _opts) do
-    with :ok <- inet_opts(transport, transport_state),
-         :ok <- transport.setopts(transport_state, active: :once) do
+  def initiate(transport, socket, hostname, _port, _opts) do
+    with :ok <- inet_opts(transport, socket),
+         :ok <- transport.setopts(socket, active: :once) do
       conn = %Conn{
         transport: transport,
-        transport_state: transport_state,
+        socket: socket,
         host: hostname,
         state: :open
       }
@@ -128,7 +115,7 @@ defmodule XHTTP1.Conn do
       {:ok, conn}
     else
       error ->
-        transport.close(transport_state)
+        transport.close(socket)
         error
     end
   end
@@ -170,12 +157,12 @@ defmodule XHTTP1.Conn do
   end
 
   def request(%Conn{} = conn, method, path, headers, body) do
-    %Conn{host: host, transport: transport, transport_state: transport_state} = conn
+    %Conn{host: host, transport: transport, socket: socket} = conn
     iodata = Request.encode(method, path, host, headers, body || "")
 
-    case transport.send(transport_state, iodata) do
-      {:ok, transport_state} ->
-        conn = %Conn{conn | transport_state: transport_state}
+    case transport.send(socket, iodata) do
+      {:ok, socket} ->
+        conn = %Conn{conn | socket: socket}
         request_ref = make_ref()
         state = if body == :stream, do: :stream_request, else: :status
         request = new_request(request_ref, state, method)
@@ -217,8 +204,8 @@ defmodule XHTTP1.Conn do
   end
 
   def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, body) do
-    case conn.transport.send(conn.transport_state, body) do
-      {:ok, transport_state} -> {:ok, %Conn{conn | transport_state: transport_state}}
+    case conn.transport.send(conn.socket, body) do
+      {:ok, socket} -> {:ok, %Conn{conn | socket: socket}}
       {:error, :closed} -> {:error, %{conn | state: :closed}, :closed}
       {:error, reason} -> {:error, conn, reason}
     end
@@ -256,39 +243,21 @@ defmodule XHTTP1.Conn do
     {:error, conn, :request_body_not_streamed, []}
   end
 
-  def stream(
-        %Conn{transport: transport, transport_state: transport_state} = conn,
-        {tag, socket, data}
-      )
+  def stream(%Conn{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    if transport.socket(transport_state) == socket do
-      result = handle_data(conn, data)
-      _ = transport.setopts(transport_state, active: :once)
-      result
-    else
-      :unknown
-    end
+    result = handle_data(conn, data)
+    _ = transport.setopts(socket, active: :once)
+    result
   end
 
-  def stream(%Conn{transport: transport, transport_state: transport_state} = conn, {tag, socket})
+  def stream(%Conn{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
-    if transport.socket(transport_state) == socket do
-      handle_close(conn)
-    else
-      :unknown
-    end
+    handle_close(conn)
   end
 
-  def stream(
-        %Conn{transport: transport, transport_state: transport_state} = conn,
-        {tag, socket, reason}
-      )
+  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    if transport.socket(transport_state) == socket do
-      handle_error(conn, reason)
-    else
-      :unknown
-    end
+    handle_error(conn, reason)
   end
 
   def stream(%Conn{}, _message) do
@@ -616,8 +585,8 @@ defmodule XHTTP1.Conn do
       Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
-    {:ok, transport_state} = conn.transport.close(conn.transport_state)
-    %{conn | state: :closed, transport_state: transport_state}
+    {:ok, socket} = conn.transport.close(conn.socket)
+    %{conn | state: :closed, socket: socket}
   end
 
   # TODO: We should probably error if both transfer-encoding and content-length

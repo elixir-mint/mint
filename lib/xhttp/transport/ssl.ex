@@ -367,12 +367,6 @@ defmodule XHTTP.Transport.SSL do
   @impl true
   defdelegate getopts(socket, opts), to: :ssl
 
-  @impl true
-  def socket(socket), do: socket
-
-  @impl true
-  def actual_transport(_socket), do: __MODULE__
-
   defp ssl_opts(hostname, opts) do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)

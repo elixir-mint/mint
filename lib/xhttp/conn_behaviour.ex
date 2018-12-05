@@ -22,12 +22,6 @@ defmodule XHTTP.ConnBehaviour do
   #
   # @callback shutdown(conn(), :read | :write | :read_write) :: :ok | {:error, term()}
 
-  @callback get_transport(conn()) :: {module(), XHTTP.Transport.state()}
-
-  @callback put_transport(conn(), {module(), XHTTP.Transport.state()}) :: conn()
-
-  @callback transport_socket(conn()) :: port()
-
   @callback initiate(
               module(),
               XHTTP.Transport.state(),

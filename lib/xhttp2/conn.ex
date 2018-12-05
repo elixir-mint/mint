@@ -29,7 +29,7 @@ defmodule XHTTP2.Conn do
   defstruct [
     # Transport things.
     :transport,
-    :transport_state,
+    :socket,
 
     # Host things.
     :hostname,
@@ -88,7 +88,7 @@ defmodule XHTTP2.Conn do
 
   @opaque t() :: %Conn{
             transport: module(),
-            transport_state: XHTTP.Transport.state(),
+            socket: XHTTP.Transport.state(),
             state: :open | :closed | :went_away,
             buffer: binary(),
             window_size: pos_integer(),
@@ -119,8 +119,8 @@ defmodule XHTTP2.Conn do
       |> Keyword.merge(@transport_opts)
 
     case negotiate(hostname, port, transport, transport_opts) do
-      {:ok, transport_state} ->
-        initiate(transport, transport_state, hostname, port, opts)
+      {:ok, socket} ->
+        initiate(transport, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -135,7 +135,7 @@ defmodule XHTTP2.Conn do
           :inet.port_number(),
           Keyword.t()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, transport_state, scheme, hostname, port, opts) do
+  def upgrade(old_transport, socket, scheme, hostname, port, opts) do
     new_transport = scheme_to_transport(scheme)
 
     transport_opts =
@@ -143,31 +143,13 @@ defmodule XHTTP2.Conn do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case new_transport.upgrade(transport_state, old_transport, hostname, port, transport_opts) do
-      {:ok, {new_transport, transport_state}} ->
-        initiate(new_transport, transport_state, hostname, port, opts)
+    case new_transport.upgrade(socket, old_transport, hostname, port, transport_opts) do
+      {:ok, {new_transport, socket}} ->
+        initiate(new_transport, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  @impl true
-  @spec get_transport(t()) :: {module(), XHTTP.Transport.state()}
-  def get_transport(%Conn{transport: transport, transport_state: transport_state}) do
-    {transport, transport_state}
-  end
-
-  @impl true
-  @spec put_transport(t(), {module(), XHTTP.Transport.state()}) :: t()
-  def put_transport(%Conn{transport: transport} = conn, {transport, transport_state}) do
-    %{conn | transport_state: transport_state}
-  end
-
-  @impl true
-  @spec transport_socket(t()) :: port()
-  def transport_socket(%Conn{transport: transport, transport_state: transport_state}) do
-    transport.socket(transport_state)
   end
 
   @impl true
@@ -266,39 +248,21 @@ defmodule XHTTP2.Conn do
           | :unknown
   def stream(conn, message)
 
-  def stream(
-        %Conn{transport: transport, transport_state: transport_state} = conn,
-        {tag, socket, reason}
-      )
+  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    if transport.socket(transport_state) == socket do
-      {:error, %{conn | state: :closed}, reason, []}
-    else
-      :unknown
-    end
+    {:error, %{conn | state: :closed}, reason, []}
   end
 
-  def stream(%Conn{transport: transport, transport_state: transport_state} = conn, {tag, socket})
+  def stream(%Conn{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
-    if transport.socket(transport_state) == socket do
-      {:error, %{conn | state: :closed}, :closed, []}
-    else
-      :unknown
-    end
+    {:error, %{conn | state: :closed}, :closed, []}
   end
 
-  def stream(
-        %Conn{transport: transport, transport_state: transport_state} = conn,
-        {tag, socket, data}
-      )
+  def stream(%Conn{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    if transport.socket(transport_state) == socket do
-      {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
-      _ = transport.setopts(transport_state, active: :once)
-      {:ok, conn, Enum.reverse(responses)}
-    else
-      :unknown
-    end
+    {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+    _ = transport.setopts(socket, active: :once)
+    {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:xhttp, conn, error} -> {:error, conn, error, []}
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
@@ -353,7 +317,7 @@ defmodule XHTTP2.Conn do
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate(transport, transport_state, hostname, port, opts) do
+  def initiate(transport, socket, hostname, port, opts) do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
@@ -361,30 +325,28 @@ defmodule XHTTP2.Conn do
       hostname: hostname,
       port: port,
       transport: transport,
-      transport_state: transport_state,
+      socket: socket,
       scheme: Keyword.get(opts, :scheme, "https"),
       state: :open
     }
 
-    with :ok <- inet_opts(transport, transport_state),
+    with :ok <- inet_opts(transport, socket),
          client_settings = settings(stream_id: 0, params: client_settings_params),
          preface = [@connection_preface, Frame.encode(client_settings)],
-         {:ok, transport_state} <- transport.send(transport_state, preface),
+         {:ok, socket} <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
-         {:ok, server_settings, buffer, transport_state} <-
-           receive_server_settings(transport, transport_state),
+         {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
          server_settings_ack =
            settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack)),
-         {:ok, transport_state} <-
-           transport.send(transport_state, Frame.encode(server_settings_ack)),
+         {:ok, socket} <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
-         conn = put_in(conn.transport_state, transport_state),
+         conn = put_in(conn.socket, socket),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport.setopts(transport_state, active: :once) do
+         :ok <- transport.setopts(socket, active: :once) do
       {:ok, conn}
     else
       error ->
-        transport.close(transport_state)
+        transport.close(socket)
         error
     end
   end
@@ -392,32 +354,32 @@ defmodule XHTTP2.Conn do
   ## Helpers
 
   defp negotiate(hostname, port, transport, transport_opts) do
-    with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts),
-         {:ok, protocol} <- transport.negotiated_protocol(transport_state) do
+    with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
+         {:ok, protocol} <- transport.negotiated_protocol(socket) do
       if protocol == "h2" do
-        {:ok, transport_state}
+        {:ok, socket}
       else
         {:error, {:bad_alpn_protocol, protocol}}
       end
     end
   end
 
-  defp receive_server_settings(transport, transport_state) do
-    case recv_next_frame(transport, transport_state, _buffer = "") do
-      {:ok, settings(), _buffer, _transport_state} = result -> result
-      {:ok, _frame, _buffer, _transport_state} -> {:error, :protocol_error}
+  defp receive_server_settings(transport, socket) do
+    case recv_next_frame(transport, socket, _buffer = "") do
+      {:ok, settings(), _buffer, _socket} = result -> result
+      {:ok, _frame, _buffer, _socket} -> {:error, :protocol_error}
       {:error, _reason} = error -> error
     end
   end
 
-  defp recv_next_frame(transport, transport_state, buffer) do
+  defp recv_next_frame(transport, socket, buffer) do
     case Frame.decode_next(buffer, @default_max_frame_size) do
       {:ok, frame, rest} ->
-        {:ok, frame, rest, transport_state}
+        {:ok, frame, rest, socket}
 
       :more ->
-        with {:ok, data, transport_state} <- transport.recv(transport_state, 0) do
-          recv_next_frame(transport, transport_state, buffer <> data)
+        with {:ok, data, socket} <- transport.recv(socket, 0) do
+          recv_next_frame(transport, socket, buffer <> data)
         end
 
       {:error, {kind, _info}} when kind in [:frame_size_error, :protocol_error] ->
@@ -1013,9 +975,9 @@ defmodule XHTTP2.Conn do
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
     conn = send!(conn, Frame.encode(frame))
-    {:ok, transport_state} = conn.transport.close(conn.transport_state)
+    {:ok, socket} = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    conn = put_in(conn.transport_state, transport_state)
+    conn = put_in(conn.socket, socket)
     throw({:xhttp, conn, error_code})
   end
 
@@ -1038,9 +1000,9 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp send!(%Conn{transport: transport, transport_state: transport_state} = conn, bytes) do
-    case transport.send(transport_state, bytes) do
-      {:ok, transport_state} -> put_in(conn.transport_state, transport_state)
+  defp send!(%Conn{transport: transport, socket: socket} = conn, bytes) do
+    case transport.send(socket, bytes) do
+      {:ok, socket} -> put_in(conn.socket, socket)
       {:error, :closed} -> throw({:xhttp, %{conn | state: :closed}, :closed})
       {:error, reason} -> throw({:xhttp, conn, reason})
     end

@@ -19,7 +19,7 @@ defmodule XHTTP1.ConnPropertiesTest do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
           assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+                   Conn.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)
@@ -44,7 +44,7 @@ defmodule XHTTP1.ConnPropertiesTest do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
           assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+                   Conn.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)
@@ -69,7 +69,7 @@ defmodule XHTTP1.ConnPropertiesTest do
       {_conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
           assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.transport_state, bytes})
+                   Conn.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)
