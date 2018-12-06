@@ -1,5 +1,5 @@
-defmodule XHTTP.Transport.TCP do
-  @behaviour XHTTP.Transport
+defmodule XHTTPCore.Transport.TCP do
+  @behaviour XHTTPCore.Transport
 
   @transport_opts [
     packet: :raw,

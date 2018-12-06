@@ -1,4 +1,4 @@
-defmodule XHTTP.Util do
+defmodule XHTTPCore.Util do
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),
@@ -7,8 +7,8 @@ defmodule XHTTP.Util do
     end
   end
 
-  def scheme_to_transport(:http), do: XHTTP.Transport.TCP
-  def scheme_to_transport(:https), do: XHTTP.Transport.SSL
+  def scheme_to_transport(:http), do: XHTTPCore.Transport.TCP
+  def scheme_to_transport(:https), do: XHTTPCore.Transport.SSL
   def scheme_to_transport(module) when is_atom(module), do: module
 
   defp calculate_buffer(opts) do

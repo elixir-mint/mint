@@ -8,38 +8,38 @@ XHTTP contains two main APIs, a stateless connection API, and a stateful multi-h
 
 ## Connection API
 
-The two connection API exists in two modules, `XHTTP1.Conn` and `XHTTP2.Conn` with implementations for HTTP/1 and HTTP/2 respectively. `XHTTPN.Conn` uses the same API but with version negotiation between the HTTP/1 and 2.
+The two connection API exists in two modules, `XHTTP1` and `XHTTP2` with implementations for HTTP/1 and HTTP/2 respectively. `XHTTPN` uses the same API but with version negotiation between the HTTP/1 and 2.
 
-This API represents a connection with a single `%Conn{}` struct and are started by running:
+This API represents a connection with a single `conn` struct and are started by running:
 
 ```elixir
-{:ok, conn} = XHTTPN.Conn.connect("example.com", 80)
+{:ok, conn} = XHTTPN.connect("example.com", 80)
 ```
 
 Requests are sent with:
 
 ```elixir
-{:ok, conn} = XHTTPN.Conn.request(conn, "GET", "/", [], "")
+{:ok, conn} = XHTTPN.request(conn, "GET", "/", [], "")
 ```
 
 The connection socket runs in [active mode](http://erlang.org/doc/man/inet.html#setopts-2), that means the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002) and pass them to the connection struct:
 
 ```elixir
-{:ok, responses, conn} = XHTTPN.Conn.stream(conn, {:tcp, #Port<0.1300>, ...})
+{:ok, responses, conn} = XHTTPN.stream(conn, {:tcp, #Port<0.1300>, ...})
 ```
 
 Responses are streamed back to the user in parts through response parts `:status`, `:headers`, `:data` and finally `:done` response. Multiple or none response parts can be returned for a single TCP/SSL message and response parts from different requests can be interleaved when using HTTP/2, users of `XHTTP` needs to handle these cases.
 
-The connection API is stateless, this means that you need to make sure to always save the returned `%Conn{}`:
+The connection API is stateless, this means that you need to make sure to always save the returned `conn`:
 
 ```elixir
 # Wrong
-{:ok, _conn} = XHTTPN.Conn.request(conn, "GET", "/foo", [], "")
-{:ok, conn} = XHTTPN.Conn.request(conn, "GET", "/bar", [], "")
+{:ok, _conn} = XHTTPN.request(conn, "GET", "/foo", [], "")
+{:ok, conn} = XHTTPN.request(conn, "GET", "/bar", [], "")
 
 # Correct
-{:ok, conn} = XHTTPN.Conn.request(conn, "GET", "/foo", [], "")
-{:ok, conn} = XHTTPN.Conn.request(conn, "GET", "/bar", [], "")
+{:ok, conn} = XHTTPN.request(conn, "GET", "/foo", [], "")
+{:ok, conn} = XHTTPN.request(conn, "GET", "/bar", [], "")
 ```
 
 ## Pool API

@@ -1,18 +1,17 @@
-defmodule XHTTP2.Conn do
+defmodule XHTTP2 do
   use Bitwise, skip_operators: true
 
-  import XHTTP.Util
+  import XHTTPCore.Util
   import XHTTP2.Frame, except: [encode: 1, decode_next: 1]
 
   alias XHTTP2.{
-    Conn,
     Frame,
     HPACK
   }
 
   require Logger
 
-  @behaviour XHTTP.ConnBehaviour
+  @behaviour XHTTPCore.Conn
 
   ## Constants
 
@@ -24,7 +23,7 @@ defmodule XHTTP2.Conn do
 
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
-  ## Connection
+  ## XHTTP2ection
 
   defstruct [
     # Transport things.
@@ -36,7 +35,7 @@ defmodule XHTTP2.Conn do
     :port,
     :scheme,
 
-    # Connection state (open, closed, and so on).
+    # XHTTP2ection state (open, closed, and so on).
     :state,
 
     # Fields of the connection.
@@ -78,17 +77,17 @@ defmodule XHTTP2.Conn do
   ## Types
 
   @type scheme :: :http | :https | module()
-  @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
-  @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
-  @type response() :: XHTTP.ConnBehaviour.response()
-  @type status() :: XHTTP.ConnBehaviour.response()
-  @type headers() :: XHTTP.ConnBehaviour.headers()
+  @type request_ref() :: XHTTPCore.Conn.request_ref()
+  @type tcp_message() :: XHTTPCore.Conn.tcp_message()
+  @type response() :: XHTTPCore.Conn.response()
+  @type status() :: XHTTPCore.Conn.response()
+  @type headers() :: XHTTPCore.Conn.headers()
   @type settings() :: keyword()
   @type stream_id() :: pos_integer()
 
-  @opaque t() :: %Conn{
+  @opaque t() :: %XHTTP2{
             transport: module(),
-            socket: XHTTP.Transport.socket(),
+            socket: XHTTPCore.Transport.socket(),
             state: :open | :closed | :went_away,
             buffer: binary(),
             window_size: pos_integer(),
@@ -129,7 +128,7 @@ defmodule XHTTP2.Conn do
 
   @spec upgrade(
           module(),
-          XHTTP.Transport.socket(),
+          XHTTPCore.Transport.socket(),
           scheme(),
           String.t(),
           :inet.port_number(),
@@ -154,7 +153,7 @@ defmodule XHTTP2.Conn do
 
   @impl true
   @spec open?(t()) :: boolean()
-  def open?(%Conn{state: state}), do: state == :open
+  def open?(%XHTTP2{state: state}), do: state == :open
 
   @impl true
   @spec request(
@@ -166,7 +165,7 @@ defmodule XHTTP2.Conn do
         ) ::
           {:ok, t(), request_ref()}
           | {:error, t(), term()}
-  def request(%Conn{} = conn, method, path, headers, body \\ nil)
+  def request(%XHTTP2{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
       {":method", method},
@@ -201,7 +200,7 @@ defmodule XHTTP2.Conn do
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
-  def stream_request_body(%Conn{} = conn, ref, chunk) when is_reference(ref) do
+  def stream_request_body(%XHTTP2{} = conn, ref, chunk) when is_reference(ref) do
     stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
 
     conn =
@@ -215,7 +214,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec ping(t(), <<_::8>>) :: {:ok, t(), request_ref()} | {:error, t(), term()}
-  def ping(%Conn{} = conn, payload \\ :binary.copy(<<0>>, 8))
+  def ping(%XHTTP2{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
     {:ok, conn, ref}
@@ -224,7 +223,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec put_settings(t(), keyword()) :: {:ok, t()} | {:error, t(), reason :: term()}
-  def put_settings(%Conn{} = conn, settings) when is_list(settings) do
+  def put_settings(%XHTTP2{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
   catch
@@ -232,7 +231,7 @@ defmodule XHTTP2.Conn do
   end
 
   @spec get_setting(t(), atom()) :: term()
-  def get_setting(%Conn{} = conn, name) do
+  def get_setting(%XHTTP2{} = conn, name) do
     case name do
       :enable_push -> conn.enable_push
       :max_concurrent_streams -> conn.server_max_concurrent_streams
@@ -248,17 +247,17 @@ defmodule XHTTP2.Conn do
           | :unknown
   def stream(conn, message)
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
+  def stream(%XHTTP2{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
     {:error, %{conn | state: :closed}, reason, []}
   end
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket})
+  def stream(%XHTTP2{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
     {:error, %{conn | state: :closed}, :closed, []}
   end
 
-  def stream(%Conn{transport: transport, socket: socket} = conn, {tag, socket, data})
+  def stream(%XHTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
     _ = transport.setopts(socket, active: :once)
@@ -268,7 +267,7 @@ defmodule XHTTP2.Conn do
     :throw, {:xhttp, conn, error, responses} -> {:error, conn, error, responses}
   end
 
-  def stream(%Conn{}, _message) do
+  def stream(%XHTTP2{}, _message) do
     :unknown
   end
 
@@ -280,7 +279,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
-  def put_private(%Conn{private: private} = conn, key, value) when is_atom(key) do
+  def put_private(%XHTTP2{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
   end
 
@@ -291,7 +290,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
-  def get_private(%Conn{private: private}, key, default \\ nil) when is_atom(key) do
+  def get_private(%XHTTP2{private: private}, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
   end
 
@@ -302,7 +301,7 @@ defmodule XHTTP2.Conn do
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
-  def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
+  def delete_private(%XHTTP2{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
   end
 
@@ -312,7 +311,7 @@ defmodule XHTTP2.Conn do
   @impl true
   @spec initiate(
           module(),
-          XHTTP.Transport.socket(),
+          XHTTPCore.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -321,7 +320,7 @@ defmodule XHTTP2.Conn do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
-    conn = %Conn{
+    conn = %XHTTP2{
       hostname: hostname,
       port: port,
       transport: transport,
@@ -352,8 +351,8 @@ defmodule XHTTP2.Conn do
   end
 
   @impl true
-  @spec get_socket(t()) :: XHTTP.Transport.socket()
-  def get_socket(%Conn{socket: socket}) do
+  @spec get_socket(t()) :: XHTTPCore.Transport.socket()
+  def get_socket(%XHTTP2{socket: socket}) do
     socket
   end
 
@@ -393,7 +392,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp open_stream(%Conn{server_max_concurrent_streams: mcs} = conn) do
+  defp open_stream(%XHTTP2{server_max_concurrent_streams: mcs} = conn) do
     if conn.open_stream_count >= mcs do
       throw({:xhttp, conn, {:max_concurrent_streams_reached, mcs}})
     end
@@ -589,7 +588,7 @@ defmodule XHTTP2.Conn do
 
   ## Frame handling
 
-  defp handle_new_data(%Conn{} = conn, data, responses) do
+  defp handle_new_data(%XHTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
         Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
@@ -1005,7 +1004,7 @@ defmodule XHTTP2.Conn do
     end
   end
 
-  defp send!(%Conn{transport: transport, socket: socket} = conn, bytes) do
+  defp send!(%XHTTP2{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
       :ok -> conn
       {:error, :closed} -> throw({:xhttp, %{conn | state: :closed}, :closed})

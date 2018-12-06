@@ -1,11 +1,13 @@
-defmodule XHTTPN.Conn do
+defmodule XHTTPN do
   @moduledoc """
-  Single interface for `XHTTP1.Conn` and `XHTTP2.Conn` with version negotiation support.
+  Single interface for `XHTTP1` and `XHTTP2` with version negotiation support.
   """
 
-  import XHTTP.Util
+  import XHTTPCore.Util
 
-  @behaviour XHTTP.ConnBehaviour
+  alias XHTTPCore.Transport
+
+  @behaviour XHTTPCore.Conn
 
   @default_protocols [:http1, :http2]
   @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
@@ -15,10 +17,10 @@ defmodule XHTTPN.Conn do
 
     case Enum.sort(protocols) do
       [:http1] ->
-        XHTTP1.Conn.connect(scheme, hostname, port, opts)
+        XHTTP1.connect(scheme, hostname, port, opts)
 
       [:http2] ->
-        XHTTP2.Conn.connect(scheme, hostname, port, opts)
+        XHTTP2.connect(scheme, hostname, port, opts)
 
       [:http1, :http2] ->
         transport = scheme_to_transport(scheme)
@@ -32,10 +34,10 @@ defmodule XHTTPN.Conn do
 
     case Enum.sort(protocols) do
       [:http1] ->
-        XHTTP1.Conn.upgrade(old_transport, transport_state, new_transport, hostname, port, opts)
+        XHTTP1.upgrade(old_transport, transport_state, new_transport, hostname, port, opts)
 
       [:http2] ->
-        XHTTP2.Conn.upgrade(old_transport, transport_state, new_transport, hostname, port, opts)
+        XHTTP2.upgrade(old_transport, transport_state, new_transport, hostname, port, opts)
 
       [:http1, :http2] ->
         transport_upgrade(old_transport, transport_state, new_transport, hostname, port, opts)
@@ -68,13 +70,13 @@ defmodule XHTTPN.Conn do
 
   def get_socket(conn), do: conn_module(conn).get_socket(conn)
 
-  defp transport_connect(XHTTP.Transport.TCP, hostname, port, opts) do
+  defp transport_connect(Transport.TCP, hostname, port, opts) do
     # TODO: http1 upgrade? Should be explicit since support is not clear
-    XHTTP1.Conn.connect(XHTTP.Transport.TCP, hostname, port, opts)
+    XHTTP1.connect(Transport.TCP, hostname, port, opts)
   end
 
-  defp transport_connect(XHTTP.Transport.SSL, hostname, port, opts) do
-    connect_negotiate(XHTTP.Transport.SSL, hostname, port, opts)
+  defp transport_connect(Transport.SSL, hostname, port, opts) do
+    connect_negotiate(Transport.SSL, hostname, port, opts)
   end
 
   defp connect_negotiate(transport, hostname, port, opts) do
@@ -92,24 +94,24 @@ defmodule XHTTPN.Conn do
   defp transport_upgrade(
          old_transport,
          transport_state,
-         XHTTP.Transport.TCP,
+         Transport.TCP,
          hostname,
          port,
          opts
        ) do
     # TODO: http1 upgrade? Should be explicit since support is not clear
-    XHTTP1.Conn.upgrade(old_transport, transport_state, XHTTP.Transport.TCP, hostname, port, opts)
+    XHTTP1.upgrade(old_transport, transport_state, Transport.TCP, hostname, port, opts)
   end
 
   defp transport_upgrade(
          old_transport,
          transport_state,
-         XHTTP.Transport.SSL,
+         Transport.SSL,
          hostname,
          port,
          opts
        ) do
-    connect_upgrade(old_transport, transport_state, XHTTP.Transport.SSL, hostname, port, opts)
+    connect_upgrade(old_transport, transport_state, Transport.SSL, hostname, port, opts)
   end
 
   defp connect_upgrade(old_transport, transport_state, new_transport, hostname, port, opts) do
@@ -130,20 +132,20 @@ defmodule XHTTPN.Conn do
   defp alpn_negotiate(transport, socket, hostname, port, opts) do
     case transport.negotiated_protocol(socket) do
       {:ok, "http/1.1"} ->
-        XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)
+        XHTTP1.initiate(transport, socket, hostname, port, opts)
 
       {:ok, "h2"} ->
-        XHTTP2.Conn.initiate(transport, socket, hostname, port, opts)
+        XHTTP2.initiate(transport, socket, hostname, port, opts)
 
       {:error, :protocol_not_negotiated} ->
         # Assume HTTP1 if ALPN is not supported
-        XHTTP1.Conn.initiate(transport, socket, hostname, port, opts)
+        XHTTP1.initiate(transport, socket, hostname, port, opts)
 
       {:ok, protocol} ->
         {:error, {:bad_alpn_protocol, protocol}}
     end
   end
 
-  defp conn_module(%XHTTP1.Conn{}), do: XHTTP1.Conn
-  defp conn_module(%XHTTP2.Conn{}), do: XHTTP2.Conn
+  defp conn_module(%XHTTP1{}), do: XHTTP1
+  defp conn_module(%XHTTP2{}), do: XHTTP2
 end

@@ -1,13 +1,13 @@
-defmodule XHTTP.TunnelProxyConnTest do
+defmodule XHTTPCore.TunnelProxyTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTPN.Conn, as: Conn
+  alias XHTTPN, as: Conn
 
   @moduletag :proxy
 
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
-             XHTTP.TunnelProxyConn.connect(
+             XHTTPCore.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:http, "httpbin.org", 80, []}
              )
@@ -23,7 +23,7 @@ defmodule XHTTP.TunnelProxyConnTest do
 
   test "200 response - https://httpbin.org" do
     assert {:ok, conn} =
-             XHTTP.TunnelProxyConn.connect(
+             XHTTPCore.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "httpbin.org", 443, []}
              )
@@ -39,7 +39,7 @@ defmodule XHTTP.TunnelProxyConnTest do
 
   test "200 response with explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
-             XHTTP.TunnelProxyConn.connect(
+             XHTTPCore.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "http2.golang.org", 443, [protocols: [:http2]]}
              )
@@ -55,7 +55,7 @@ defmodule XHTTP.TunnelProxyConnTest do
 
   test "200 response without explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
-             XHTTP.TunnelProxyConn.connect(
+             XHTTPCore.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "http2.golang.org", 443, [protocols: [:http1, :http2]]}
              )

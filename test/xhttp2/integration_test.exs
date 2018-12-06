@@ -3,14 +3,12 @@ defmodule XHTTP2.IntegrationTest do
 
   import XHTTP2.TestHelpers
 
-  alias XHTTP2.Conn
-
   @moduletag :integration
 
   setup context do
     case context.connect do
       {host, port} ->
-        assert {:ok, %Conn{} = conn} = Conn.connect(:https, host, port)
+        assert {:ok, %XHTTP2{} = conn} = XHTTP2.connect(:https, host, port)
         [conn: conn]
 
       _other ->
@@ -22,9 +20,9 @@ defmodule XHTTP2.IntegrationTest do
     @moduletag connect: {"http2.golang.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "GET", "/reqinfo", [])
+      assert {:ok, %XHTTP2{} = conn, req_id} = XHTTP2.request(conn, "GET", "/reqinfo", [])
 
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^req_id, 200},
@@ -37,32 +35,33 @@ defmodule XHTTP2.IntegrationTest do
       assert data =~ "Method: GET"
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "GET /clockstream", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "GET", "/clockstream", [])
+      assert {:ok, %XHTTP2{} = conn, req_id} = XHTTP2.request(conn, "GET", "/clockstream", [])
 
-      assert {:ok, %Conn{} = conn, responses} = stream_messages_until_response(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^req_id, 200}, {:headers, ^req_id, _headers}] = responses
 
       assert_receive message, 5000
-      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert {:ok, %XHTTP2{} = conn, responses} = XHTTP2.stream(conn, message)
       assert [{:data, ^req_id, data}] = responses
       assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
 
       assert_receive message, 5000
-      assert {:ok, %Conn{} = conn, responses} = Conn.stream(conn, message)
+      assert {:ok, %XHTTP2{} = conn, responses} = XHTTP2.stream(conn, message)
       assert [{:data, ^req_id, data}] = responses
       assert data =~ ~r/\A\d{4}-\d{2}-\d{2}/
 
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "PUT /ECHO", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, req_id} = Conn.request(conn, "PUT", "/ECHO", [], "hello world")
+      assert {:ok, %XHTTP2{} = conn, req_id} =
+               XHTTP2.request(conn, "PUT", "/ECHO", [], "hello world")
 
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^req_id, 200},
@@ -76,12 +75,12 @@ defmodule XHTTP2.IntegrationTest do
       assert data == "HELLO WORLD"
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "GET /file/gopher.png", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/file/gopher.png", [])
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.request(conn, "GET", "/file/gopher.png", [])
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^ref, 200},
@@ -98,14 +97,14 @@ defmodule XHTTP2.IntegrationTest do
       assert is_binary(data3)
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "ping", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
-      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.ping(conn)
+      assert {:ok, %XHTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
   end
 
@@ -113,16 +112,16 @@ defmodule XHTTP2.IntegrationTest do
     @moduletag connect: {"twitter.com", 443}
 
     test "ping", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
-      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.ping(conn)
+      assert {:ok, %XHTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.request(conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, headers} | rest] = responses
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
@@ -130,7 +129,7 @@ defmodule XHTTP2.IntegrationTest do
       assert is_list(headers)
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
   end
 
@@ -138,16 +137,16 @@ defmodule XHTTP2.IntegrationTest do
     @describetag connect: {"facebook.com", 443}
 
     test "ping", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
-      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.ping(conn)
+      assert {:ok, %XHTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/", [])
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.request(conn, "GET", "/", [])
 
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
@@ -156,7 +155,7 @@ defmodule XHTTP2.IntegrationTest do
       assert is_list(headers)
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
   end
 
@@ -165,16 +164,16 @@ defmodule XHTTP2.IntegrationTest do
     @describetag connect: {"nghttp2.org", 443}
 
     test "ping", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.ping(conn)
-      assert {:ok, %Conn{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.ping(conn)
+      assert {:ok, %XHTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %Conn{} = conn, ref} = Conn.request(conn, "GET", "/httpbin/", [])
+      assert {:ok, %XHTTP2{} = conn, ref} = XHTTP2.request(conn, "GET", "/httpbin/", [])
 
-      assert {:ok, %Conn{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %XHTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
@@ -183,15 +182,15 @@ defmodule XHTTP2.IntegrationTest do
       assert is_list(headers)
 
       assert conn.buffer == ""
-      assert Conn.open?(conn)
+      assert XHTTP2.open?(conn)
     end
   end
 
   defp stream_messages_until_response(conn) do
     assert_receive message, 1000
 
-    case Conn.stream(conn, message) do
-      {:ok, %Conn{} = conn, []} -> stream_messages_until_response(conn)
+    case XHTTP2.stream(conn, message) do
+      {:ok, %XHTTP2{} = conn, []} -> stream_messages_until_response(conn)
       other -> other
     end
   end
