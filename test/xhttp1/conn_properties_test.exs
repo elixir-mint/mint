@@ -1,25 +1,23 @@
-defmodule XHTTP1.ConnPropertiesTest do
+defmodule XHTTP1.PropertiesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
   import XHTTP1.TestHelpers
-  alias XHTTP1.Conn
   alias XHTTP1.TestServer
 
   setup do
     {:ok, port} = TestServer.start()
-    assert {:ok, conn} = Conn.connect(:http, "localhost", port)
+    assert {:ok, conn} = XHTTP1.connect(:http, "localhost", port)
     [conn: conn]
   end
 
   property "body with content-length", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref} = XHTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789XXX"
 
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} = XHTTP1.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)
@@ -34,7 +32,7 @@ defmodule XHTTP1.ConnPropertiesTest do
   end
 
   property "body with chunked transfer-encoding split on every byte", %{conn: conn} do
-    {:ok, conn, ref} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref} = XHTTP1.request(conn, "GET", "/", [], nil)
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
@@ -43,8 +41,7 @@ defmodule XHTTP1.ConnPropertiesTest do
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} = XHTTP1.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)
@@ -59,17 +56,16 @@ defmodule XHTTP1.ConnPropertiesTest do
   end
 
   property "pipeline with multiple responses in single message", %{conn: conn} do
-    {:ok, conn, ref1} = Conn.request(conn, "GET", "/", [], nil)
-    {:ok, conn, ref2} = Conn.request(conn, "GET", "/", [], nil)
-    {:ok, conn, ref3} = Conn.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref1} = XHTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = XHTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = XHTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
     responses = for _ <- 1..3, do: response, into: ""
 
     check all byte_chunks <- random_chunks(responses) do
       {_conn, responses} =
         Enum.reduce(byte_chunks, {conn, []}, fn bytes, {conn, responses} ->
-          assert {:ok, conn, new_responses} =
-                   Conn.stream(conn, {:tcp, conn.socket, bytes})
+          assert {:ok, conn, new_responses} = XHTTP1.stream(conn, {:tcp, conn.socket, bytes})
 
           {conn, responses ++ new_responses}
         end)

@@ -1,5 +1,5 @@
-defmodule XHTTP.TunnelProxyConn do
-  import XHTTP.Util
+defmodule XHTTPCore.TunnelProxy do
+  import XHTTPCore.Util
 
   def connect(proxy, host) do
     with {:ok, conn} <- establish_proxy(proxy, host) do
@@ -12,8 +12,8 @@ defmodule XHTTP.TunnelProxyConn do
     {_scheme, hostname, port, _opts} = host
     path = "#{hostname}:#{port}"
 
-    with {:ok, conn} <- XHTTP1.Conn.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
-         {:ok, conn, ref} <- XHTTP1.Conn.request(conn, "CONNECT", path, []),
+    with {:ok, conn} <- XHTTP1.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
+         {:ok, conn, ref} <- XHTTP1.request(conn, "CONNECT", path, []),
          :ok <- receive_response(conn, ref) do
       {:ok, conn}
     else
@@ -24,8 +24,8 @@ defmodule XHTTP.TunnelProxyConn do
   defp upgrade_connection(conn, proxy, {scheme, hostname, port, opts}) do
     {proxy_scheme, _proxy_hostname, _proxy_port, _proxy_opts} = proxy
     transport = scheme_to_transport(proxy_scheme)
-    socket = XHTTP1.Conn.get_socket(conn)
-    XHTTPN.Conn.upgrade(transport, socket, scheme, hostname, port, opts)
+    socket = XHTTP1.get_socket(conn)
+    XHTTPN.upgrade(transport, socket, scheme, hostname, port, opts)
   end
 
   defp receive_response(conn, ref) do
@@ -44,7 +44,7 @@ defmodule XHTTP.TunnelProxyConn do
   end
 
   defp stream(conn, ref, msg) do
-    case XHTTPN.Conn.stream(conn, msg) do
+    case XHTTPN.stream(conn, msg) do
       {:ok, conn, responses} ->
         case handle_responses(conn, ref, responses) do
           :done -> :ok

@@ -1,13 +1,12 @@
 defmodule XHTTP1.IntegrationTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTP1.Conn
 
   @moduletag :integration
 
   test "200 response - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -19,9 +18,9 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "ssl, path, long body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:https, "httpbin.org", 443)
+    assert {:ok, conn} = XHTTP1.connect(:https, "httpbin.org", 443)
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/50000", [], nil)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "GET", "/bytes/50000", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -39,7 +38,7 @@ defmodule XHTTP1.IntegrationTest do
       |> Enum.map(&:public_key.pem_entry_decode/1)
 
     assert {:error, {:tls_alert, 'unknown ca'}} =
-             Conn.connect(
+             XHTTP1.connect(
                :https,
                "httpbin.org",
                443,
@@ -49,7 +48,7 @@ defmodule XHTTP1.IntegrationTest do
 
   test "ssl with missing CA cacertfile - httpbin.org" do
     assert {:error, {:tls_alert, 'unknown ca'}} =
-             Conn.connect(
+             XHTTP1.connect(
                :https,
                "httpbin.org",
                443,
@@ -59,7 +58,7 @@ defmodule XHTTP1.IntegrationTest do
 
   test "ssl with missing CA cacerts - httpbin.org" do
     assert {:error, {:tls_alert, 'unknown ca'}} =
-             Conn.connect(
+             XHTTP1.connect(
                :https,
                "httpbin.org",
                443,
@@ -68,9 +67,9 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "keep alive - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:https, "httpbin.org", 443)
+    assert {:ok, conn} = XHTTP1.connect(:https, "httpbin.org", 443)
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -79,9 +78,9 @@ defmodule XHTTP1.IntegrationTest do
     assert {:headers, ^request, _} = headers
     assert merge_body(responses, request) =~ "Other Utilities"
 
-    assert {:ok, conn} = Conn.connect(:https, "httpbin.org", 443)
+    assert {:ok, conn} = XHTTP1.connect(:https, "httpbin.org", 443)
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -92,8 +91,8 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "POST body - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", [], "BODY")
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "POST", "/post", [], "BODY")
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -105,11 +104,11 @@ defmodule XHTTP1.IntegrationTest do
 
   test "POST body streaming - httpbin.org" do
     headers = [{"content-length", "4"}]
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "POST", "/post", headers, :stream)
-    assert {:ok, conn} = Conn.stream_request_body(conn, request, "BO")
-    assert {:ok, conn} = Conn.stream_request_body(conn, request, "DY")
-    assert {:ok, conn} = Conn.stream_request_body(conn, request, :eof)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "POST", "/post", headers, :stream)
+    assert {:ok, conn} = XHTTP1.stream_request_body(conn, request, "BO")
+    assert {:ok, conn} = XHTTP1.stream_request_body(conn, request, "DY")
+    assert {:ok, conn} = XHTTP1.stream_request_body(conn, request, :eof)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert conn.buffer == ""
@@ -120,11 +119,11 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "pipelining - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
-    assert {:ok, conn, request1} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, request2} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, request3} = Conn.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, request4} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn, request1} = XHTTP1.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request2} = XHTTP1.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request3} = XHTTP1.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request4} = XHTTP1.request(conn, "GET", "/", [], nil)
 
     assert {:ok, conn, [_status, _headers | responses1]} = receive_stream(conn)
     assert {:ok, conn, [_status, _headers | responses2]} = receive_stream(conn)
@@ -148,8 +147,8 @@ defmodule XHTTP1.IntegrationTest do
   # $ curl -vv httpbin.org/stream-bytes/0
   @tag :skip
   test "chunked no chunks - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/stream-bytes/0", [], nil)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn, request} = XHTTP1.request(conn, "GET", "/stream-bytes/0", [], nil)
 
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
@@ -157,10 +156,10 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "chunked single chunk - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
 
     assert {:ok, conn, request} =
-             Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=1024", [], nil)
+             XHTTP1.request(conn, "GET", "/stream-bytes/1024?chunk_size=1024", [], nil)
 
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
@@ -168,10 +167,10 @@ defmodule XHTTP1.IntegrationTest do
   end
 
   test "chunked multiple chunks - httpbin.org" do
-    assert {:ok, conn} = Conn.connect(:http, "httpbin.org", 80)
+    assert {:ok, conn} = XHTTP1.connect(:http, "httpbin.org", 80)
 
     assert {:ok, conn, request} =
-             Conn.request(conn, "GET", "/stream-bytes/1024?chunk_size=100", [], nil)
+             XHTTP1.request(conn, "GET", "/stream-bytes/1024?chunk_size=100", [], nil)
 
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
@@ -180,22 +179,24 @@ defmodule XHTTP1.IntegrationTest do
 
   test "ssl, bad certificate - badssl.com" do
     assert {:error, {:tls_alert, 'unknown ca'}} =
-             Conn.connect(:https, "untrusted-root.badssl.com", 443,
+             XHTTP1.connect(:https, "untrusted-root.badssl.com", 443,
                transport_opts: [log_alert: false]
              )
 
     assert {:ok, _conn} =
-             Conn.connect(:https, "untrusted-root.badssl.com", 443,
+             XHTTP1.connect(:https, "untrusted-root.badssl.com", 443,
                transport_opts: [verify: :verify_none]
              )
   end
 
   test "ssl, bad hostname - badssl.com" do
     assert {:error, {:tls_alert, 'handshake failure'}} =
-             Conn.connect(:https, "wrong.host.badssl.com", 443, transport_opts: [log_alert: false])
+             XHTTP1.connect(:https, "wrong.host.badssl.com", 443,
+               transport_opts: [log_alert: false]
+             )
 
     assert {:ok, _conn} =
-             Conn.connect(:https, "wrong.host.badssl.com", 443,
+             XHTTP1.connect(:https, "wrong.host.badssl.com", 443,
                transport_opts: [verify: :verify_none]
              )
   end

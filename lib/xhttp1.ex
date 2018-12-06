@@ -1,4 +1,4 @@
-defmodule XHTTP1.Conn do
+defmodule XHTTP1 do
   @moduledoc """
   Streaming API for HTTP connections.
 
@@ -6,32 +6,32 @@ defmodule XHTTP1.Conn do
   sent with `request/5`, the connection needs to be streamed messages to
   `stream/2` from `:gen_tcp` or `:ssl` socket active modes.
 
-  If the message is from the socket belonging to the given `%Conn{}` then
+  If the message is from the socket belonging to the given `%XHTTP1{}` then
   `stream/2` will return parts of the response.
 
   All connection handling happens in the current process.
 
   The `stream/2` function is pure because it's the users responsibility to
   receive socket messages and pass them to the function, therefor it's important
-  to always store the returned `%Conn{}` struct from functions.
+  to always store the returned `%XHTTP1{}` struct from functions.
   """
 
-  import XHTTP.Util
+  import XHTTPCore.Util
 
-  alias XHTTP1.{Conn, Parse, Request, Response}
+  alias XHTTP1.{Parse, Request, Response}
 
   require Logger
 
-  @behaviour XHTTP.ConnBehaviour
+  @behaviour XHTTPCore.Conn
 
-  @opaque t() :: %Conn{}
+  @opaque t() :: %XHTTP1{}
 
   @type scheme :: :http | :https | module()
-  @type request_ref() :: XHTTP.ConnBehaviour.request_ref()
-  @type tcp_message() :: XHTTP.ConnBehaviour.tcp_message()
-  @type response() :: XHTTP.ConnBehaviour.response()
-  @type status() :: XHTTP.ConnBehaviour.response()
-  @type headers() :: XHTTP.ConnBehaviour.headers()
+  @type request_ref() :: XHTTPCore.Conn.request_ref()
+  @type tcp_message() :: XHTTPCore.Conn.tcp_message()
+  @type response() :: XHTTPCore.Conn.response()
+  @type status() :: XHTTPCore.Conn.response()
+  @type headers() :: XHTTPCore.Conn.headers()
 
   # TODO: Currently we keep the Host on the conn but we could also supply
   # it on each request so you can use multiple Hosts on a single conn
@@ -47,7 +47,7 @@ defmodule XHTTP1.Conn do
   ]
 
   @doc """
-  Establishes a connection and returns a `%Conn{}` with the connection state.
+  Establishes a connection and returns a `%XHTTP1{}` with the connection state.
   """
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
@@ -68,7 +68,7 @@ defmodule XHTTP1.Conn do
 
   @spec upgrade(
           module(),
-          XHTTP.Transport.socket(),
+          XHTTPCore.Transport.socket(),
           scheme(),
           String.t(),
           :inet.port_number(),
@@ -92,7 +92,7 @@ defmodule XHTTP1.Conn do
   @impl true
   @spec initiate(
           module(),
-          XHTTP.Transport.socket(),
+          XHTTPCore.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -100,7 +100,7 @@ defmodule XHTTP1.Conn do
   def initiate(transport, socket, hostname, _port, _opts) do
     with :ok <- inet_opts(transport, socket),
          :ok <- transport.setopts(socket, active: :once) do
-      conn = %Conn{
+      conn = %XHTTP1{
         transport: transport,
         socket: socket,
         host: hostname,
@@ -123,7 +123,7 @@ defmodule XHTTP1.Conn do
   """
   @impl true
   @spec open?(t()) :: boolean()
-  def open?(%Conn{state: state}), do: state == :open
+  def open?(%XHTTP1{state: state}), do: state == :open
 
   @doc """
   Sends an HTTP request.
@@ -147,12 +147,12 @@ defmodule XHTTP1.Conn do
           | {:error, t(), term()}
   def request(conn, method, path, headers, body \\ nil)
 
-  def request(%Conn{request: %{state: :stream_request}}, _method, _path, _headers, _body) do
+  def request(%XHTTP1{request: %{state: :stream_request}}, _method, _path, _headers, _body) do
     {:error, :request_body_is_streaming}
   end
 
-  def request(%Conn{} = conn, method, path, headers, body) do
-    %Conn{host: host, transport: transport, socket: socket} = conn
+  def request(%XHTTP1{} = conn, method, path, headers, body) do
+    %XHTTP1{host: host, transport: transport, socket: socket} = conn
     iodata = Request.encode(method, path, host, headers, body || "")
 
     case transport.send(socket, iodata) do
@@ -162,11 +162,11 @@ defmodule XHTTP1.Conn do
         request = new_request(request_ref, state, method)
 
         if conn.request == nil do
-          conn = %Conn{conn | request: request}
+          conn = %XHTTP1{conn | request: request}
           {:ok, conn, request_ref}
         else
           requests = :queue.in(request, conn.requests)
-          conn = %Conn{conn | requests: requests}
+          conn = %XHTTP1{conn | requests: requests}
           {:ok, conn, request_ref}
         end
 
@@ -193,11 +193,11 @@ defmodule XHTTP1.Conn do
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
-  def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, :eof) do
+  def stream_request_body(%XHTTP1{request: %{state: :stream_request, ref: ref}} = conn, ref, :eof) do
     {:ok, put_in(conn.request.state, :status)}
   end
 
-  def stream_request_body(%Conn{request: %{state: :stream_request, ref: ref}} = conn, ref, body) do
+  def stream_request_body(%XHTTP1{request: %{state: :stream_request, ref: ref}} = conn, ref, body) do
     case conn.transport.send(conn.socket, body) do
       :ok -> {:ok, conn}
       {:error, :closed} -> {:error, %{conn | state: :closed}, :closed}
@@ -232,39 +232,39 @@ defmodule XHTTP1.Conn do
           {:ok, t(), [response()]}
           | {:error, t(), term(), [response()]}
           | :unknown
-  def stream(%Conn{request: %{state: :stream_request}} = conn, _message) do
+  def stream(%XHTTP1{request: %{state: :stream_request}} = conn, _message) do
     # TODO: Close connection
     {:error, conn, :request_body_not_streamed, []}
   end
 
-  def stream(%Conn{transport: transport, socket: socket} = conn, {tag, socket, data})
+  def stream(%XHTTP1{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
     _ = transport.setopts(socket, active: :once)
     result
   end
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket})
+  def stream(%XHTTP1{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
     handle_close(conn)
   end
 
-  def stream(%Conn{socket: socket} = conn, {tag, socket, reason})
+  def stream(%XHTTP1{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
     handle_error(conn, reason)
   end
 
-  def stream(%Conn{}, _message) do
+  def stream(%XHTTP1{}, _message) do
     :unknown
   end
 
-  defp handle_data(%Conn{request: nil} = conn, data) do
+  defp handle_data(%XHTTP1{request: nil} = conn, data) do
     # TODO: Figure out if we should keep buffering even though there are no
     # requests in flight
     {:ok, put_in(conn.buffer, conn.buffer <> data), []}
   end
 
-  defp handle_data(%Conn{request: request} = conn, data) do
+  defp handle_data(%XHTTP1{request: request} = conn, data) do
     data = conn.buffer <> data
 
     case decode(request.state, conn, data, []) do
@@ -278,7 +278,7 @@ defmodule XHTTP1.Conn do
     end
   end
 
-  defp handle_close(%Conn{request: request} = conn) do
+  defp handle_close(%XHTTP1{request: request} = conn) do
     conn = put_in(conn.state, :closed)
     conn = request_done(conn)
 
@@ -303,7 +303,7 @@ defmodule XHTTP1.Conn do
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
-  def put_private(%Conn{private: private} = conn, key, value) when is_atom(key) do
+  def put_private(%XHTTP1{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
   end
 
@@ -314,7 +314,7 @@ defmodule XHTTP1.Conn do
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
-  def get_private(%Conn{private: private}, key, default \\ nil) when is_atom(key) do
+  def get_private(%XHTTP1{private: private}, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
   end
 
@@ -325,13 +325,13 @@ defmodule XHTTP1.Conn do
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
-  def delete_private(%Conn{private: private} = conn, key) when is_atom(key) do
+  def delete_private(%XHTTP1{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
   end
 
   @impl true
-  @spec get_socket(t()) :: XHTTP.Transport.socket()
-  def get_socket(%Conn{socket: socket}) do
+  @spec get_socket(t()) :: XHTTPCore.Transport.socket()
+  def get_socket(%XHTTP1{socket: socket}) do
     socket
   end
 
@@ -582,7 +582,7 @@ defmodule XHTTP1.Conn do
 
   defp close(conn) do
     if conn.buffer != "" do
-      Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
+      Logger.debug(["XHTTP1ection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
     :ok = conn.transport.close(conn.socket)

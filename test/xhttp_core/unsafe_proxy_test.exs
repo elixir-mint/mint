@@ -1,7 +1,7 @@
-defmodule XHTTP.UnsafeProxyConnTest do
+defmodule XHTTPCore.UnsafeProxyTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTP.UnsafeProxyConn, as: Conn
+  alias XHTTPCore.UnsafeProxy, as: Conn
 
   @moduletag :proxy
 

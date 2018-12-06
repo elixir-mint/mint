@@ -1,4 +1,4 @@
-defmodule XHTTP.Transport do
+defmodule XHTTPCore.Transport do
   @type socket() :: term()
   @type error() :: {:error, reason :: term()}
 

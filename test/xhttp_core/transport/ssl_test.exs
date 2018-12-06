@@ -1,6 +1,6 @@
-defmodule XHTTP.Transport.SSLTest do
+defmodule XHTTPCore.Transport.SSLTest do
   use ExUnit.Case, async: true
-  alias XHTTP.Transport.SSL
+  alias XHTTPCore.Transport.SSL
 
   describe "default ciphers" do
     test "no RSA key exchange" do

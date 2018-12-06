@@ -1,19 +1,18 @@
 defmodule XHTTPN.IntegrationTest do
   use ExUnit.Case, async: true
-  alias XHTTPN.Conn
 
   @moduletag :integration
 
   describe "httpbin.org" do
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
-               Conn.connect(
+               XHTTPN.connect(
                  :https,
                  "httpbin.org",
                  443
                )
 
-      assert {:ok, conn, request} = Conn.request(conn, "GET", "/bytes/1", [], nil)
+      assert {:ok, conn, request} = XHTTPN.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = XHTTP1.TestHelpers.receive_stream(conn)
 
       assert [
@@ -27,15 +26,15 @@ defmodule XHTTPN.IntegrationTest do
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, {:tls_alert, 'no application protocol'}} =
-               Conn.connect(:https, "httpbin.org", 443, protocols: [:http2])
+               XHTTPN.connect(:https, "httpbin.org", 443, protocols: [:http2])
     end
   end
 
   describe "nghttp2.org" do
     test "SSL - select HTTP1" do
-      assert {:ok, conn} = Conn.connect(:https, "nghttp2.org", 443, protocols: [:http1])
+      assert {:ok, conn} = XHTTPN.connect(:https, "nghttp2.org", 443, protocols: [:http1])
 
-      assert {:ok, conn, request} = Conn.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = XHTTPN.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = XHTTP1.TestHelpers.receive_stream(conn)
 
       assert [
@@ -47,9 +46,9 @@ defmodule XHTTPN.IntegrationTest do
     end
 
     test "SSL - select HTTP2" do
-      assert {:ok, conn} = Conn.connect(:https, "nghttp2.org", 443)
+      assert {:ok, conn} = XHTTPN.connect(:https, "nghttp2.org", 443)
 
-      assert {:ok, conn, request} = Conn.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = XHTTPN.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = XHTTP2.TestHelpers.receive_stream(conn)
 
       assert [
@@ -59,8 +58,8 @@ defmodule XHTTPN.IntegrationTest do
                {:done, ^request}
              ] = responses
 
-      # TODO: Should we support HTTP2 throught HTTPN?
-      # assert {:ok, conn, ref} = Conn.ping(conn)
+      # TODO: Should we support HTTP2 specific features throught HTTPN?
+      # assert {:ok, conn, ref} = XHTTPN.ping(conn)
       # assert {:ok, conn, [{:pong, ^ref}]} = XHTTP2.TestHelpers.receive_stream(conn)
     end
   end
@@ -68,7 +67,7 @@ defmodule XHTTPN.IntegrationTest do
   describe "ssl certificate verification" do
     test "bad certificate - badssl.com" do
       assert {:error, {:tls_alert, 'unknown ca'}} =
-               Conn.connect(
+               XHTTPN.connect(
                  :https,
                  "untrusted-root.badssl.com",
                  443,
@@ -76,7 +75,7 @@ defmodule XHTTPN.IntegrationTest do
                )
 
       assert {:ok, _conn} =
-               Conn.connect(
+               XHTTPN.connect(
                  :https,
                  "untrusted-root.badssl.com",
                  443,
@@ -86,7 +85,7 @@ defmodule XHTTPN.IntegrationTest do
 
     test "bad hostname - badssl.com" do
       assert {:error, {:tls_alert, 'handshake failure'}} =
-               Conn.connect(
+               XHTTPN.connect(
                  :https,
                  "wrong.host.badssl.com",
                  443,
@@ -94,7 +93,7 @@ defmodule XHTTPN.IntegrationTest do
                )
 
       assert {:ok, _conn} =
-               Conn.connect(
+               XHTTPN.connect(
                  :https,
                  "wrong.host.badssl.com",
                  443,

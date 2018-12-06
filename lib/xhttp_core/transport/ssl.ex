@@ -1,8 +1,8 @@
-defmodule XHTTP.Transport.SSL do
+defmodule XHTTPCore.Transport.SSL do
   require Logger
   require Record
 
-  @behaviour XHTTP.Transport
+  @behaviour XHTTPCore.Transport
 
   # From RFC7540 appendix A
   @blacklisted_ciphers [
@@ -317,9 +317,9 @@ defmodule XHTTP.Transport.SSL do
   end
 
   @impl true
-  def upgrade(socket, XHTTP.Transport.TCP, hostname, _port, opts) do
+  def upgrade(socket, XHTTPCore.Transport.TCP, hostname, _port, opts) do
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
-    XHTTP.Transport.TCP.setopts(socket, active: false)
+    XHTTPCore.Transport.TCP.setopts(socket, active: false)
 
     case :ssl.connect(socket, ssl_opts(hostname, opts)) do
       {:ok, socket} -> {:ok, {__MODULE__, socket}}
@@ -327,7 +327,7 @@ defmodule XHTTP.Transport.SSL do
     end
   end
 
-  def upgrade(_socket, XHTTP.Transport.SSL, _hostname, _port, _opts) do
+  def upgrade(_socket, XHTTPCore.Transport.SSL, _hostname, _port, _opts) do
     raise "nested SSL sessions are not supported"
   end
 
