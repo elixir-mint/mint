@@ -1,13 +1,7 @@
-defmodule XHTTPN do
-  @moduledoc """
-  Single interface for `XHTTP1` and `XHTTP2` with version negotiation support.
-  """
-
+defmodule XHTTP.Negotiate do
   import XHTTPCore.Util
 
   alias XHTTPCore.Transport
-
-  @behaviour XHTTPCore.Conn
 
   @default_protocols [:http1, :http2]
   @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
@@ -44,31 +38,8 @@ defmodule XHTTPN do
     end
   end
 
-  def get_transport(conn) do
-    conn_module(conn).get_transport(conn)
-  end
-
   def initiate(transport, transport_state, hostname, port, opts),
     do: alpn_negotiate(transport, transport_state, hostname, port, opts)
-
-  def open?(conn), do: conn_module(conn).open?(conn)
-
-  def request(conn, method, path, headers, body \\ nil),
-    do: conn_module(conn).request(conn, method, path, headers, body)
-
-  def stream_request_body(conn, ref, body),
-    do: conn_module(conn).stream_request_body(conn, ref, body)
-
-  def stream(conn, message), do: conn_module(conn).stream(conn, message)
-
-  def put_private(conn, key, value), do: conn_module(conn).put_private(conn, key, value)
-
-  def get_private(conn, key, default \\ nil),
-    do: conn_module(conn).get_private(conn, key, default)
-
-  def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
-
-  def get_socket(conn), do: conn_module(conn).get_socket(conn)
 
   defp transport_connect(Transport.TCP, hostname, port, opts) do
     # TODO: http1 upgrade? Should be explicit since support is not clear
@@ -145,7 +116,4 @@ defmodule XHTTPN do
         {:error, {:bad_alpn_protocol, protocol}}
     end
   end
-
-  defp conn_module(%XHTTP1{}), do: XHTTP1
-  defp conn_module(%XHTTP2{}), do: XHTTP2
 end
