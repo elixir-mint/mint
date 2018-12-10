@@ -13,6 +13,7 @@ defmodule XHTTP.IntegrationTest do
                  443
                )
 
+      assert conn.__struct__ == XHTTP1
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -37,6 +38,7 @@ defmodule XHTTP.IntegrationTest do
     test "SSL - select HTTP1" do
       assert {:ok, conn} = XHTTP.connect(:https, "nghttp2.org", 443, protocols: [:http1])
 
+      assert conn.__struct__ == XHTTP1
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -51,6 +53,7 @@ defmodule XHTTP.IntegrationTest do
     test "SSL - select HTTP2" do
       assert {:ok, conn} = XHTTP.connect(:https, "nghttp2.org", 443)
 
+      assert conn.__struct__ == XHTTP2
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -112,6 +115,7 @@ defmodule XHTTP.IntegrationTest do
       assert {:ok, conn} =
                XHTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8888, []})
 
+      assert conn.__struct__ == XHTTP.UnsafeProxy
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -125,6 +129,7 @@ defmodule XHTTP.IntegrationTest do
       assert {:ok, conn} =
                XHTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})
 
+      assert conn.__struct__ == XHTTP1
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -141,6 +146,7 @@ defmodule XHTTP.IntegrationTest do
                  protocols: [:http2]
                )
 
+      assert conn.__struct__ == XHTTP2
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -157,6 +163,7 @@ defmodule XHTTP.IntegrationTest do
                  protocols: [:http1, :http2]
                )
 
+      assert conn.__struct__ == XHTTP2
       assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
 

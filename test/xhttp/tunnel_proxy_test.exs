@@ -11,6 +11,7 @@ defmodule XHTTP.TunnelProxyTest do
                {:http, "httpbin.org", 80, []}
              )
 
+    assert conn.__struct__ == XHTTP1
     assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -27,6 +28,7 @@ defmodule XHTTP.TunnelProxyTest do
                {:https, "httpbin.org", 443, []}
              )
 
+    assert conn.__struct__ == XHTTP1
     assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -43,6 +45,7 @@ defmodule XHTTP.TunnelProxyTest do
                {:https, "http2.golang.org", 443, [protocols: [:http2]]}
              )
 
+    assert conn.__struct__ == XHTTP2
     assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -59,6 +62,7 @@ defmodule XHTTP.TunnelProxyTest do
                {:https, "http2.golang.org", 443, [protocols: [:http1, :http2]]}
              )
 
+    assert conn.__struct__ == XHTTP2
     assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
