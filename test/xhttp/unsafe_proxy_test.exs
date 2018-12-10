@@ -6,7 +6,8 @@ defmodule XHTTP.UnsafeProxyTest do
   @moduletag :proxy
 
   test "200 response - http://httpbin.org" do
-    assert {:ok, conn} = UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+    assert {:ok, conn} =
+             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
 
     assert {:ok, conn, request} = UnsafeProxy.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
