@@ -1,5 +1,5 @@
-defmodule XHTTPCore.UnsafeProxy do
-  alias XHTTPCore.UnsafeProxy
+defmodule XHTTP.UnsafeProxy do
+  alias XHTTP.UnsafeProxy
 
   @behaviour XHTTPCore.Conn
 

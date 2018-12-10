@@ -1,4 +1,4 @@
-defmodule XHTTPCore.TunnelProxy do
+defmodule XHTTP.TunnelProxy do
   import XHTTPCore.Util
 
   def connect(proxy, host) do
@@ -25,7 +25,7 @@ defmodule XHTTPCore.TunnelProxy do
     {proxy_scheme, _proxy_hostname, _proxy_port, _proxy_opts} = proxy
     transport = scheme_to_transport(proxy_scheme)
     socket = XHTTP1.get_socket(conn)
-    XHTTPN.upgrade(transport, socket, scheme, hostname, port, opts)
+    XHTTP.Negotiate.upgrade(transport, socket, scheme, hostname, port, opts)
   end
 
   defp receive_response(conn, ref) do
@@ -44,7 +44,7 @@ defmodule XHTTPCore.TunnelProxy do
   end
 
   defp stream(conn, ref, msg) do
-    case XHTTPN.stream(conn, msg) do
+    case XHTTP1.stream(conn, msg) do
       {:ok, conn, responses} ->
         case handle_responses(conn, ref, responses) do
           :done -> :ok

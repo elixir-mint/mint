@@ -1,18 +1,17 @@
-defmodule XHTTPCore.TunnelProxyTest do
+defmodule XHTTP.TunnelProxyTest do
   use ExUnit.Case, async: true
   import XHTTP1.TestHelpers
-  alias XHTTPN, as: Conn
 
   @moduletag :proxy
 
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
-             XHTTPCore.TunnelProxy.connect(
+             XHTTP.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:http, "httpbin.org", 80, []}
              )
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -23,12 +22,12 @@ defmodule XHTTPCore.TunnelProxyTest do
 
   test "200 response - https://httpbin.org" do
     assert {:ok, conn} =
-             XHTTPCore.TunnelProxy.connect(
+             XHTTP.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "httpbin.org", 443, []}
              )
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -39,12 +38,12 @@ defmodule XHTTPCore.TunnelProxyTest do
 
   test "200 response with explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
-             XHTTPCore.TunnelProxy.connect(
+             XHTTP.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "http2.golang.org", 443, [protocols: [:http2]]}
              )
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -55,12 +54,12 @@ defmodule XHTTPCore.TunnelProxyTest do
 
   test "200 response without explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
-             XHTTPCore.TunnelProxy.connect(
+             XHTTP.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
                {:https, "http2.golang.org", 443, [protocols: [:http1, :http2]]}
              )
 
-    assert {:ok, conn, request} = Conn.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
