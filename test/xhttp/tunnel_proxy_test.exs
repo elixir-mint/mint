@@ -71,4 +71,22 @@ defmodule XHTTP.TunnelProxyTest do
     assert {:headers, ^request, headers} = headers
     assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
   end
+
+  @tag :skip
+  test "do not support nested HTTPS connections - https://httpbin.org" do
+    assert {:ok, conn} =
+             XHTTP.TunnelProxy.connect(
+               {:https, "localhost", 8888, []},
+               {:https, "httpbin.org", 443, []}
+             )
+
+    assert conn.__struct__ == XHTTP1
+    assert {:ok, conn, request} = XHTTP.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert merge_body(responses, request) =~ "httpbin"
+  end
 end
