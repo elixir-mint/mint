@@ -1,4 +1,6 @@
 defmodule XHTTPCore.Util do
+  @moduledoc false
+
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),
