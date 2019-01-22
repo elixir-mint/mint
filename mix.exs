@@ -26,6 +26,7 @@ defmodule XHTTP.MixProject do
   defp deps do
     [
       {:castore, github: "ericmj/castore"},
+      {:ex_doc, "~> 0.19.3", only: [:dev]},
       {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test},
       {:stream_data, "~> 0.4.0", only: :test}
     ]
