@@ -1,4 +1,6 @@
 defmodule XHTTP2.Frame do
+  @moduledoc false
+
   use Bitwise, skip_operators: true
 
   import Record
