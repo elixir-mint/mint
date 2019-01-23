@@ -153,7 +153,7 @@ defmodule XHTTP2 do
 
   @impl true
   @spec open?(t()) :: boolean()
-  def open?(%XHTTP2{state: state}), do: state == :open
+  def open?(%XHTTP2{state: state} = _conn), do: state == :open
 
   @impl true
   @spec request(
@@ -200,8 +200,8 @@ defmodule XHTTP2 do
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
-  def stream_request_body(%XHTTP2{} = conn, ref, chunk) when is_reference(ref) do
-    stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+  def stream_request_body(%XHTTP2{} = conn, request_ref, chunk) when is_reference(request_ref) do
+    stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
 
     conn =
       if chunk == :eof do
@@ -291,7 +291,7 @@ defmodule XHTTP2 do
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
-  def get_private(%XHTTP2{private: private}, key, default \\ nil) when is_atom(key) do
+  def get_private(%XHTTP2{private: private} = _conn, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
   end
 
@@ -353,7 +353,7 @@ defmodule XHTTP2 do
 
   @impl true
   @spec get_socket(t()) :: XHTTPCore.Transport.socket()
-  def get_socket(%XHTTP2{socket: socket}) do
+  def get_socket(%XHTTP2{socket: socket} = _conn) do
     socket
   end
 
