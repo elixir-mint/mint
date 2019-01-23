@@ -398,6 +398,16 @@ defmodule XHTTP2.XHTTP2Test do
       assert XHTTP2.open?(conn)
     end
 
+    test "trying to send unknown settings fails", %{conn: conn} do
+      assert_raise ArgumentError, ":header_table_size must be an integer, got: :oops", fn ->
+        XHTTP2.put_settings(conn, header_table_size: :oops)
+      end
+
+      assert_raise ArgumentError, "unknown setting parameter :oops", fn ->
+        XHTTP2.put_settings(conn, oops: 1)
+      end
+    end
+
     test "client can read server settings", %{conn: conn} do
       assert XHTTP2.get_setting(conn, :max_concurrent_streams) == 100
       assert XHTTP2.get_setting(conn, :enable_push) == true
