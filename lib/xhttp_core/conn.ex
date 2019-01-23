@@ -13,6 +13,7 @@ defmodule XHTTPCore.Conn do
           | {:headers, request_ref(), headers()}
           | {:data, request_ref(), binary()}
           | {:done, request_ref()}
+          | {:pong, request_ref()}
           | {:error, request_ref(), term()}
   @type status() :: non_neg_integer()
   @type reason() :: String.t()
