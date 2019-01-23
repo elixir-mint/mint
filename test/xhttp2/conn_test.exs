@@ -401,6 +401,10 @@ defmodule XHTTP2.XHTTP2Test do
     test "client can read server settings", %{conn: conn} do
       assert XHTTP2.get_setting(conn, :max_concurrent_streams) == 100
       assert XHTTP2.get_setting(conn, :enable_push) == true
+
+      assert_raise ArgumentError, "unknown HTTP/2 setting: :unknown", fn ->
+        XHTTP2.get_setting(conn, :unknown)
+      end
     end
 
     test "server can update the initial window size and affect open streams", context do

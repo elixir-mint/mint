@@ -237,6 +237,7 @@ defmodule XHTTP2 do
       :max_concurrent_streams -> conn.server_max_concurrent_streams
       :initial_window_size -> conn.initial_window_size
       :max_frame_size -> conn.max_frame_size
+      other -> raise ArgumentError, "unknown HTTP/2 setting: #{inspect(other)}"
     end
   end
 
