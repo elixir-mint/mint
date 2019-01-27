@@ -234,7 +234,7 @@ defmodule XHTTP2 do
   @doc """
   Sends a request to the connected server.
 
-  This function opens a new request to the server that `conn` is connected to.
+  This function sends a new request to the server that `conn` is connected to.
   `method` is a string representing the method for the request, such as `"GET"`
   or `"POST"`. `path` is the path on the host to send the request to. `headers`
   is a list of request headers in the form `{header_name, header_value}` with
