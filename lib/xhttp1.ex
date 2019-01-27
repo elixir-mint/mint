@@ -28,7 +28,7 @@ defmodule XHTTP1 do
 
   @type scheme :: :http | :https | module()
   @type request_ref() :: XHTTPCore.Conn.request_ref()
-  @type tcp_message() :: XHTTPCore.Conn.tcp_message()
+  @type socket_message() :: XHTTPCore.Conn.socket_message()
   @type response() :: XHTTPCore.Conn.response()
   @type status() :: XHTTPCore.Conn.response()
   @type headers() :: XHTTPCore.Conn.headers()
@@ -228,7 +228,7 @@ defmodule XHTTP1 do
   reference `t:request_ref/0` to distinguish them.
   """
   @impl true
-  @spec stream(t(), tcp_message()) ::
+  @spec stream(t(), socket_message()) ::
           {:ok, t(), [response()]}
           | {:error, t(), term(), [response()]}
           | :unknown
