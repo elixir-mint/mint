@@ -504,31 +504,31 @@ defmodule XHTTP2 do
 
   These are the possible responses that can be returned.
 
-    * `{:status, request_ref, status_code}` - this is returned when the server replied
+    * `{:status, request_ref, status_code}` - returned when the server replied
       with a response status code. The status code is a non-negative integer.
 
-    * `{:headers, request_ref, headers}` - this is returned when the server replied
+    * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
       with `header_name` and `header_value` being strings. Note that it's possible
       to receive multiple header responses for the same request, in case the headers
       are sent in separate chunks.
 
-    * `{:data, request_ref, binary}` - this is returned when the server replied with
+    * `{:data, request_ref, binary}` - returned when the server replied with
       a chunk of response body (as a binary). The request shouldn't be considered done
       when a piece of body is received because multiple chunks could be received. The
       request is done when the `:done` response is returned.
 
-    * `{:done, request_ref}` - this is returned when the server signaled the request
+    * `{:done, request_ref}` - returned when the server signaled the request
       as done. When this is received, the response body and headers can be considered
       complete and it can be assumed that no more responses will be received for this
       request. This means that for example, you can stop holding on to the request ref
       for this request.
 
-    * `{:pong, request_ref}` - this is returned when a server replies to a ping
+    * `{:pong, request_ref}` - returned when a server replies to a ping
       request sent by the client. See `ping/2` for more information. This
       response type is HTTP/2-specific.
 
-    * `{:error, request_ref, reason}` - this is returned when there is an error that
+    * `{:error, request_ref, reason}` - returned when there is an error that
       only affects the request and not the whole connection. For example, if the
       server sends bad data on a given request, that request will be closed an an error
       for that request will be returned among the responses, but the connection will
