@@ -256,7 +256,9 @@ defmodule XHTTP2 do
   If there's an error with sending the request, `{:error, conn, reason}` is returned.
   `reason` is the cause of the error. `conn` is an updated connection. It's important
   to store the returned connection over the old connection in case of errors too, because
-  the state of the connection might change when there are errors as well.
+  the state of the connection might change when there are errors as well. An error when
+  sending a request **does not** necessarily mean that the connection is closed. Use
+  `open?/1` to verify that the connection is open.
 
   ## Examples
 
