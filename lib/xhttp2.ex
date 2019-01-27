@@ -511,9 +511,7 @@ defmodule XHTTP2 do
 
     * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
-      with `header_name` and `header_value` being strings. Note that it's possible
-      to receive multiple header responses for the same request, in case the headers
-      are sent in separate chunks.
+      with `header_name` and `header_value` being strings.
 
     * `{:data, request_ref, binary}` - returned when the server replied with
       a chunk of response body (as a binary). The request shouldn't be considered done
