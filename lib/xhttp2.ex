@@ -232,7 +232,7 @@ defmodule XHTTP2 do
   def open?(%XHTTP2{state: state} = _conn), do: state == :open
 
   @doc """
-  Opens a request to the connected server.
+  Sends a request to the connected server.
 
   This function opens a new request to the server that `conn` is connected to.
   `method` is a string representing the method for the request, such as `"GET"`
