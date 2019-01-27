@@ -479,7 +479,7 @@ defmodule XHTTP2 do
   This function processes a "message" which can be any term, but should be
   a message received by the process that owns the connection. **Processing**
   a message means that this function will parse it and check if it's a message
-  that is directed to this connection ,that is, a TCP/SSL message coming on the
+  that is directed to this connection, that is, a TCP/SSL message received on the
   connection's socket. If it is, then this function will parse the message,
   turn it into a list of responses, and possibly take action given the responses.
   As an example of an action that this function could perform, if the server sends
