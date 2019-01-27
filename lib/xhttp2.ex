@@ -307,7 +307,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Streams a piece of request body on the connection or signals the end of the body.
+  Streams a chunk of the request body on the connection or signals the end of the body.
 
   If a request is opened (through `request/5`) with the body as `:stream`, then the
   body can be streamed through this function. The function takes a `conn`, a
