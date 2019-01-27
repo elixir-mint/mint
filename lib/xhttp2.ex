@@ -245,7 +245,7 @@ defmodule XHTTP2 do
 
     * iodata - the body to send for the request.
 
-    * `:stream` - when the value of the body is `:stream`, then the request
+    * `:stream` - when the value of the body is `:stream` the request
       body can be streamed on the connection. See `stream_request_body/3`.
 
   If the request is sent correctly, this function returns `{:ok, conn, request_ref}`.
