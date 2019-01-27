@@ -491,7 +491,7 @@ defmodule XHTTP2 do
   where `conn` is the updated connection, `reason` is the error reason, and `responses`
   is a list of responses that were correctly parsed before the error.
 
-  If the given `message` is not something coming from the connection's socket,
+  If the given `message` is not from the connection's socket,
   this function returns `:unknown`.
 
   ## Responses
