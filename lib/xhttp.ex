@@ -58,6 +58,7 @@ defmodule XHTTP do
   # TODO: deal with this by either having it in the behaviour or not having it at all.
   def get_transport(conn), do: conn_module(conn).get_transport(conn)
 
+  @impl true
   @spec initiate(
           module(),
           XHTTPCore.Transport.socket(),
@@ -68,9 +69,11 @@ defmodule XHTTP do
   def initiate(transport, transport_state, hostname, port, opts),
     do: XHTTP.Negotiate.initiate(transport, transport_state, hostname, port, opts)
 
+  @impl true
   @spec open?(t()) :: boolean()
   def open?(conn), do: conn_module(conn).open?(conn)
 
+  @impl true
   @spec request(
           t(),
           method :: String.t(),
@@ -83,27 +86,33 @@ defmodule XHTTP do
   def request(conn, method, path, headers, body \\ nil),
     do: conn_module(conn).request(conn, method, path, headers, body)
 
+  @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(conn, ref, body),
     do: conn_module(conn).stream_request_body(conn, ref, body)
 
+  @impl true
   @spec stream(t(), socket_message()) ::
           {:ok, t(), [response()]}
           | {:error, t(), term(), [response()]}
           | :unknown
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(conn, key, value), do: conn_module(conn).put_private(conn, key, value)
 
+  @impl true
   @spec get_private(t(), atom(), term()) :: term()
   def get_private(conn, key, default \\ nil),
     do: conn_module(conn).get_private(conn, key, default)
 
+  @impl true
   @spec delete_private(t(), atom()) :: t()
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
+  @impl true
   @spec get_socket(t()) :: XHTTPCore.Transport.socket()
   def get_socket(conn), do: conn_module(conn).get_socket(conn)
 
