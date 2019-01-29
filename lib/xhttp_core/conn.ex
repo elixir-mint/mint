@@ -4,7 +4,7 @@ defmodule XHTTPCore.Conn do
   @type conn() :: term()
 
   @type request_ref() :: reference()
-  @type tcp_message() ::
+  @type socket_message() ::
           {:tcp | :ssl, :gen_tcp.sockeconn(), binary()}
           | {:tcp_closed | :ssl_closed, :gen_tcp.sockeconn()}
           | {:tcp_error | :ssl_error, :gen_tcp.sockeconn(), term()}
@@ -13,6 +13,7 @@ defmodule XHTTPCore.Conn do
           | {:headers, request_ref(), headers()}
           | {:data, request_ref(), binary()}
           | {:done, request_ref()}
+          | {:pong, request_ref()}
           | {:error, request_ref(), term()}
   @type status() :: non_neg_integer()
   @type reason() :: String.t()
@@ -45,7 +46,7 @@ defmodule XHTTPCore.Conn do
   @callback stream_request_body(conn(), request_ref(), iodata() | :eof) ::
               {:ok, conn()} | {:error, conn(), term()}
 
-  @callback stream(conn(), tcp_message()) ::
+  @callback stream(conn(), socket_message()) ::
               {:ok, conn(), [response()]}
               | {:error, conn(), term(), [response()]}
               | :unknown

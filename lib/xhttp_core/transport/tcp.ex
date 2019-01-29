@@ -1,4 +1,6 @@
 defmodule XHTTPCore.Transport.TCP do
+  @moduledoc false
+
   @behaviour XHTTPCore.Transport
 
   @transport_opts [

@@ -1,4 +1,6 @@
 defmodule XHTTPCore.Transport.SSL do
+  @moduledoc false
+
   require Logger
   require Record
 
