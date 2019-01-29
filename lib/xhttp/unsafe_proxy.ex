@@ -21,7 +21,7 @@ defmodule XHTTP.UnsafeProxy do
   @type headers() :: XHTTPCore.Conn.headers()
   @type host_triple :: {scheme(), hostname :: String.t(), :inet.port_number()}
 
-  @spec connect(host_triple(), host_triple(), opts :: Keyword.t()) ::
+  @spec connect(host_triple(), host_triple(), opts :: keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(proxy, host, opts \\ []) do
     {proxy_scheme, proxy_hostname, proxy_port} = proxy
