@@ -136,32 +136,7 @@ defmodule XHTTP2 do
   ## Public interface
 
   @doc """
-  Creates a new HTTP/2 connection to a given server.
-
-  Creates a new `%XHTTP2{}` struct and establishes the connection to the given server,
-  identified by the given `host` and `port` combination. Both HTTP and HTTPS are supported
-  by passing respectively `:http` and `:https` as the `scheme`.
-
-  The connection struct wraps a TCP/SSL socket, which is created once the connection
-  is established inside this function. If HTTP is used, then the created socket is a TCP
-  socket and the `:gen_tcp` module is used to create that socket. If HTTPS is used, then
-  the created socket is an SSL socket and the `:ssl` module is used to create that socket.
-  The socket is created in active mode, which is why it is important to know the type of
-  the socket: messages from the socket will be delivered directly to the process that
-  creates the connection and tagged appropriately (see the `:gen_tcp` and `:ssl` modules).
-
-  ## Options
-
-    * `:transport_opts` - (keyword) options to be given to the transport being used.
-      These options will be merged with some default options that cannot be overridden.
-
-    * `:client_settings` - (keyword) a list of client HTTP/2 settings to send to the
-      server. See `put_settings/2` for more information. This is HTTP/2 specific.
-
-  ## Examples
-
-      {:ok, conn} = XHTTP2.connect(:https, "http2.golang.org", 443)
-
+  Same as `XHTTP.connect/4`, but forces a HTTP/2 connection.
   """
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
@@ -211,60 +186,22 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Checks whether the connection is open.
-
-  This function returns `true` if the connection is open, `false` otherwise. It should
-  be used to check that a connection is open before sending requests or performing
-  operations that involve talking to the server.
-
-  If a connection is not open, it has become useless and you should get rid of it.
-  If you still need a connection to the server, start a new connection with `connect/4`.
-
-  ## Examples
-
-      {:ok, conn} = XHTTP2.connect(:https, "http2.golang.org", 443)
-      XHTTP2.open?(conn)
-      #=> true
-
+  See `XHTTP.open?/1`.
   """
   @impl true
   @spec open?(t()) :: boolean()
   def open?(%XHTTP2{state: state} = _conn), do: state == :open
 
   @doc """
-  Sends a request to the connected server.
+  See `XHTTP.request/5`.
 
-  This function sends a new request to the server that `conn` is connected to.
-  `method` is a string representing the method for the request, such as `"GET"`
-  or `"POST"`. `path` is the path on the host to send the request to. `headers`
-  is a list of request headers in the form `{header_name, header_value}` with
-  `header_name` and `header_value` being strings. `body` can have one of three
-  values:
-
-    * `nil` - no body is sent with the request. This is the default value.
-
-    * iodata - the body to send for the request.
-
-    * `:stream` - when the value of the body is `:stream` the request
-      body can be streamed on the connection. See `stream_request_body/3`.
-
-  If the request is sent correctly, this function returns `{:ok, conn, request_ref}`.
-  `conn` is an updated connection that should be stored over the old connection.
-  `request_ref` is a unique reference that can be used to match on responses for this
-  request that are returned by `stream/2`. See `stream/2` for more information.
-
-  If there's an error with sending the request, `{:error, conn, reason}` is returned.
-  `reason` is the cause of the error. `conn` is an updated connection. It's important
-  to store the returned connection over the old connection in case of errors too, because
-  the state of the connection might change when there are errors as well. An error when
-  sending a request **does not** necessarily mean that the connection is closed. Use
-  `open?/1` to verify that the connection is open.
-
-  ## Examples
-
-      XHTTP2.request(conn, "GET", "/", _headers = [])
-      XHTTP2.request(conn, "POST", "/path", [{"Content-Type", "application/json"}], "{}")
-
+  In HTTP/2, opening a request means opening a new HTTP/2 stream (see the
+  module documentation). This means that a request could fail because the
+  maximum number of concurrent streams allowed by the server has been reached.
+  In that case, the error reason `{:max_concurrent_streams_reached, value}` is
+  returned where `value` is the maximum number of concurrent streams possible.
+  If you want to avoid incurring in this error, you can retrieve the value of
+  the maximum number of concurrent streams through `get_setting/2`.
   """
   @impl true
   @spec request(
@@ -309,35 +246,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Streams a chunk of the request body on the connection or signals the end of the body.
-
-  If a request is opened (through `request/5`) with the body as `:stream`, then the
-  body can be streamed through this function. The function takes a `conn`, a
-  `request_ref` returned by `request/5` to identify the request to stream the body for,
-  and a chunk of body to stream. The value of chunk can be:
-
-    * iodata - a chunk of iodata is transmitted to the server as part of the body
-      of the request.
-
-    * `:eof` - signals the end of the streaming of the request body for the given
-      request. Usually the server won't send any reply until this is sent.
-
-  Users should send the appropriate request headers to indicate the length of
-  the message body.
-
-  This function always returns an updated connection to be stored over the old connection.
-
-  ## Examples
-
-  Let's see an example of streaming an empty JSON object (`{}`) by streaming one curly
-  brace at a time.
-
-      headers = [{"Content-Type", "application/json"}, {"Content-Length", "2"}]
-      {:ok, request_ref, conn} = XHTTP2.request(conn, "POST", "/", headers, :stream)
-      {:ok, conn} = XHTTP2.stream_request_body(conn, request_ref, "{")
-      {:ok, conn} = XHTTP2.stream_request_body(conn, request_ref, "}")
-      {:ok, conn} = XHTTP2.stream_request_body(conn, request_ref, :eof)
-
+  See `XHTTP.stream_request_body/3`.
   """
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
@@ -479,98 +388,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Streams the next batch of responses from the given message.
-
-  This function processes a "message" which can be any term, but should be
-  a message received by the process that owns the connection. **Processing**
-  a message means that this function will parse it and check if it's a message
-  that is directed to this connection, that is, a TCP/SSL message received on the
-  connection's socket. If it is, then this function will parse the message,
-  turn it into a list of responses, and possibly take action given the responses.
-  As an example of an action that this function could perform, if the server sends
-  a ping request this function will transparently take care of pinging the server back.
-
-  If there's no error, this function returns `{:ok, conn, responses}` where `conn` is
-  the updated connection and `responses` is a list of responses. See the "Responses"
-  section below. If there's an error, `{:error, conn, reason, responses}` is returned,
-  where `conn` is the updated connection, `reason` is the error reason, and `responses`
-  is a list of responses that were correctly parsed before the error.
-
-  If the given `message` is not from the connection's socket,
-  this function returns `:unknown`.
-
-  ## Responses
-
-  Each possible response returned by this function is a tuple with two or more elements.
-  The first element is always an atom that identifies the kind of response. The second
-  element is a unique reference that identifies the request that the response belongs to.
-  This is the term returned by `request/5`. After these two elements, there can be
-  response-specific terms as well, documented below.
-
-  These are the possible responses that can be returned.
-
-    * `{:status, request_ref, status_code}` - returned when the server replied
-      with a response status code. The status code is a non-negative integer.
-
-    * `{:headers, request_ref, headers}` - returned when the server replied
-      with a list of headers. Headers are in the form `{header_name, header_value}`
-      with `header_name` and `header_value` being strings.
-
-    * `{:data, request_ref, binary}` - returned when the server replied with
-      a chunk of response body (as a binary). The request shouldn't be considered done
-      when a piece of body is received because multiple chunks could be received. The
-      request is done when the `:done` response is returned.
-
-    * `{:done, request_ref}` - returned when the server signaled the request
-      as done. When this is received, the response body and headers can be considered
-      complete and it can be assumed that no more responses will be received for this
-      request. This means that for example, you can stop holding on to the request ref
-      for this request.
-
-    * `{:pong, request_ref}` - returned when a server replies to a ping
-      request sent by the client. See `ping/2` for more information. This
-      response type is HTTP/2-specific.
-
-    * `{:error, request_ref, reason}` - returned when there is an error that
-      only affects the request and not the whole connection. For example, if the
-      server sends bad data on a given request, that request will be closed an an error
-      for that request will be returned among the responses, but the connection will
-      remain alive and well.
-
-  Responses are not grouped in any particular order. For example, sometimes `stream/2`
-  might return a `:status` and a `:headers` response together in the same list of responses,
-  while sometimes they might be returned from separate `stream/2` calls. This holds for
-  all responses.
-
-  ## Examples
-
-  Let's assume we have a function called `receive_next_and_stream/1` that takes
-  a connection and then receives the next message, calls `stream/2` with that message
-  as an argument, and then returns the result of `stream/2`:
-
-      defp receive_next_and_stream(conn) do
-        receive do
-          message -> XHTTP2.stream(conn, message)
-        end
-      end
-
-  Now, we can see an example of a workflow involving `stream/2`.
-
-      {:ok, request_ref, conn} = XHTTP2.request(conn, "GET", "/", _headers = [])
-
-      {:ok, conn, responses} = receive_next_and_stream(conn)
-      responses
-      #=> [{:status, ^request_ref, 200}]
-
-      {:ok, conn, responses} = receive_next_and_stream(conn)
-      responses
-      #=> [{:headers, ^request_ref, [{"Content-Type", "application/json"}]},
-      #=>  {:data, ^request_ref, "{"}]
-
-      {:ok, conn, responses} = receive_next_and_stream(conn)
-      responses
-      #=> [{:data, ^request_ref, "}"}, {:done, ^request_ref}]
-
+  See `XHTTP.stream/2`.
   """
   @impl true
   @spec stream(t(), socket_message()) ::
@@ -604,24 +422,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Assigns a new private key and value in the connection.
-
-  This storage is meant to be used to associate metadata with the connection and
-  it can be useful when handling multiple connections.
-
-  The given `key` must be an atom, while the given `value` can be an arbitrary
-  term. The return value of this function is an updated connection.
-
-  See also `get_private/3` and `delete_private/2`.
-
-  ## Examples
-
-  Let's see an example of putting a value and then getting it:
-
-      conn = XHTTP2.put_private(conn, :client_name, "XHTTP")
-      XHTTP2.get_private(conn, :client_name)
-      #=> "XHTTP"
-
+  See `XHTTP.put_private/3`.
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
@@ -630,24 +431,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Gets a private value from the connection.
-
-  Retrieves a private value previously set with `put_private/3` from the connection.
-  `key` is the key under which the value to retrieve is stored. `default` is a default
-  value returned in case there's no value under the given key.
-
-  See also `put_private/3` and `delete_private/2`.
-
-  ## Examples
-
-      conn = XHTTP2.put_private(conn, :client_name, "XHTTP")
-
-      XHTTP2.get_private(conn, :client_name)
-      #=> "XHTTP"
-
-      XHTTP2.get_private(conn, :non_existent)
-      #=> nil
-
+  See `XHTTP.get_private/3`.
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
@@ -656,24 +440,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Deletes a value in the private store.
-
-  Deletes the private value stored under `key` in the connection. Returns the
-  updated connection.
-
-  See also `put_private/3` and `get_private/3`.
-
-  ## Examples
-
-      conn = XHTTP2.put_private(conn, :client_name, "XHTTP")
-
-      XHTTP2.get_private(conn, :client_name)
-      #=> "XHTTP"
-
-      conn = XHTTP2.delete_private(conn, :client_name)
-      XHTTP2.get_private(conn, :client_name)
-      #=> nil
-
+  See `XHTTP.delete_private/2`.
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
@@ -728,17 +495,7 @@ defmodule XHTTP2 do
   end
 
   @doc """
-  Gets the underlying TCP/SSL socket from the connection.
-
-  Right now there is no built-in way to tell if the socket being retrieved
-  is a `:gen_tcp` or an `:ssl` socket. You can store the transport (`:http`
-  or `:https`) you're using in the private store when starting the connection.
-  See `put_private/3` and `get_private/3`.
-
-  ## Examples
-
-      socket = XHTTP2.get_socket(conn)
-
+  See `XHTTP.get_socket/1`.
   """
   @impl true
   @spec get_socket(t()) :: XHTTPCore.Transport.socket()
