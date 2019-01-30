@@ -322,6 +322,9 @@ defmodule XHTTP2 do
     * `:eof` - signals the end of the streaming of the request body for the given
       request. Usually the server won't send any reply until this is sent.
 
+  Users should send the appropriate request headers to indicate the length of
+  the message body.
+
   This function always returns an updated connection to be stored over the old connection.
 
   ## Examples
@@ -329,7 +332,7 @@ defmodule XHTTP2 do
   Let's see an example of streaming an empty JSON object (`{}`) by streaming one curly
   brace at a time.
 
-      headers = [{"Content-Type", "application/json"}]
+      headers = [{"Content-Type", "application/json"}, {"Content-Length", "2"}]
       {:ok, request_ref, conn} = XHTTP2.request(conn, "POST", "/", headers, :stream)
       {:ok, conn} = XHTTP2.stream_request_body(conn, request_ref, "{")
       {:ok, conn} = XHTTP2.stream_request_body(conn, request_ref, "}")
