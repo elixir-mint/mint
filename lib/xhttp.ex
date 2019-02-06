@@ -329,6 +329,11 @@ defmodule XHTTP do
 
   This function always returns an updated connection to be stored over the old connection.
 
+  When streaming the request body, XHTTP cannot send a precalculated `content-length`
+  request header. It is up to you set the correct headers depending on how you stream
+  the body, either by setting the `content-length` header yourself or by using the
+  appropriate transfer encoding if using HTTP/1.1.
+
   ## Examples
 
   Let's see an example of streaming an empty JSON object (`{}`) by streaming one curly
