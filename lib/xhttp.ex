@@ -79,7 +79,7 @@ defmodule XHTTP do
   we use this HTTP client. Usually, you will want to create this data structure
   in a process that acts as *connection manager*. Sometimes, you might want to
   have a single process responsible for multiple connections, either to just one
-  host or different hosts. For more discussion on architectures based off of this
+  host or multiple hosts. For more discussion on architectures based off of this
   HTTP client, see the [TODO architecture] page in the docs.
   """
 
@@ -105,7 +105,7 @@ defmodule XHTTP do
   identified by the given `host` and `port` combination. Both HTTP and HTTPS are supported
   by passing respectively `:http` and `:https` as the `scheme`.
 
-  The connection struct wraps a TCP/SSL socket, which is created once the connection
+  The connection struct wraps a socket, which is created once the connection
   is established inside this function. If HTTP is used, then the created socket is a TCP
   socket and the `:gen_tcp` module is used to create that socket. If HTTPS is used, then
   the created socket is an SSL socket and the `:ssl` module is used to create that socket.
@@ -168,7 +168,7 @@ defmodule XHTTP do
 
   Using a proxy:
 
-      proxy = {:https, "myproxy.example.com", 443, []}
+      proxy = {:http, "myproxy.example.com", 80, []}
       {:ok, conn} = XHTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
 
   Forcing the connection to be an HTTP/2 connection:
