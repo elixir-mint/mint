@@ -333,7 +333,7 @@ defmodule XHTTP do
   Let's see an example of streaming an empty JSON object (`{}`) by streaming one curly
   brace at a time.
 
-      headers = [{"Content-Type", "application/json"}, {"Content-Length", "2"}]
+      headers = [{"content-type", "application/json"}, {"content-length", "2"}]
       {:ok, request_ref, conn} = XHTTP.request(conn, "POST", "/", headers, :stream)
       {:ok, conn} = XHTTP.stream_request_body(conn, request_ref, "{")
       {:ok, conn} = XHTTP.stream_request_body(conn, request_ref, "}")
