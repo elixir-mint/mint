@@ -788,7 +788,7 @@ defmodule XHTTP1 do
 
   defp close(conn) do
     if conn.buffer != "" do
-      Logger.debug(["XHTTP1ection closed with data left in the buffer: ", inspect(conn.buffer)])
+      Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
     :ok = conn.transport.close(conn.socket)
