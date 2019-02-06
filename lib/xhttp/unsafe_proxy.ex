@@ -1,4 +1,6 @@
 defmodule XHTTP.UnsafeProxy do
+  @moduledoc false
+
   alias XHTTP.UnsafeProxy
 
   @behaviour XHTTPCore.Conn

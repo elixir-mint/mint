@@ -1,4 +1,6 @@
 defmodule XHTTP.TunnelProxy do
+  @moduledoc false
+
   import XHTTPCore.Util
 
   def connect(proxy, host) do
