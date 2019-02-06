@@ -10,7 +10,8 @@ defmodule XHTTP do
   To establish a connection with a given server, use `connect/4`. This will
   return an opaque data structure, `%XHTTP{}`, that represents the connection
   to the server. To send a request, you can use `request/5`. Sending a request
-  does not take care of the response to that request, instead we use `XHTTP.stream/2` to process the response, which we will look at in just a bit. The connection is a
+  does not take care of the response to that request, instead we use `XHTTP.stream/2`
+  to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
   set in **active mode**. This means that TCP/SSL messages will be delivered to
   the process that started the connection and created the `%XHTTP{}` data structure.
@@ -31,12 +32,8 @@ defmodule XHTTP do
 
       {:ok, conn} = XHTTP.connect(:http, "httpbin.org", 80)
 
-  `conn` is a `%XHTTP{}` data structure that represents the connection. This
-  data structure is a wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl`
-  module) socket that is set in **active mode**. This means that TCP/SSL messages
-  will be delivered to the process that started the connection.
-
-  To send a request, we use `request/5`.
+  `conn` is a `%XHTTP{}` data structure that represents the connection. To send a request,
+  we use `request/5`.
 
       {:ok, conn, request_ref} = XHTTP.request(conn, "GET", "/", [], nil)
 
