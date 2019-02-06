@@ -1,4 +1,6 @@
 defmodule XHTTP.Negotiate do
+  @moduledoc false
+
   import XHTTPCore.Util
 
   alias XHTTPCore.Transport
