@@ -48,7 +48,7 @@ defmodule XHTTP do
   request a given response belongs to.
 
   Now that we sent our request, we're responsible for receiving the messages that
-  the TCP/SSL socket is going to send to our process. For example, in a GenServer
+  the TCP/SSL socket will send to our process. For example, in a GenServer
   we would do that with a `handle_info/2` callback. In our case, we're going to
   use a simple `receive`. `XHTTP` provides a way to tell if a message comes
   from the socket wrapped by our connection or not: the `stream/2` function. If
