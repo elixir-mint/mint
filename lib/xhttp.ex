@@ -43,7 +43,7 @@ defmodule XHTTP do
   As you can see, sending a request returns a new updated `conn` struct and a
   `request_ref`. The updated connection struct is returned because the connection
   is an immutable piece of data, so every action we do on it must return a new,
-  possibly updated, piece of data that we're responsible for storing over the old
+  possibly updated, connection that we're responsible for storing over the old
   one. `request_ref` is a unique reference that can be used to identify which
   request a given response belongs to.
 
