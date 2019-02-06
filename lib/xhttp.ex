@@ -119,14 +119,14 @@ defmodule XHTTP do
       These options will be merged with some default options that cannot be overridden.
 
     * `:protocols` - (list of atoms) a list of protocols to try when connecting to the
-      server. The possible values in the list are `:http1` for HTTP/1.1 and `:http2` for
-      HTTP/2. If only one protocol is present in the list, then the connection will
-      be forced to use that protocol. If both `:http1` and `:http2` are present in the
+      server. The possible values in the list are `:http1` for HTTP/1 and HTTP/1.1 and
+      `:http2` for HTTP/2. If only one protocol is present in the list, then the connection
+      will be forced to use that protocol. If both `:http1` and `:http2` are present in the
       list, then XHTTP will negotiate the protocol. See the section "Protocol negotiation"
       below for more information. Defaults to `[:http1, :http2]`.
 
-  The following options are HTTP/1.1-specific and will force the connection
-  to be an HTTP/1.1 connection.
+  The following options are HTTP/1-specific and will force the connection
+  to be an HTTP/1 connection.
 
     * `:proxy` - a `{scheme, hostname, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.
@@ -141,12 +141,12 @@ defmodule XHTTP do
   If both `:http1` and `:http2` are present in the list passed in the `:protocol` options,
   the protocol negotiation happens in the following way:
 
-    * If the scheme used to connect to the server is `:http`, then HTTP/1.1 is used.
+    * If the scheme used to connect to the server is `:http`, then HTTP/1 or HTTP/1.1 is used.
 
     * If the scheme is `:https`, then ALPN negotiation is used to determine the right
-      protocol. This means that the server will decide whether to use HTTP/1.1 or
+      protocol. This means that the server will decide whether to use HTTP/1 or
       HTTP/2. If the server doesn't support protocol negotiation, we will fall back to
-      HTTP/1.1. If the server negotiates a protocol that we don't know how to handle,
+      HTTP/1. If the server negotiates a protocol that we don't know how to handle,
       `{:error, {:bad_alpn_protocol, protocol}}` is returned.
 
   ## Proxying
@@ -154,7 +154,7 @@ defmodule XHTTP do
   You can set up proxying through the `:proxy` option, which is a tuple
   `{scheme, hostname, port, opts}` that identifies the proxy to connect to.
   Once a proxied connection is returned, the proxy is transparent to you and you
-  can use the connection like a normal HTTP/1.1 connection.
+  can use the connection like a normal HTTP/1 connection.
 
   If the `scheme` is `:http`, we will connect to the host in the most compatible
   way, supporting older proxy servers. Data will be sent in clear text.
@@ -266,7 +266,7 @@ defmodule XHTTP do
 
     * `:stream` - when the value of the body is `:stream` the request
       body can be streamed on the connection. See `stream_request_body/3`.
-      In HTTP/1.1, you can't open a request if the body of another request is
+      In HTTP/1, you can't open a request if the body of another request is
       streaming.
 
   If the request is sent correctly, this function returns `{:ok, conn, request_ref}`.
@@ -285,7 +285,7 @@ defmodule XHTTP do
   before the next request can be sent. It is up to users to verify that the
   server supports pipelining and that the request is safe to pipeline.
 
-  In HTTP/1.1, you can't open a request if the body of another request is streaming.
+  In HTTP/1, you can't open a request if the body of another request is streaming.
   See `XHTTP1.request/5` for more information.
 
   For a quick discussion on HTTP/2 streams and requests, see the `XHTTP2` module and
@@ -329,7 +329,7 @@ defmodule XHTTP do
   When streaming the request body, XHTTP cannot send a precalculated `content-length`
   request header. It is up to you set the correct headers depending on how you stream
   the body, either by setting the `content-length` header yourself or by using the
-  appropriate transfer encoding if using HTTP/1.1.
+  appropriate transfer encoding if using HTTP/1.
 
   ## Examples
 
@@ -407,7 +407,7 @@ defmodule XHTTP do
 
     * `{:pong, request_ref}` - returned when a server replies to a ping
       request sent by the client. This response type is HTTP/2-specific
-      and will never be returned by an HTTP/1.1 connection. See `XHTTP2.ping/2`
+      and will never be returned by an HTTP/1 connection. See `XHTTP2.ping/2`
       for more information.
 
   ## Examples

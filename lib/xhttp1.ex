@@ -1,15 +1,15 @@
 defmodule XHTTP1 do
   @moduledoc """
-  Processless HTTP client with support for HTTP/1.1.
+  Processless HTTP client with support for HTTP/1 and HTTP/1.1.
 
-  This module provides a data structure that represents an HTTP/1.1 connection to
+  This module provides a data structure that represents an HTTP/1 or HTTP/1.1 connection to
   a given server. The connection is represented as an opaque struct `%XHTTP1{}`.
   The connection is a data structure and is not backed by a process, and all the
   connection handling happens in the process that creates the struct.
 
   This module and data structure work exactly like the ones described in the `XHTTP`
-  module, with the exception that `XHTTP1` specifically deals with HTTP/1.1 while
-  `XHTTP` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
+  module, with the exception that `XHTTP1` specifically deals with HTTP/1 and HTTP/1.1 while
+  `XHTTP` deals seamlessly with HTTP/1, HTTP/1.1, and HTTP/2. For more information on
   how to use the data structure and client architecture, see `XHTTP`.
   """
 
@@ -44,7 +44,7 @@ defmodule XHTTP1 do
   ]
 
   @doc """
-  Same as `XHTTP.connect/4`, but forces an HTTP/1.1 connection.
+  Same as `XHTTP.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
 
   This function doesn't support proxying.
   """
@@ -128,7 +128,7 @@ defmodule XHTTP1 do
   @doc """
   See `XHTTP.request/5`.
 
-  In HTTP/1.1, you can't open a new request if you're streaming the body of
+  In HTTP/1 and HTTP/1.1, you can't open a new request if you're streaming the body of
   another request. If you try, the error reason `{:error, :request_body_is_streaming}` is
   returned.
   """
