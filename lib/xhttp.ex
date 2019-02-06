@@ -10,7 +10,7 @@ defmodule XHTTP do
   To establish a connection with a given server, use `connect/4`. This will
   return an opaque data structure, `%XHTTP{}`, that represents the connection
   to the server. To send a request, you can use `request/5`. Sending a request
-  does not take care of the response to that request. The connection is a
+  does not take care of the response to that request, instead we use `XHTTP.stream/2` to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
   set in **active mode**. This means that TCP/SSL messages will be delivered to
   the process that started the connection and created the `%XHTTP{}` data structure.
