@@ -217,10 +217,6 @@ defmodule XHTTP do
   def upgrade(old_transport, transport_state, scheme, hostname, port, opts),
     do: XHTTP.Negotiate.upgrade(old_transport, transport_state, scheme, hostname, port, opts)
 
-  # TODO: deal with this by either having it in the behaviour or not having it at all.
-  @doc false
-  def get_transport(conn), do: conn_module(conn).get_transport(conn)
-
   @doc false
   @impl true
   @spec initiate(
