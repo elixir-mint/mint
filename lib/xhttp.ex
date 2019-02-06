@@ -72,6 +72,7 @@ defmodule XHTTP do
 
   As you can see, all responses have the unique request reference as the second
   element of the tuple, so that we know which request the response belongs to.
+  See `t:XHTTP.responses/0` for the full list of responses returned by `XHTTP.stream/2`.
 
   ## Architecture
 
