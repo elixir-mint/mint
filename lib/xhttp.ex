@@ -157,11 +157,13 @@ defmodule XHTTP do
   Once a proxied connection is returned, the proxy is transparent to you and you
   can use the connection like a normal HTTP/1.1 connection.
 
-  If the `scheme` is `:http`, we will use an unsafe proxy to connect to
-  the given host.
+  If the `scheme` is `:http`, we will connect to the host in the most compatible
+  way, supporting older proxy servers. Data will be sent in clear text.
 
-  If the scheme is `:https`, we will use a tunnel proxy to connect to the
-  given host.
+  If the connection scheme is `:https`, we will connect to the host with a tunnel
+  through the proxy. Using `:https` for both the proxy and the connection scheme
+  is not supported, it is recommended to use `:https` for the end host connection
+  instead of the proxy.
 
   ## Examples
 
