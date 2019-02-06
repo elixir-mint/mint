@@ -296,7 +296,7 @@ defmodule XHTTP do
   ## Examples
 
       XHTTP.request(conn, "GET", "/", _headers = [])
-      XHTTP.request(conn, "POST", "/path", [{"Content-Type", "application/json"}], "{}")
+      XHTTP.request(conn, "POST", "/path", [{"content-type", "application/json"}], "{}")
 
   """
   @impl true
