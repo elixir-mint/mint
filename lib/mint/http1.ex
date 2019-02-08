@@ -15,6 +15,7 @@ defmodule Mint.HTTP1 do
 
   import Mint.Core.Util
 
+  alias Mint.Types
   alias Mint.HTTP1.{Parse, Request, Response}
 
   require Logger
@@ -22,13 +23,6 @@ defmodule Mint.HTTP1 do
   @behaviour Mint.Core.Conn
 
   @opaque t() :: %__MODULE__{}
-
-  @type scheme :: :http | :https | module()
-  @type request_ref() :: Mint.Core.Conn.request_ref()
-  @type socket_message() :: Mint.Core.Conn.socket_message()
-  @type response() :: Mint.Core.Conn.response()
-  @type status() :: Mint.Core.Conn.response()
-  @type headers() :: Mint.Core.Conn.headers()
 
   # TODO: Currently we keep the Host on the conn but we could also supply
   # it on each request so you can use multiple Hosts on a single conn
@@ -48,7 +42,7 @@ defmodule Mint.HTTP1 do
 
   This function doesn't support proxying.
   """
-  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
     # TODO: Also ALPN negotiate HTTP1?
@@ -71,7 +65,7 @@ defmodule Mint.HTTP1 do
   @spec upgrade(
           module(),
           Mint.Core.Transport.socket(),
-          scheme(),
+          Types.scheme(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -137,10 +131,10 @@ defmodule Mint.HTTP1 do
           t(),
           method :: String.t(),
           path :: String.t(),
-          headers(),
+          Types.headers(),
           body :: iodata() | nil | :stream
         ) ::
-          {:ok, t(), request_ref()}
+          {:ok, t(), Types.request_ref()}
           | {:error, t(), term()}
   def request(conn, method, path, headers, body \\ nil)
 
@@ -188,7 +182,7 @@ defmodule Mint.HTTP1 do
   See `Mint.HTTP.stream_request_body/3`.
   """
   @impl true
-  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(
         %__MODULE__{request: %{state: :stream_request, ref: ref}} = conn,
@@ -214,9 +208,9 @@ defmodule Mint.HTTP1 do
   See `Mint.HTTP.stream/2`.
   """
   @impl true
-  @spec stream(t(), socket_message()) ::
-          {:ok, t(), [response()]}
-          | {:error, t(), term(), [response()]}
+  @spec stream(t(), term()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), term(), [Types.response()]}
           | :unknown
   def stream(conn, message)
 

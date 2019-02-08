@@ -69,7 +69,7 @@ defmodule Mint.HTTP do
 
   As you can see, all responses have the unique request reference as the second
   element of the tuple, so that we know which request the response belongs to.
-  See `t:Mint.HTTP.response/0` for the full list of responses returned by `Mint.HTTP.stream/2`.
+  See `t:Mint.Types.response/0` for the full list of responses returned by `Mint.HTTP.stream/2`.
 
   ## Architecture
 
@@ -83,18 +83,12 @@ defmodule Mint.HTTP do
 
   import Mint.Core.Util
 
-  alias Mint.{TunnelProxy, UnsafeProxy}
+  alias Mint.{Types, TunnelProxy, UnsafeProxy}
   alias Mint.Core.Transport
 
   @behaviour Mint.Core.Conn
 
   @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
-
-  @type scheme() :: :http | :https | module()
-  @type headers() :: Mint.Core.Conn.headers()
-  @type request_ref() :: Mint.Core.Conn.request_ref()
-  @type socket_message() :: Mint.Core.Conn.socket_message()
-  @type response() :: Mint.Core.Conn.response()
 
   @doc """
   Creates a new connection to a given server.
@@ -178,7 +172,7 @@ defmodule Mint.HTTP do
       {:ok, conn} = Mint.HTTP.connect(:https, "http2.golang.org", 443, protocols: [:http2])
 
   """
-  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
     # TODO: Proxy auth
@@ -209,7 +203,7 @@ defmodule Mint.HTTP do
   @spec upgrade(
           module(),
           Mint.Core.Transport.socket(),
-          scheme(),
+          Types.scheme(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -302,10 +296,10 @@ defmodule Mint.HTTP do
           t(),
           method :: String.t(),
           path :: String.t(),
-          headers(),
+          Types.headers(),
           body :: iodata() | nil | :stream
         ) ::
-          {:ok, t(), request_ref()}
+          {:ok, t(), Types.request_ref()}
           | {:error, t(), term()}
   def request(conn, method, path, headers, body \\ nil),
     do: conn_module(conn).request(conn, method, path, headers, body)
@@ -344,7 +338,7 @@ defmodule Mint.HTTP do
 
   """
   @impl true
-  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(conn, ref, body),
     do: conn_module(conn).stream_request_body(conn, ref, body)
@@ -441,9 +435,9 @@ defmodule Mint.HTTP do
 
   """
   @impl true
-  @spec stream(t(), socket_message()) ::
-          {:ok, t(), [response()]}
-          | {:error, t(), term(), [response()]}
+  @spec stream(t(), term()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), term(), [Types.response()]}
           | :unknown
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 

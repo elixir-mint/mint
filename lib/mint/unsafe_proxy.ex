@@ -1,7 +1,7 @@
 defmodule Mint.UnsafeProxy do
   @moduledoc false
 
-  alias Mint.UnsafeProxy
+  alias Mint.{Types, UnsafeProxy}
 
   @behaviour Mint.Core.Conn
 
@@ -15,13 +15,7 @@ defmodule Mint.UnsafeProxy do
 
   @opaque t() :: %UnsafeProxy{}
 
-  @type scheme :: :http | :https | module()
-  @type request_ref() :: Mint.Core.Conn.request_ref()
-  @type socket_message() :: Mint.Core.Conn.socket_message()
-  @type response() :: Mint.Core.Conn.response()
-  @type status() :: Mint.Core.Conn.response()
-  @type headers() :: Mint.Core.Conn.headers()
-  @type host_triple :: {scheme(), hostname :: String.t(), :inet.port_number()}
+  @type host_triple() :: {Types.scheme(), hostname :: String.t(), :inet.port_number()}
 
   @spec connect(host_triple(), host_triple(), opts :: keyword()) ::
           {:ok, t()} | {:error, term()}
@@ -63,12 +57,12 @@ defmodule Mint.UnsafeProxy do
   @impl true
   @spec request(
           t(),
-          method :: atom | String.t(),
+          method :: String.t(),
           path :: String.t(),
-          headers(),
+          Types.headers(),
           body :: iodata() | nil | :stream
         ) ::
-          {:ok, t(), request_ref()}
+          {:ok, t(), Types.request_ref()}
           | {:error, t(), term()}
   def request(
         %UnsafeProxy{module: module, state: state} = conn,
@@ -86,7 +80,7 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
-  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(%UnsafeProxy{module: module, state: state} = conn, ref, body) do
     case module.stream_request_body(state, ref, body) do
@@ -96,9 +90,9 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
-  @spec stream(t(), socket_message()) ::
-          {:ok, t(), [response()]}
-          | {:error, t(), term(), [response()]}
+  @spec stream(t(), term()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), term(), [Types.response()]}
           | :unknown
   def stream(%UnsafeProxy{module: module, state: state} = conn, message) do
     case module.stream(state, message) do
