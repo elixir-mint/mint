@@ -1,4 +1,4 @@
-defmodule Mint.HTTP2.Mint.HTTP2Test do
+defmodule Mint.HTTP2Test do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.Frame

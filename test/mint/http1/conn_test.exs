@@ -1,4 +1,4 @@
-defmodule Mint.HTTP1.Mint.HTTP1Test do
+defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
   alias Mint.{HTTP1, HTTP1.TestServer}
