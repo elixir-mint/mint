@@ -13,13 +13,13 @@ The two connection API exists in two modules, `Mint.HTTP1` and `Mint.HTTP2` with
 This API represents a connection with a single `conn` struct and are started by running:
 
 ```elixir
-{:ok, conn} = Mint.connect("example.com", 80)
+{:ok, conn} = Mint.HTTP.connect("example.com", 80)
 ```
 
 Requests are sent with:
 
 ```elixir
-{:ok, conn} = Mint.request(conn, "GET", "/", [], "")
+{:ok, conn} = Mint.HTTP.request(conn, "GET", "/", [], "")
 ```
 
 The connection socket runs in [active mode](http://erlang.org/doc/man/inet.html#setopts-2), that means the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002) and pass them to the connection struct:
@@ -34,12 +34,12 @@ The connection API is stateless, this means that you need to make sure to always
 
 ```elixir
 # Wrong
-{:ok, _conn} = Mint.request(conn, "GET", "/foo", [], "")
-{:ok, conn} = Mint.request(conn, "GET", "/bar", [], "")
+{:ok, _conn} = Mint.HTTP.request(conn, "GET", "/foo", [], "")
+{:ok, conn} = Mint.HTTP.request(conn, "GET", "/bar", [], "")
 
 # Correct
-{:ok, conn} = Mint.request(conn, "GET", "/foo", [], "")
-{:ok, conn} = Mint.request(conn, "GET", "/bar", [], "")
+{:ok, conn} = Mint.HTTP.request(conn, "GET", "/foo", [], "")
+{:ok, conn} = Mint.HTTP.request(conn, "GET", "/bar", [], "")
 ```
 
 ## Pool API

@@ -136,7 +136,7 @@ defmodule Mint.HTTP2 do
   ## Public interface
 
   @doc """
-  Same as `Mint.connect/4`, but forces a HTTP/2 connection.
+  Same as `Mint.HTTP.connect/4`, but forces a HTTP/2 connection.
   """
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
@@ -186,14 +186,14 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.open?/1`.
+  See `Mint.HTTP.open?/1`.
   """
   @impl true
   @spec open?(t()) :: boolean()
   def open?(%Mint.HTTP2{state: state} = _conn), do: state == :open
 
   @doc """
-  See `Mint.request/5`.
+  See `Mint.HTTP.request/5`.
 
   In HTTP/2, opening a request means opening a new HTTP/2 stream (see the
   module documentation). This means that a request could fail because the
@@ -246,7 +246,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.stream_request_body/3`.
+  See `Mint.HTTP.stream_request_body/3`.
   """
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
@@ -389,7 +389,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.stream/2`.
+  See `Mint.HTTP.stream/2`.
   """
   @impl true
   @spec stream(t(), socket_message()) ::
@@ -423,7 +423,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.put_private/3`.
+  See `Mint.HTTP.put_private/3`.
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
@@ -432,7 +432,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.get_private/3`.
+  See `Mint.HTTP.get_private/3`.
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
@@ -441,7 +441,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.delete_private/2`.
+  See `Mint.HTTP.delete_private/2`.
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
@@ -496,7 +496,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.get_socket/1`.
+  See `Mint.HTTP.get_socket/1`.
   """
   @impl true
   @spec get_socket(t()) :: Mint.Core.Transport.socket()

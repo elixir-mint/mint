@@ -1,6 +1,9 @@
 defmodule Mint.TunnelProxyTest do
   use ExUnit.Case, async: true
+
   import Mint.HTTP1.TestHelpers
+
+  alias Mint.HTTP
 
   @moduletag :proxy
 
@@ -12,7 +15,7 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP1
-    assert {:ok, conn, request} = Mint.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -29,7 +32,7 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP1
-    assert {:ok, conn, request} = Mint.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -46,7 +49,7 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP2
-    assert {:ok, conn, request} = Mint.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -63,7 +66,7 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP2
-    assert {:ok, conn, request} = Mint.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
@@ -81,7 +84,7 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP1
-    assert {:ok, conn, request} = Mint.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses

@@ -44,7 +44,7 @@ defmodule Mint.HTTP1 do
   ]
 
   @doc """
-  Same as `Mint.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
+  Same as `Mint.HTTP.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
 
   This function doesn't support proxying.
   """
@@ -119,14 +119,14 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.open?/1`.
+  See `Mint.HTTP.open?/1`.
   """
   @impl true
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{state: state}), do: state == :open
 
   @doc """
-  See `Mint.request/5`.
+  See `Mint.HTTP.request/5`.
 
   In HTTP/1 and HTTP/1.1, you can't open a new request if you're streaming the body of
   another request. If you try, the error reason `{:error, :request_body_is_streaming}` is
@@ -185,7 +185,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.stream_request_body/3`.
+  See `Mint.HTTP.stream_request_body/3`.
   """
   @impl true
   @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
@@ -211,7 +211,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.stream/2`.
+  See `Mint.HTTP.stream/2`.
   """
   @impl true
   @spec stream(t(), socket_message()) ::
@@ -284,7 +284,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.put_private/3`.
+  See `Mint.HTTP.put_private/3`.
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
@@ -293,7 +293,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.get_private/3`.
+  See `Mint.HTTP.get_private/3`.
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
@@ -302,7 +302,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.delete_private/2`.
+  See `Mint.HTTP.delete_private/2`.
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
@@ -311,7 +311,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.get_socket/1`.
+  See `Mint.HTTP.get_socket/1`.
   """
   @impl true
   @spec get_socket(t()) :: Mint.Core.Transport.socket()

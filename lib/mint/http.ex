@@ -1,4 +1,4 @@
-defmodule Mint do
+defmodule Mint.HTTP do
   @moduledoc """
   Processless HTTP connection data structure and functions.
 
@@ -18,7 +18,7 @@ defmodule Mint do
 
   The process that owns the connection is responsible for receiving the messages
   (for example, a GenServer is responsible for defining `handle_info/2`). However,
-  `Mint` makes it easy to identify TCP/SSL messages that are coming from the
+  `Mint.HTTP` makes it easy to identify TCP/SSL messages that are coming from the
   connection with the server with the `stream/2` function. This function takes the
   connection and a term and returns `:unknown` if the term is not a TCP/SSL message
   belonging to the connection. If the term *is* a message for the connection, then
@@ -30,12 +30,12 @@ defmodule Mint do
   request, and processing the response. We start by using `connect/3` to connect
   to a server.
 
-      {:ok, conn} = Mint.connect(:http, "httpbin.org", 80)
+      {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 
   `conn` is a `%Mint{}` data structure that represents the connection. To send a request,
   we use `request/5`.
 
-      {:ok, conn, request_ref} = Mint.request(conn, "GET", "/", [], nil)
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], nil)
 
   As you can see, sending a request returns a new updated `conn` struct and a
   `request_ref`. The updated connection struct is returned because the connection
@@ -47,14 +47,14 @@ defmodule Mint do
   Now that we sent our request, we're responsible for receiving the messages that
   the TCP/SSL socket will send to our process. For example, in a GenServer
   we would do that with a `handle_info/2` callback. In our case, we're going to
-  use a simple `receive`. `Mint` provides a way to tell if a message comes
+  use a simple `receive`. `Mint.HTTP` provides a way to tell if a message comes
   from the socket wrapped by our connection or not: the `stream/2` function. If
   the message we pass to it is not destined for our connection, this function returns
   `:unknown`. Otherwise, it returns an updated connection and one or more responses.
 
       receive do
         message ->
-          case Mint.stream(conn, message) do
+          case Mint.HTTP.stream(conn, message) do
             :unknown -> handle_normal_message(message)
             {:ok, conn, responses} -> handle_responses(conn, responses)
           end
@@ -69,7 +69,7 @@ defmodule Mint do
 
   As you can see, all responses have the unique request reference as the second
   element of the tuple, so that we know which request the response belongs to.
-  See `t:Mint.responses/0` for the full list of responses returned by `Mint.stream/2`.
+  See `t:Mint.HTTP.response/0` for the full list of responses returned by `Mint.HTTP.stream/2`.
 
   ## Architecture
 
@@ -166,16 +166,16 @@ defmodule Mint do
 
   ## Examples
 
-      {:ok, conn} = Mint.connect(:http, "httpbin.org", 80)
+      {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 
   Using a proxy:
 
       proxy = {:http, "myproxy.example.com", 80, []}
-      {:ok, conn} = Mint.connect(:https, "httpbin.org", 443, proxy: proxy)
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
 
   Forcing the connection to be an HTTP/2 connection:
 
-      {:ok, conn} = Mint.connect(:https, "http2.golang.org", 443, protocols: [:http2])
+      {:ok, conn} = Mint.HTTP.connect(:https, "http2.golang.org", 443, protocols: [:http2])
 
   """
   @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
@@ -241,8 +241,8 @@ defmodule Mint do
 
   ## Examples
 
-      {:ok, conn} = Mint.connect(:http, "httpbin.org", 80)
-      Mint.open?(conn)
+      {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
+      Mint.HTTP.open?(conn)
       #=> true
 
   """
@@ -293,8 +293,8 @@ defmodule Mint do
 
   ## Examples
 
-      Mint.request(conn, "GET", "/", _headers = [])
-      Mint.request(conn, "POST", "/path", [{"content-type", "application/json"}], "{}")
+      Mint.HTTP.request(conn, "GET", "/", _headers = [])
+      Mint.HTTP.request(conn, "POST", "/path", [{"content-type", "application/json"}], "{}")
 
   """
   @impl true
@@ -337,10 +337,10 @@ defmodule Mint do
   brace at a time.
 
       headers = [{"content-type", "application/json"}, {"content-length", "2"}]
-      {:ok, request_ref, conn} = Mint.request(conn, "POST", "/", headers, :stream)
-      {:ok, conn} = Mint.stream_request_body(conn, request_ref, "{")
-      {:ok, conn} = Mint.stream_request_body(conn, request_ref, "}")
-      {:ok, conn} = Mint.stream_request_body(conn, request_ref, :eof)
+      {:ok, request_ref, conn} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{")
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "}")
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, :eof)
 
   """
   @impl true
@@ -462,8 +462,8 @@ defmodule Mint do
 
   Let's see an example of putting a value and then getting it:
 
-      conn = Mint.put_private(conn, :client_name, "Mint")
-      Mint.get_private(conn, :client_name)
+      conn = Mint.HTTP.put_private(conn, :client_name, "Mint")
+      Mint.HTTP.get_private(conn, :client_name)
       #=> "Mint"
 
   """
@@ -482,12 +482,12 @@ defmodule Mint do
 
   ## Examples
 
-      conn = Mint.put_private(conn, :client_name, "Mint")
+      conn = Mint.HTTP.put_private(conn, :client_name, "Mint")
 
-      Mint.get_private(conn, :client_name)
+      Mint.HTTP.get_private(conn, :client_name)
       #=> "Mint"
 
-      Mint.get_private(conn, :non_existent)
+      Mint.HTTP.get_private(conn, :non_existent)
       #=> nil
 
   """
@@ -506,13 +506,13 @@ defmodule Mint do
 
   ## Examples
 
-      conn = Mint.put_private(conn, :client_name, "Mint")
+      conn = Mint.HTTP.put_private(conn, :client_name, "Mint")
 
-      Mint.get_private(conn, :client_name)
+      Mint.HTTP.get_private(conn, :client_name)
       #=> "Mint"
 
-      conn = Mint.delete_private(conn, :client_name)
-      Mint.get_private(conn, :client_name)
+      conn = Mint.HTTP.delete_private(conn, :client_name)
+      Mint.HTTP.get_private(conn, :client_name)
       #=> nil
 
   """
@@ -530,7 +530,7 @@ defmodule Mint do
 
   ## Examples
 
-      socket = Mint.get_socket(conn)
+      socket = Mint.HTTP.get_socket(conn)
 
   """
   @impl true
