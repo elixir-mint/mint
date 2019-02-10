@@ -1,23 +1,9 @@
 defmodule Mint.Core.Conn do
   @moduledoc false
 
-  @type conn() :: term()
+  alias Mint.Types
 
-  @type request_ref() :: reference()
-  @type socket_message() ::
-          {:tcp | :ssl, :gen_tcp.sockeconn(), binary()}
-          | {:tcp_closed | :ssl_closed, :gen_tcp.sockeconn()}
-          | {:tcp_error | :ssl_error, :gen_tcp.sockeconn(), term()}
-  @type response() ::
-          {:status, request_ref(), status()}
-          | {:headers, request_ref(), headers()}
-          | {:data, request_ref(), binary()}
-          | {:done, request_ref()}
-          | {:pong, request_ref()}
-          | {:error, request_ref(), term()}
-  @type status() :: non_neg_integer()
-  @type reason() :: String.t()
-  @type headers() :: [{String.t(), String.t()}]
+  @type conn() :: term()
 
   # @callback close(conn()) :: :ok
   #
@@ -35,27 +21,27 @@ defmodule Mint.Core.Conn do
 
   @callback request(
               conn(),
-              String.t(),
-              String.t(),
-              headers(),
-              iodata() | nil | :stream
+              method :: String.t(),
+              path :: String.t(),
+              Types.headers(),
+              body :: iodata() | nil | :stream
             ) ::
-              {:ok, conn(), request_ref()}
-              | {:error, conn(), term()}
+              {:ok, conn(), Types.request_ref()}
+              | {:error, conn(), reason :: term()}
 
-  @callback stream_request_body(conn(), request_ref(), iodata() | :eof) ::
-              {:ok, conn()} | {:error, conn(), term()}
+  @callback stream_request_body(conn(), Types.request_ref(), body_chunk :: iodata() | :eof) ::
+              {:ok, conn()} | {:error, conn(), reason :: term()}
 
-  @callback stream(conn(), socket_message()) ::
-              {:ok, conn(), [response()]}
-              | {:error, conn(), term(), [response()]}
+  @callback stream(conn(), term()) ::
+              {:ok, conn(), [Types.response()]}
+              | {:error, conn(), reason :: term(), [Types.response()]}
               | :unknown
 
-  @callback put_private(conn(), atom(), term()) :: conn()
+  @callback put_private(conn(), key :: atom(), value :: term()) :: conn()
 
-  @callback get_private(conn(), atom(), term()) :: term()
+  @callback get_private(conn(), key :: atom(), default_value :: term()) :: term()
 
-  @callback delete_private(conn(), atom()) :: conn()
+  @callback delete_private(conn(), key :: atom()) :: conn()
 
   @callback get_socket(conn()) :: Mint.Core.Transport.socket()
 end

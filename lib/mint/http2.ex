@@ -31,6 +31,8 @@ defmodule Mint.HTTP2 do
   import Mint.Core.Util
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
 
+  alias Mint.Types
+
   alias Mint.HTTP2.{
     Frame,
     HPACK
@@ -103,14 +105,12 @@ defmodule Mint.HTTP2 do
 
   ## Types
 
-  @type scheme :: :http | :https | module()
-  @type request_ref() :: Mint.Core.Conn.request_ref()
-  @type socket_message() :: Mint.Core.Conn.socket_message()
-  @type response() :: Mint.Core.Conn.response()
-  @type status() :: Mint.Core.Conn.response()
-  @type headers() :: Mint.Core.Conn.headers()
+  @typedoc """
+  HTTP/2 settings.
+
+  See `get_setting/2`.
+  """
   @type settings() :: keyword()
-  @type stream_id() :: pos_integer()
 
   @opaque t() :: %Mint.HTTP2{
             transport: module(),
@@ -122,15 +122,15 @@ defmodule Mint.HTTP2 do
             decode_table: HPACK.Table.t(),
             ping_queue: :queue.queue(),
             client_settings_queue: :queue.queue(),
-            next_stream_id: stream_id(),
-            streams: %{optional(stream_id()) => map()},
+            next_stream_id: stream_id :: non_neg_integer(),
+            streams: %{optional(stream_id :: non_neg_integer()) => map()},
             open_stream_count: non_neg_integer(),
-            ref_to_stream_id: %{optional(reference()) => stream_id()},
+            ref_to_stream_id: %{optional(reference()) => stream_id :: non_neg_integer()},
             enable_push: boolean(),
             server_max_concurrent_streams: non_neg_integer(),
             initial_window_size: pos_integer(),
             max_frame_size: pos_integer(),
-            headers_being_processed: {stream_id(), iodata(), boolean()} | nil
+            headers_being_processed: {stream_id :: non_neg_integer(), iodata(), boolean()} | nil
           }
 
   ## Public interface
@@ -138,7 +138,7 @@ defmodule Mint.HTTP2 do
   @doc """
   Same as `Mint.HTTP.connect/4`, but forces a HTTP/2 connection.
   """
-  @spec connect(scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
     transport = scheme_to_transport(scheme)
@@ -163,7 +163,7 @@ defmodule Mint.HTTP2 do
   @spec upgrade(
           module(),
           Mint.Core.Transport.socket(),
-          scheme(),
+          Types.scheme(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -208,10 +208,10 @@ defmodule Mint.HTTP2 do
           t(),
           method :: String.t(),
           path :: String.t(),
-          headers(),
+          Types.headers(),
           body :: iodata() | nil | :stream
         ) ::
-          {:ok, t(), request_ref()}
+          {:ok, t(), Types.request_ref()}
           | {:error, t(), term()}
   def request(%Mint.HTTP2{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
@@ -249,7 +249,7 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.stream_request_body/3`.
   """
   @impl true
-  @spec stream_request_body(t(), request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
@@ -288,7 +288,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn, ref} = Mint.HTTP2.ping(conn)
 
   """
-  @spec ping(t(), <<_::8>>) :: {:ok, t(), request_ref()} | {:error, t(), term()}
+  @spec ping(t(), <<_::8>>) :: {:ok, t(), Types.request_ref()} | {:error, t(), term()}
   def ping(%Mint.HTTP2{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
@@ -392,9 +392,9 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.stream/2`.
   """
   @impl true
-  @spec stream(t(), socket_message()) ::
-          {:ok, t(), [response()]}
-          | {:error, t(), term(), [response()]}
+  @spec stream(t(), term()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), term(), [Types.response()]}
           | :unknown
   def stream(conn, message)
 
