@@ -52,7 +52,8 @@ defmodule Mint.HTTP2 do
 
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
-  ## Mint.HTTP2ection
+
+  @user_agent "mint/" <> Mix.Project.config()[:version]
 
   defstruct [
     # Transport things.
@@ -220,7 +221,7 @@ defmodule Mint.HTTP2 do
       {":path", path},
       {":scheme", conn.scheme},
       {":authority", "#{conn.hostname}:#{conn.port}"}
-      | headers
+      | add_default_headers(headers)
     ]
 
     {conn, stream_id, ref} = open_stream(conn)
@@ -732,6 +733,18 @@ defmodule Mint.HTTP2 do
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
     end)
+  end
+
+  defp add_default_headers(headers) do
+    put_new_header(headers, "user-agent", @user_agent)
+  end
+
+  defp put_new_header(headers, name, value) do
+    if List.keymember?(headers, name, 0) do
+      headers
+    else
+      [{name, value} | headers]
+    end
   end
 
   ## Frame handling

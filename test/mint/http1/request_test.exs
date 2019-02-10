@@ -13,7 +13,7 @@ defmodule Mint.HTTP1.RequestTest do
                request_string("""
                GET / HTTP/1.1
                host: example.com
-               user-agent: mint/0.1.0
+               user-agent: mint/#{Mix.Project.config()[:version]}
                foo: bar
 
                """)
@@ -28,7 +28,7 @@ defmodule Mint.HTTP1.RequestTest do
                request_string("""
                GET / HTTP/1.1
                host: example.com
-               user-agent: mint/0.1.0
+               user-agent: mint/#{Mix.Project.config()[:version]}
                content-length: 4
 
                BODY\
@@ -44,7 +44,7 @@ defmodule Mint.HTTP1.RequestTest do
                request_string("""
                GET / HTTP/1.1
                host: example.com
-               user-agent: mint/0.1.0
+               user-agent: mint/#{Mix.Project.config()[:version]}
                content-length: 10
 
                BODY\

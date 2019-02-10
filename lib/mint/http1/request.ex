@@ -3,7 +3,7 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  @user_agent "mint/0.1.0"
+  @user_agent "mint/" <> Mix.Project.config()[:version]
 
   def encode(method, target, host, headers, body) do
     headers = add_default_headers(headers, host, body)
@@ -42,9 +42,10 @@ defmodule Mint.HTTP1.Request do
   end
 
   defp put_new_header(headers, name, value) do
-    case :lists.keyfind(name, 1, headers) do
-      {^name, _} -> headers
-      false -> [{name, value} | headers]
+    if List.keymember?(headers, name, 0) do
+      headers
+    else
+      [{name, value} | headers]
     end
   end
 
