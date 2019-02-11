@@ -25,7 +25,7 @@ defmodule Mint.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:castore, github: "ericmj/castore"},
+      {:castore, "~> 0.1.0"},
       {:ex_doc, "~> 0.19.3", only: :dev},
       {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test},
       {:stream_data, "~> 0.4.0", only: :test}
