@@ -3,33 +3,47 @@ language: elixir
 services:
   - docker
 
-matrix:
-  include:
-  - elixir: 1.7.2
-    otp_release: 21.0
-  - elixir: 1.7.2
-    otp_release: 20.3.1
-  - elixir: 1.6.6
-    otp_release: 19.3
-  - elixir: 1.5.3
-    otp_release: 18.3
-  - elixir: 1.5.3
-    otp_release: 17.5
+otp_release: '21.1'
+elixir: '1.8'
 
 env:
   - DOCKER_COMPOSE_VERSION=1.22.0
 
-script:
-  - docker-compose up --detach
-  - mix test --include proxy
+stages:
+  - check formatted
+  - test
+
+jobs:
+  include:
+    - stage: test
+      script:
+        - docker-compose up --detach
+        - mix test --trace --include proxy
+
+    - otp_release: '21.1'
+      elixir: '1.7'
+
+    - otp_release: '20.3.1'
+      elixir: '1.7'
+
+    - otp_release: '19.3'
+      elixir: '1.6'
+
+    - otp_release: '18.3'
+      elixir: '1.5'
+
+    - otp_release: '17.5'
+      elixir: '1.5'
+
+    - stage: check formatted
+      script: mix format --check-formatted
+      sudo: false
+      before_install: skip
 
 before_install:
   - sudo rm /usr/local/bin/docker-compose
   - curl -L https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
   - chmod +x docker-compose
   - sudo mv docker-compose /usr/local/bin
-
-notifications:
-  recipients:
-    - eric.meadows.jonsson@gmail.com
-    - an.leopardi@gmail.com
+  - docker-compose --version
+  - docker-compose build
