@@ -2,19 +2,19 @@ defmodule Mint.HTTP do
   @moduledoc """
   Processless HTTP connection data structure and functions.
 
-  Single interface for `Mint.HTTP1` and `Mint.HTTP2` with version negotiation support
-  and support for proxies.
+  Single interface for `Mint.HTTP1` and `Mint.HTTP2` with support for version
+  negotiation and proxies.
 
   ## Usage
 
   To establish a connection with a given server, use `connect/4`. This will
-  return an opaque data structure, `%Mint{}`, that represents the connection
+  return an opaque data structure that represents the connection
   to the server. To send a request, you can use `request/5`. Sending a request
   does not take care of the response to that request, instead we use `Mint.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
   set in **active mode**. This means that TCP/SSL messages will be delivered to
-  the process that started the connection and created the `%Mint{}` data structure.
+  the process that started the connection.
 
   The process that owns the connection is responsible for receiving the messages
   (for example, a GenServer is responsible for defining `handle_info/2`). However,
@@ -32,8 +32,9 @@ defmodule Mint.HTTP do
 
       {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 
-  `conn` is a `%Mint{}` data structure that represents the connection. To send a request,
-  we use `request/5`.
+  `conn` is a data structure that represents the connection.
+
+  To send a request, we use `request/5`.
 
       {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], nil)
 
@@ -93,7 +94,7 @@ defmodule Mint.HTTP do
   @doc """
   Creates a new connection to a given server.
 
-  Creates a new `%Mint{}` struct and establishes the connection to the given server,
+  Creates a new connection struct and establishes the connection to the given server,
   identified by the given `host` and `port` combination. Both HTTP and HTTPS are supported
   by passing respectively `:http` and `:https` as the `scheme`.
 
