@@ -1,14 +1,28 @@
 defmodule Mint.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @repo_url "https://github.com/ericmj/mint"
+
   def project do
     [
       app: :mint,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.5",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
-      deps: deps()
+      deps: deps(),
+
+      # Hex
+      package: package(),
+      description: "Small and composable HTTP client.",
+
+      # Docs
+      name: "Mint",
+      docs: [
+        source_ref: "v#{@version}",
+        source_url: @repo_url
+      ]
     ]
   end
 
@@ -16,6 +30,13 @@ defmodule Mint.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["Apache 2.0"],
+      links: %{"GitHub" => @repo_url}
     ]
   end
 
