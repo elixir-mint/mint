@@ -116,7 +116,7 @@ defmodule Mint.HTTP1 do
   See `Mint.HTTP.close/1`.
   """
   @impl true
-  @spec close(t()) :: :ok
+  @spec close(t()) :: {:ok, t()}
   def close(conn)
 
   def close(%__MODULE__{state: :open} = conn) do
