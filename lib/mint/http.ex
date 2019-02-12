@@ -8,8 +8,8 @@ defmodule Mint.HTTP do
   ## Usage
 
   To establish a connection with a given server, use `connect/4`. This will
-  return an opaque data structure that represents
-  the connection to the server. To send a request, you can use `request/5`. Sending a request
+  return an opaque data structure that represents the connection
+  to the server. To send a request, you can use `request/5`. Sending a request
   does not take care of the response to that request, instead we use `Mint.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
@@ -32,8 +32,7 @@ defmodule Mint.HTTP do
 
       {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 
-  `conn` is a data structure that represents the connection: `%Mint.HTTP1{}` or
-  `%Mint.HTTP2{}`.
+  `conn` is a data structure that represents the connection.
 
   To send a request, we use `request/5`.
 
