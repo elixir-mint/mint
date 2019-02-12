@@ -21,7 +21,12 @@ defmodule Mint.TunnelProxy do
          :ok <- receive_response(conn, ref) do
       {:ok, conn}
     else
-      {:error, reason} -> {:error, {:proxy, reason}}
+      {:error, reason} ->
+        {:error, {:proxy, reason}}
+
+      {:error, conn, reason} ->
+        {:ok, conn} = HTTP1.close(conn)
+        {:error, {:proxy, reason}}
     end
   end
 
