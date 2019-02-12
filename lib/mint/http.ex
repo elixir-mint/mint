@@ -225,6 +225,28 @@ defmodule Mint.HTTP do
     do: Mint.Negotiate.initiate(transport, transport_state, hostname, port, opts)
 
   @doc """
+  Closes the given connection.
+
+  This function closes the socket wrapped by the given connection. Once the socket
+  is closed, the connection goes into the "closed" state and `open?/1` returns `false`.
+  You can throw away a closed connection.
+
+  Closing a connection does not guarantee that data that is in flight gets delivered
+  to the server.
+
+  Always returns `{:ok, conn}` where `conn` is the updated connection.
+
+  ## Examples
+
+      Mint.HTTP.close(conn)
+      #=> :ok
+
+  """
+  @impl true
+  @spec close(t()) :: {:ok, t()}
+  def close(conn), do: conn_module(conn).close(conn)
+
+  @doc """
   Checks whether the connection is open.
 
   This function returns `true` if the connection is open, `false` otherwise. It should

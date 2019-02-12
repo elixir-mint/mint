@@ -49,6 +49,12 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
+  @spec close(t()) :: {:ok, t()}
+  def close(%UnsafeProxy{module: module, state: state} = _conn) do
+    module.close(state)
+  end
+
+  @impl true
   @spec open?(t()) :: boolean()
   def open?(%UnsafeProxy{module: module, state: state}) do
     module.open?(state)

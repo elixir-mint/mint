@@ -5,10 +5,6 @@ defmodule Mint.Core.Conn do
 
   @type conn() :: term()
 
-  # @callback close(conn()) :: :ok
-  #
-  # @callback shutdown(conn(), :read | :write | :read_write) :: :ok | {:error, term()}
-
   @callback initiate(
               module(),
               Mint.Core.Transport.socket(),
@@ -18,6 +14,8 @@ defmodule Mint.Core.Conn do
             ) :: {:ok, conn()} | {:error, term()}
 
   @callback open?(conn()) :: boolean()
+
+  @callback close(conn()) :: {:ok, conn()}
 
   @callback request(
               conn(),

@@ -187,6 +187,22 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
+  See `Mint.HTTP.close/1`.
+  """
+  @impl true
+  @spec close(t()) :: {:ok, t()}
+  def close(conn)
+
+  def close(%__MODULE__{state: :open, transport: transport, socket: socket} = conn) do
+    :ok = transport.close(socket)
+    {:ok, %__MODULE__{conn | state: :closed}}
+  end
+
+  def close(%__MODULE__{state: :closed} = conn) do
+    {:ok, conn}
+  end
+
+  @doc """
   See `Mint.HTTP.open?/1`.
   """
   @impl true

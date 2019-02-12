@@ -473,6 +473,12 @@ defmodule Mint.HTTP2Test do
     assert HTTP2.open?(conn)
   end
 
+  test "close/1", %{conn: conn} do
+    assert HTTP2.open?(conn)
+    assert {:ok, conn} = HTTP2.close(conn)
+    refute HTTP2.open?(conn)
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     HTTP2.stream(conn, message)
