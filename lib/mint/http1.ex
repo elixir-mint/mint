@@ -113,6 +113,22 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
+  See `Mint.HTTP.close/1`.
+  """
+  @impl true
+  @spec close(t()) :: {:ok, t()}
+  def close(conn)
+
+  def close(%__MODULE__{state: :open} = conn) do
+    conn = internal_close(conn)
+    {:ok, conn}
+  end
+
+  def close(%__MODULE__{state: :closed} = conn) do
+    {:ok, conn}
+  end
+
+  @doc """
   See `Mint.HTTP.open?/1`.
   """
   @impl true
@@ -543,10 +559,10 @@ defmodule Mint.HTTP1 do
 
     cond do
       !request -> conn
-      "close" in request.connection -> close(conn)
+      "close" in request.connection -> internal_close(conn)
       request.version >= {1, 1} -> conn
       "keep-alive" in request.connection -> conn
-      true -> close(conn)
+      true -> internal_close(conn)
     end
   end
 
@@ -560,7 +576,7 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp close(conn) do
+  defp internal_close(conn) do
     if conn.buffer != "" do
       Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end

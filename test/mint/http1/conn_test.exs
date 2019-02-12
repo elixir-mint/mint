@@ -278,4 +278,10 @@ defmodule Mint.HTTP1Test do
     assert headers == {:headers, ref, [{"transfer-encoding", "custom, chunked"}]}
     assert body == {:data, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
   end
+
+  test "close/1", %{conn: conn} do
+    assert HTTP1.open?(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
 end
