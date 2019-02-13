@@ -79,7 +79,7 @@ defmodule Mint.HTTP do
   in a process that acts as *connection manager*. Sometimes, you might want to
   have a single process responsible for multiple connections, either to just one
   host or multiple hosts. For more discussion on architectures based off of this
-  HTTP client, see the [TODO architecture] page in the docs.
+  HTTP client, see the [*Architecture*](architecture.html) page in the docs.
   """
 
   import Mint.Core.Util
