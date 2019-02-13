@@ -38,23 +38,27 @@ defmodule Mint.HTTP1.TestHelpers do
   end
 
   def receive_stream(conn) do
-    receive_stream(conn, [])
+    receive do
+      {:rest, previous} ->
+        maybe_done(conn, previous)
+    after
+      0 ->
+        receive_stream(conn, [])
+    end
   end
 
-  def receive_stream(conn, responses) do
+  def receive_stream(conn, acc) do
     receive do
-      {:rest, conn, rest_responses} ->
-        maybe_done(conn, rest_responses, responses)
-
       {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
-        assert {:ok, conn, new_responses} = conn.__struct__.stream(conn, message)
-        maybe_done(conn, new_responses, responses)
+        assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
+        maybe_done(conn, acc ++ responses)
 
       {tag, _socket} = message when tag in [:tcp_closed, :ssl_closed] ->
-        assert {:ok, conn, new_responses} = conn.__struct__.stream(conn, message)
-        maybe_done(conn, new_responses, responses)
+        assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
+        maybe_done(conn, acc ++ responses)
 
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
+        # TODO: accumulated responses should be returned here
         assert {:error, _conn, _reason} = conn.__struct__.stream(conn, message)
     after
       10000 ->
@@ -62,16 +66,16 @@ defmodule Mint.HTTP1.TestHelpers do
     end
   end
 
-  def maybe_done(conn, responses, acc) do
-    {new, rest} = Enum.split_while(responses, &(not match?({:done, _}, &1)))
+  def maybe_done(conn, responses) do
+    {all, rest} = Enum.split_while(responses, &(not match?({:done, _}, &1)))
 
-    case {new, rest} do
-      {new, []} ->
-        receive_stream(conn, acc ++ new)
+    case {all, rest} do
+      {all, []} ->
+        receive_stream(conn, all)
 
-      {new, [done | rest]} ->
-        if rest != [], do: send(self(), {:rest, conn, rest})
-        {:ok, conn, acc ++ new ++ [done]}
+      {all, [done | rest]} ->
+        if rest != [], do: send(self(), {:rest, rest})
+        {:ok, conn, all ++ [done]}
     end
   end
 
