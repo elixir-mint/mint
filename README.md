@@ -19,7 +19,7 @@ Then, run `$ mix deps.get`.
 
 ## Usage
 
-Mint is different from most Erlang and Elixir client because it provides a process-less architecture. Instead, Mint is based on a functional and immutable data structure that represents an HTTP connection. This data structure wraps a TCP or SSL socket. This allows for more fine-tailored architectures where the developer is responsible for wrapping the connection struct, such as having one process handle multiple connections or having different kinds of processes handle connections.
+Mint is different from most Erlang and Elixir HTTP clients because it provides a process-less architecture. Instead, Mint is based on a functional and immutable data structure that represents an HTTP connection. This data structure wraps a TCP or SSL socket. This allows for more fine-tailored architectures where the developer is responsible for wrapping the connection struct, such as having one process handle multiple connections or having different kinds of processes handle connections.
 
 Below is an example of a basic interaction with Mint. First, we start a connection through `Mint.HTTP.connect/3`:
 
