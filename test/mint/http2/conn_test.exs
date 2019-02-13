@@ -475,6 +475,11 @@ defmodule Mint.HTTP2Test do
 
   test "close/1", %{conn: conn} do
     assert HTTP2.open?(conn)
+
+    # Ensure the connection is established before closing
+    {:ok, conn} = HTTP2.put_settings(conn, max_concurrent_streams: 10)
+    {:ok, conn, []} = stream_next_message(conn)
+
     assert {:ok, conn} = HTTP2.close(conn)
     refute HTTP2.open?(conn)
   end
