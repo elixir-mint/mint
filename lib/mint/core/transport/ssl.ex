@@ -431,6 +431,7 @@ defmodule Mint.Core.Transport.SSL do
     if Keyword.has_key?(opts, :cacertfile) || Keyword.has_key?(opts, :cacerts) do
       opts
     else
+      raise_on_missing_castore!()
       Keyword.put(opts, :cacertfile, CAStore.file_path())
     end
   end
@@ -514,4 +515,11 @@ defmodule Mint.Core.Transport.SSL do
 
   defp get_valid_suites([suit | rest], valid), do: get_valid_suites(rest, [suit | valid])
   defp get_valid_suites([], valid), do: valid
+
+  defp raise_on_missing_castore! do
+    Code.ensure_loaded?(CAStore) ||
+      raise "default CA trust store not available; " <>
+              "please add `:castore` to your project's dependencies or " <>
+              "specify the trust store using the `:cacertfile`/`:cacerts` option"
+  end
 end
