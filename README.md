@@ -66,6 +66,19 @@ The connection API is stateless, this means that you need to make sure to always
 
 The pooling API is not yet implemented, see [#32](https://github.com/ericmj/mint/issues/32).
 
+## SSL certificates
+
+When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint doesn't ship with the certificate store itself, but it has an optional dependency on [CAStore](https://github.com/ericmj/castore), which provides an up-to-date certificate store. If you don't want to use your own certificate store, just add `:castore` to your dependencies.
+
+```elixir
+def deps do
+  [
+    {:castore, "~> 0.1.0"},
+    {:mint, "~> 0.1.0"}
+  ]
+end
+```
+
 ## Contributing
 
 Mint has not yet reached an initial 0.1.0 release and the current goal is to reach a minimal first release. Because of this Mint is still in a lot of flux and we want to focus on changes only required for getting to 0.1.0. If you wish to contribute check out the [issue list](https://github.com/ericmj/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.

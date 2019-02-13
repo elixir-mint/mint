@@ -80,6 +80,13 @@ defmodule Mint.HTTP do
   have a single process responsible for multiple connections, either to just one
   host or multiple hosts. For more discussion on architectures based off of this
   HTTP client, see the [*Architecture*](architecture.html) page in the docs.
+
+  ## SSL certificates
+
+  When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint
+  doesn't ship with the certificate store itself, but it has an optional dependency on
+  [CAStore](https://github.com/ericmj/castore), which provides an up-to-date certificate store. If
+  you don't want to use your own certificate store, just add `:castore` to your dependencies.
   """
 
   import Mint.Core.Util
