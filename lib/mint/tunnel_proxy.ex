@@ -25,7 +25,7 @@ defmodule Mint.TunnelProxy do
         {:error, {:proxy, reason}}
 
       {:error, conn, reason} ->
-        {:ok, conn} = HTTP1.close(conn)
+        {:ok, _conn} = HTTP1.close(conn)
         {:error, {:proxy, reason}}
     end
   end
