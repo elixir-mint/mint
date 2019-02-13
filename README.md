@@ -1,28 +1,39 @@
-# Mint
+# Mint 🌱
 
-Functional HTTP client for Elixir with support for HTTP/1 and HTTP/2.
+> Functional HTTP client for Elixir with support for HTTP/1 and HTTP/2.
 
-This library is not yet production ready, but we do appreciate contributions and testers.
+## Installation
 
-Mint contains two main APIs, a stateless connection API, and a stateful multi-host pooling API.
+To install Mint, add it to your `mix.exs` file. Unless you're using your own SSL certificate store, also add the [CAStore][castore] library to your dependencies.
 
-## Connection API
+```elixir
+defp deps do
+  [
+    {:castore, "~> 0.1.0"},
+    {:mint, "~> 0.1.0"}
+  ]
+end
+```
 
-The two connection API exists in two modules, `Mint.HTTP1` and `Mint.HTTP2` with implementations for HTTP/1 and HTTP/2 respectively. `Mint` uses the same API but with version negotiation between the HTTP/1 and 2.
+Then, run `$ mix deps.get`.
 
-This API represents a connection with a single `conn` struct and are started by running:
+## Usage
+
+Mint is different from most Erlang and Elixir HTTP clients because it provides a process-less architecture. Instead, Mint is based on a functional and immutable data structure that represents an HTTP connection. This data structure wraps a TCP or SSL socket. This allows for more fine-tailored architectures where the developer is responsible for wrapping the connection struct, such as having one process handle multiple connections or having different kinds of processes handle connections.
+
+Below is an example of a basic interaction with Mint. First, we start a connection through `Mint.HTTP.connect/3`:
 
 ```elixir
 iex> {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 ```
 
-Requests are sent with:
+This transparently chooses between HTTP/1 and HTTP/2. Requests are sent with:
 
 ```elixir
 iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
 ```
 
-The connection socket runs in [active mode](http://erlang.org/doc/man/inet.html#setopts-2), that means the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002):
+The connection socket runs in [*active mode*](http://erlang.org/doc/man/inet.html#setopts-2), which means that the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002):
 
 ```elixir
 iex> flush()
@@ -30,7 +41,8 @@ iex> flush()
  "HTTP/1.1 200 OK\r\n" <> _}
 ```
 
-Responses are streamed back to the user in parts through response parts `:status`, `:headers`, `:data` and finally `:done` response:
+To handle such messages, Mint provides a `stream/2` function that turns messages into HTTP responses. Responses are streamed back to the user in parts through response parts `:status`, `:headers`, `:data`, and finally `:done`.
+
 
 ```elixir
 iex> {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
@@ -48,8 +60,6 @@ iex> receive do
 ]
 ```
 
-Multiple or none response parts can be returned for a single TCP/SSL message and response parts from different requests can be interleaved when using HTTP/2, users of `Mint` needs to handle these cases.
-
 The connection API is stateless, this means that you need to make sure to always save the returned `conn`:
 
 ```elixir
@@ -62,13 +72,11 @@ The connection API is stateless, this means that you need to make sure to always
 {:ok, conn, ref} = Mint.HTTP.request(conn, "GET", "/bar", [], "")
 ```
 
-## Pool API
+For more information, see [the documentation][documentation].
 
-The pooling API is not yet implemented, see [#32](https://github.com/ericmj/mint/issues/32).
+### SSL certificates
 
-## SSL certificates
-
-When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint doesn't ship with the certificate store itself, but it has an optional dependency on [CAStore](https://github.com/ericmj/castore), which provides an up-to-date certificate store. If you don't want to use your own certificate store, just add `:castore` to your dependencies.
+When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint doesn't ship with the certificate store itself, but it has an optional dependency on [CAStore][castore], which provides an up-to-date certificate store. If you don't want to use your own certificate store, just add `:castore` to your dependencies.
 
 ```elixir
 def deps do
@@ -98,3 +106,6 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
   See the License for the specific language governing permissions and
   limitations under the License.
+
+[castore]: https://github.com/ericmj/castore
+[documentation]: https://hexdocs.pm/mint
