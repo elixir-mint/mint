@@ -361,16 +361,26 @@ defmodule Mint.Core.Transport.SSL do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
-    |> add_cacerts()
-    |> add_partial_chain_fun()
-    |> add_verify_fun(hostname)
+    |> add_verify_opts(hostname)
+  end
+
+  defp add_verify_opts(opts, hostname) do
+    verify = Keyword.get(opts, :verify)
+
+    if verify == :verify_peer do
+      opts
+      |> add_cacerts()
+      |> add_partial_chain_fun()
+      |> add_verify_fun(hostname)
+    else
+      opts
+    end
   end
 
   defp add_verify_fun(opts, host_or_ip) do
-    verify = Keyword.get(opts, :verify)
     verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
 
-    if verify == :verify_peer and not verify_fun_present? do
+    if not verify_fun_present? do
       host_or_ip = String.to_charlist(host_or_ip)
       reference_ids = [dns_id: host_or_ip, ip: host_or_ip]
       Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
