@@ -20,6 +20,11 @@ In this example we will look at wrapping a single connection in a GenServer. Thi
 
 The way this architecture works is that a GenServer process holds the connection. The connection is started when the `ConnectionProcess` GenServer starts (in the `init/1` callback). When a request is made, the request is sent but the GenServer keeps processing stuff and doesn't directly reply to the process that asked to send the request. The GenServer will only reply to the caller once a response comes from the server. This allows the GenServer to keep sending requests and processing responses while making the request blocking for the caller.
 
+This asynchronous architecture also makes the GenServer usable from different processes. If you use HTTP/1, requests will appear to be concurrent to the callers of our GenServer, but the GenServer will pipeline the requests. If you use HTTP/2, the requests will be actually concurrent.
+If you want to avoid pipelining requests you need to manually queue them or reject them in case there's already an ongoing request.
+
+In this code we don't handle closed connections and failed requests (for brevity). For example, you could handle closed connections by having the GenServer try to reconnect after a backoff time.
+
 ```elixir
 defmodule ConnectionProcess do
   use GenServer
@@ -51,14 +56,14 @@ defmodule ConnectionProcess do
     # In both the successful case and the error case, we make sure to update the connection
     # struct in the state since the connection is an immutable data structure.
     case Mint.HTTP.request(state.conn, method, path, headers, body) do
-      {:ok, request_ref, conn} ->
+      {:ok, conn, request_ref} ->
         state = put_in(state.conn, conn)
         # We store the caller this request belongs to and an empty map as the response.
         # The map will be filled with status code, headers, and so on.
         state = put_in(state.requests[request_ref], %{from: from, response: %{}})
         {:noreply, state}
 
-      {:error, reason, conn} ->
+      {:error, conn, reason} ->
         state = put_in(state.conn, conn)
         {:reply, {:error, reason}, state}
     end
