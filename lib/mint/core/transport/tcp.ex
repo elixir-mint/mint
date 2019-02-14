@@ -9,18 +9,19 @@ defmodule Mint.Core.Transport.TCP do
     active: false
   ]
 
+  @default_timeout 30_000
+
   @impl true
-  def connect(host, port, opts) do
-    # TODO: Timeout
+  def connect(hostname, port, opts) do
+    hostname = String.to_charlist(hostname)
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     opts =
       opts
       |> Keyword.merge(@transport_opts)
       |> Keyword.delete(:alpn_advertised_protocols)
 
-    host
-    |> String.to_charlist()
-    |> :gen_tcp.connect(port, opts)
+    :gen_tcp.connect(hostname, port, opts, timeout)
   end
 
   @impl true
