@@ -119,6 +119,7 @@ defmodule Mint.HTTP do
 
     * `:transport_opts` - (keyword) options to be given to the transport being used.
       These options will be merged with some default options that cannot be overridden.
+      For more details, refer to the "Transport options" section below.
 
     * `:protocols` - (list of atoms) a list of protocols to try when connecting to the
       server. The possible values in the list are `:http1` for HTTP/1 and HTTP/1.1 and
@@ -165,6 +166,58 @@ defmodule Mint.HTTP do
   through the proxy. Using `:https` for both the proxy and the connection scheme
   is not supported, it is recommended to use `:https` for the end host connection
   instead of the proxy.
+
+  ## Transport options
+
+  The options specified in `:transport_opts` are passed to the module that
+  implements the socket interface: `:gen_tcp` when the scheme is `:http`, and
+  `:ssl` when the scheme is`:https`. Please refer to the documentation for those
+  modules, as well as for `:inet.setopts/2`, for a detailed description of all
+  available options.
+
+  The behaviour of some options is modified by Mint, as described below.
+
+  Common options for `:http` and `:https`:
+
+    * `:active` - managed by Mint; should not normally be modified by the
+      application at any time
+    * `:mode` - set to `:binary`; cannot be overriden
+    * `:packet` - set to `:raw`; cannot be overridden
+
+  Options for `:https` only:
+
+    * `:alpn_advertised_protocols` - managed by Mint; cannot be overridden
+    * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
+      no CA trust store is specified using the `:cacertfile` or `:cacerts`
+      option, Mint will attempt to use the trust store from the CAStore package,
+      or raise an exception if this package is not available
+    * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites()`
+      filtered according to the blacklist in RFC7540 appendix A; may be
+      overridden by the caller
+    * `:depth` - defaults to 4; may be overridden by the caller
+    * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
+      Mint will enable its own partial chain handler, which accepts server
+      certificate chains containing a certificate that was issued by a
+      CA certificate in the CA trust store, even if that certificate is not
+      last in the chain; this improves interoperability with some servers
+      (e.g. with a cross-signed intermediate CA, or some misconfigured servers),
+      but it should be noted that this is a less strict interpretation of the
+      TLS specification than the Erlang/OTP default behaviour
+    * `:reuse_sessions` - defaults to `true`; may be overridden by the caller
+    * `:secure_renegotiate` - defaults to `true`; may be overridden by the
+      caller
+    * `:server_name_indication` - defaults to specified destination hostname;
+      may be overridden by the caller
+    * `:verify` - defaults to `:verify_peer`; may be overridden by the caller
+    * `:verify_fun` - unless a custom `:verify_fun` is specified, or `:verify`
+      is set to `:verify_none`, Mint will enable hostname verification with
+      support for wildcards in the server's 'SubjectAltName' extension, similar
+      to the behaviour implemented in
+      `:public_key.pkix_verify_hostname_match_fun(:https)` in recent Erlang/OTP
+      releases; this improves compatibility with recently issued wildcard
+      certificates, also on older Erlang/OTP releases
+    * `:versions` - defaults to `[:"tlsv1.2"]` (TLS v1.2 only); may be
+      overridden by the caller
 
   ## Examples
 
