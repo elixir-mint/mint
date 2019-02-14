@@ -59,9 +59,7 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  @doc """
-  TODO: write docs.
-  """
+  @doc false
   @spec upgrade(
           module(),
           Mint.Core.Transport.socket(),
