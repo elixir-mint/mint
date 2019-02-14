@@ -95,6 +95,8 @@ defmodule Mint.HTTP2.HPACK.Table do
 
   @doc """
   Adds the given header to the given table.
+
+  If the new entry does not fit within the max table size then the oldest entries will be evicted.
   """
   @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
@@ -221,7 +223,12 @@ defmodule Mint.HTTP2.HPACK.Table do
     if name_index, do: {:name, name_index}, else: :not_found
   end
 
-  @doc "TODO"
+  @doc """
+  Resizes the table.
+
+  If the existing entries do not fit in the new table size the oldest entries are evicted.
+  """
+  @spec resize(t(), non_neg_integer()) :: t()
   def resize(%__MODULE__{entries: entries, size: size} = table, new_size) do
     {new_entries_reversed, new_size} = evict_towards_size(Enum.reverse(entries), size, new_size)
 
