@@ -292,6 +292,7 @@ defmodule Mint.Core.Transport.SSL do
   ]
 
   @default_versions [:"tlsv1.2"]
+  @default_timeout 30_000
 
   Record.defrecordp(
     :certificate,
@@ -311,19 +312,21 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def connect(hostname, port, opts) do
-    # TODO: Timeout
+    hostname = String.to_charlist(hostname)
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
 
-    hostname
-    |> String.to_charlist()
-    |> :ssl.connect(port, ssl_opts(hostname, opts))
+    :ssl.connect(hostname, port, ssl_opts(hostname, opts), timeout)
   end
 
   @impl true
   def upgrade(socket, Mint.Core.Transport.TCP, hostname, _port, opts) do
+    hostname = String.to_charlist(hostname)
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
+
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
-    case :ssl.connect(socket, ssl_opts(hostname, opts)) do
+    case :ssl.connect(socket, ssl_opts(hostname, opts), timeout) do
       {:ok, socket} -> {:ok, {__MODULE__, socket}}
       {:error, reason} -> {:error, reason}
     end
@@ -381,7 +384,6 @@ defmodule Mint.Core.Transport.SSL do
     verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
 
     if not verify_fun_present? do
-      host_or_ip = String.to_charlist(host_or_ip)
       reference_ids = [dns_id: host_or_ip, ip: host_or_ip]
       Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
     else
@@ -423,12 +425,12 @@ defmodule Mint.Core.Transport.SSL do
   defp domain_without_host([?. | domain]), do: domain
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
-  defp default_ssl_opts(host) do
+  defp default_ssl_opts(hostname) do
     # TODO: Add revocation check
 
     [
       ciphers: default_ciphers(),
-      server_name_indication: String.to_charlist(host),
+      server_name_indication: hostname,
       versions: @default_versions,
       verify: :verify_peer,
       depth: 4,
