@@ -189,11 +189,13 @@ defmodule Mint.HTTP do
     * `:alpn_advertised_protocols` - managed by Mint; cannot be overridden
     * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
-      option, Mint will attempt to use the trust store from the [CAStore](https://github.com/ericmj/castore) package,
-      or raise an exception if this package is not available
+      option, Mint will attempt to use the trust store from the
+      [CAStore](https://github.com/ericmj/castore) package, or raise an
+      exception if this package is not available
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
-      filtered according to the blacklist in RFC7540 appendix A; may be
-      overridden by the caller
+      filtered according to the blacklist in
+      [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
+      may be overridden by the caller
     * `:depth` - defaults to `4`; may be overridden by the caller
     * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
       Mint will enable its own partial chain handler, which accepts server
