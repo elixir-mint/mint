@@ -177,12 +177,19 @@ defmodule Mint.HTTP do
 
   The behaviour of some options is modified by Mint, as described below.
 
+  A special case is the `:timeout` option, which is passed to the transport
+  module's `connect` function to limit the amount of time to wait for the
+  network connection to be established.
+
   Common options for `:http` and `:https`:
 
     * `:active` - managed by Mint; should not normally be modified by the
       application at any time
     * `:mode` - set to `:binary`; cannot be overriden
     * `:packet` - set to `:raw`; cannot be overridden
+    * `:timeout` - connect timeout in milliseconds; defaults to `30_000` (30
+      seconds), and may be overridden by the caller; set to `:infinity` to
+      disable the connect timeout
 
   Options for `:https` only:
 
