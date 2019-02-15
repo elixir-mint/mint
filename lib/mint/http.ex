@@ -171,7 +171,7 @@ defmodule Mint.HTTP do
 
   The options specified in `:transport_opts` are passed to the module that
   implements the socket interface: `:gen_tcp` when the scheme is `:http`, and
-  `:ssl` when the scheme is`:https`. Please refer to the documentation for those
+  `:ssl` when the scheme is `:https`. Please refer to the documentation for those
   modules, as well as for `:inet.setopts/2`, for a detailed description of all
   available options.
 
@@ -189,18 +189,18 @@ defmodule Mint.HTTP do
     * `:alpn_advertised_protocols` - managed by Mint; cannot be overridden
     * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
-      option, Mint will attempt to use the trust store from the CAStore package,
+      option, Mint will attempt to use the trust store from the [CAStore](https://github.com/ericmj/castore) package,
       or raise an exception if this package is not available
-    * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites()`
+    * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
       filtered according to the blacklist in RFC7540 appendix A; may be
       overridden by the caller
-    * `:depth` - defaults to 4; may be overridden by the caller
+    * `:depth` - defaults to `4`; may be overridden by the caller
     * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
       Mint will enable its own partial chain handler, which accepts server
       certificate chains containing a certificate that was issued by a
       CA certificate in the CA trust store, even if that certificate is not
       last in the chain; this improves interoperability with some servers
-      (e.g. with a cross-signed intermediate CA, or some misconfigured servers),
+      (for example, with a cross-signed intermediate CA, or some misconfigured servers),
       but it should be noted that this is a less strict interpretation of the
       TLS specification than the Erlang/OTP default behaviour
     * `:reuse_sessions` - defaults to `true`; may be overridden by the caller
