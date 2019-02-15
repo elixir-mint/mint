@@ -142,20 +142,13 @@ defmodule Mint.HTTP1.IntegrationTest do
     assert merge_body(responses4, request4) =~ "A simple HTTP Request &amp; Response Service"
   end
 
-  # TODO: Figure out what is happening here. Server is responding without
-  # content-length or transfer-encoding headers, this means we should read body
-  # until connection is closed by server. We timeout in this test but curl
-  # returns immediately, so somehow curl knows much earlier that the body is
-  # zero length.
-  # $ curl -vv httpbin.org/stream-bytes/0
-  @tag :skip
   test "chunked no chunks - httpbin.org" do
     assert {:ok, conn} = HTTP1.connect(:http, "httpbin.org", 80)
     assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/stream-bytes/0", [], nil)
 
     assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
 
-    assert byte_size(merge_body(responses, request)) == 1024
+    assert byte_size(merge_body(responses, request)) == 0
   end
 
   test "chunked single chunk - httpbin.org" do
