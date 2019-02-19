@@ -30,8 +30,11 @@ defmodule Mint.IntegrationTest do
 
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
-      assert {:error, {:tls_alert, 'no application protocol'}} =
-               HTTP.connect(:https, "httpbin.org", 443, protocols: [:http2])
+      assert {:error, :protocol_not_negotiated} =
+               HTTP.connect(:https, "httpbin.org", 443,
+                 protocols: [:http2],
+                 transport_opts: [reuse_sessions: false]
+               )
     end
   end
 
@@ -80,7 +83,7 @@ defmodule Mint.IntegrationTest do
                  :https,
                  "untrusted-root.badssl.com",
                  443,
-                 transport_opts: [log_alert: false]
+                 transport_opts: [log_alert: false, reuse_sessions: false]
                )
 
       assert {:ok, _conn} =
@@ -98,7 +101,7 @@ defmodule Mint.IntegrationTest do
                  :https,
                  "wrong.host.badssl.com",
                  443,
-                 transport_opts: [log_alert: false]
+                 transport_opts: [log_alert: false, reuse_sessions: false]
                )
 
       assert {:ok, _conn} =
