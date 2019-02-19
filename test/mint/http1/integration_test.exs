@@ -33,22 +33,6 @@ defmodule Mint.HTTP1.IntegrationTest do
     assert byte_size(merge_body(responses, request)) == 50000
   end
 
-  test "ssl with cacerts - httpbin.org" do
-    cacerts =
-      "test/support/empty_cacerts.pem"
-      |> File.read!()
-      |> :public_key.pem_decode()
-      |> Enum.map(&:public_key.pem_entry_decode/1)
-
-    assert {:error, {:tls_alert, 'unknown ca'}} =
-             HTTP1.connect(
-               :https,
-               "httpbin.org",
-               443,
-               transport_opts: [cacerts: cacerts, log_alert: false]
-             )
-  end
-
   test "ssl with missing CA cacertfile - httpbin.org" do
     assert {:error, {:tls_alert, 'unknown ca'}} =
              HTTP1.connect(
