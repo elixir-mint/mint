@@ -163,7 +163,7 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
 
-    assert {:error, conn, :invalid_response, []} =
+    assert {:error, conn, :invalid_response, [{:status, _ref, 200}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     refute HTTP1.open?(conn)

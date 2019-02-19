@@ -58,8 +58,7 @@ defmodule Mint.HTTP1.TestHelpers do
         maybe_done(conn, acc ++ responses)
 
       {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
-        # TODO: accumulated responses should be returned here
-        assert {:error, _conn, _reason} = conn.__struct__.stream(conn, message)
+        assert {:error, _conn, _reason, _responses} = conn.__struct__.stream(conn, message)
     after
       10000 ->
         flunk("receive_stream timeout")

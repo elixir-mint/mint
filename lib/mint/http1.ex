@@ -267,10 +267,9 @@ defmodule Mint.HTTP1 do
       {:ok, conn, responses} ->
         {:ok, conn, Enum.reverse(responses)}
 
-      {:error, conn, reason} ->
+      {:error, conn, reason, responses} ->
         conn = put_in(conn.state, :closed)
-        # TODO: Include responses that were successfully decoded before the error
-        {:error, conn, reason, []}
+        {:error, conn, reason, responses}
     end
   end
 
@@ -342,7 +341,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_status_line}
+        {:error, conn, :invalid_status_line, responses}
     end
   end
 
@@ -363,7 +362,7 @@ defmodule Mint.HTTP1 do
 
         case store_header(request, name, value) do
           {:ok, request} -> decode_headers(conn, request, rest, responses, headers)
-          {:error, reason} -> {:error, conn, reason}
+          {:error, reason} -> {:error, conn, reason, responses}
         end
 
       {:ok, :eof, rest} ->
@@ -378,7 +377,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_header}
+        {:error, conn, :invalid_header, responses}
     end
   end
 
@@ -429,7 +428,7 @@ defmodule Mint.HTTP1 do
         decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
       _other ->
-        {:error, conn, :invalid_chunk_size}
+        {:error, conn, :invalid_chunk_size, responses}
     end
   end
 
@@ -460,7 +459,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       _other ->
-        {:error, conn, :missing_crlf_after_chunk}
+        {:error, conn, :missing_crlf_after_chunk, responses}
     end
   end
 
@@ -501,7 +500,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_trailer_header}
+        {:error, conn, :invalid_trailer_header, responses}
     end
   end
 
