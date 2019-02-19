@@ -39,7 +39,11 @@ defmodule Mint.HTTP1.IntegrationTest do
                :https,
                "httpbin.org",
                443,
-               transport_opts: [cacertfile: "test/support/empty_cacerts.pem", log_alert: false]
+               transport_opts: [
+                 cacertfile: "test/support/empty_cacerts.pem",
+                 log_alert: false,
+                 reuse_sessions: false
+               ]
              )
   end
 
@@ -49,7 +53,7 @@ defmodule Mint.HTTP1.IntegrationTest do
                :https,
                "httpbin.org",
                443,
-               transport_opts: [cacerts: [], log_alert: false]
+               transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
              )
   end
 
@@ -160,7 +164,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   test "ssl, bad certificate - badssl.com" do
     assert {:error, {:tls_alert, 'unknown ca'}} =
              HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
-               transport_opts: [log_alert: false]
+               transport_opts: [log_alert: false, reuse_sessions: false]
              )
 
     assert {:ok, _conn} =
@@ -172,7 +176,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   test "ssl, bad hostname - badssl.com" do
     assert {:error, {:tls_alert, 'handshake failure'}} =
              HTTP1.connect(:https, "wrong.host.badssl.com", 443,
-               transport_opts: [log_alert: false]
+               transport_opts: [log_alert: false, reuse_sessions: false]
              )
 
     assert {:ok, _conn} =
