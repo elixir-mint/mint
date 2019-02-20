@@ -105,14 +105,15 @@ defmodule Mint.HTTP1Test do
 
   test "status, headers, and body", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
-    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nXX"
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
 
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "X"})
+    assert {:error, conn, {:unexpected_data, "X"}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
-    assert conn.buffer == "XX"
+    refute HTTP1.open?(conn)
   end
 
   test "connection: close", %{conn: conn} do
@@ -122,7 +123,6 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "X"})
     refute HTTP1.open?(conn)
   end
 
@@ -133,7 +133,6 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "X"})
     assert HTTP1.open?(conn)
   end
 
@@ -144,7 +143,6 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "X"})
     refute HTTP1.open?(conn)
   end
 
@@ -155,7 +153,6 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "X"})
     assert HTTP1.open?(conn)
   end
 
