@@ -473,7 +473,12 @@ defmodule Mint.HTTP2Test do
     assert HTTP2.open?(conn)
   end
 
-  test "close/1", %{conn: conn} do
+  test "close/1", %{conn: conn, server: server} do
+    TestServer.expect(server, fn state, settings() ->
+      frame = settings(stream_id: 0, flags: set_flag(:settings, :ack), params: [])
+      TestServer.send_frame(state, frame)
+    end)
+
     assert HTTP2.open?(conn)
 
     # Ensure the connection is established before closing
