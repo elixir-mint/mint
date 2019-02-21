@@ -14,7 +14,7 @@ defmodule Mint.HTTP1.PropertiesTest do
 
   property "body with content-length", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
-    response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789XXX"
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789"
 
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
@@ -28,8 +28,7 @@ defmodule Mint.HTTP1.PropertiesTest do
       assert {:status, ^ref, 200} = status
       assert {:headers, ^ref, [{"content-length", "10"}]} = headers
       assert merge_body(rest, ref) == "0123456789"
-
-      assert conn.buffer == "XXX"
+      assert conn.buffer == ""
     end
   end
 
@@ -38,7 +37,7 @@ defmodule Mint.HTTP1.PropertiesTest do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\n"
 
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
@@ -52,8 +51,7 @@ defmodule Mint.HTTP1.PropertiesTest do
       assert {:status, ^ref, 200} = status
       assert {:headers, ^ref, [{"transfer-encoding", "chunked"}]} = headers
       assert merge_body_with_trailers(rest, ref) == {"0123", [{"trailer", "value"}]}
-
-      assert conn.buffer == "XXX"
+      assert conn.buffer == ""
     end
   end
 

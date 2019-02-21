@@ -229,7 +229,7 @@ defmodule Mint.HTTP1 do
   def stream(conn, message)
 
   def stream(%__MODULE__{request: %{state: :stream_request}} = conn, _message) do
-    # TODO: Close connection
+    conn = internal_close(conn)
     {:error, conn, :request_body_not_streamed, []}
   end
 
@@ -255,9 +255,8 @@ defmodule Mint.HTTP1 do
   end
 
   defp handle_data(%__MODULE__{request: nil} = conn, data) do
-    # TODO: Figure out if we should keep buffering even though there are no
-    # requests in flight
-    {:ok, put_in(conn.buffer, conn.buffer <> data), []}
+    conn = internal_close(conn)
+    {:error, conn, {:unexpected_data, data}, []}
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
