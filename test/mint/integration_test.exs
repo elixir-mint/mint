@@ -69,10 +69,6 @@ defmodule Mint.IntegrationTest do
                {:data, ^request, <<_>>},
                {:done, ^request}
              ] = responses
-
-      # TODO: Should we support HTTP2 specific features throught HTTPN?
-      # assert {:ok, conn, ref} = Mint.ping(conn)
-      # assert {:ok, conn, [{:pong, ^ref}]} = Mint.HTTP2.TestHelpers.receive_stream(conn)
     end
   end
 
