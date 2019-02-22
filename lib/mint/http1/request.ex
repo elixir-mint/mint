@@ -49,13 +49,7 @@ defmodule Mint.HTTP1.Request do
     end
   end
 
-  # TODO: Consider ordering some of the headers, from RFC2616 4.2:
-  # > The order in which header fields with differing field names are
-  # > received is not significant. However, it is "good practice" to send
-  # > general-header fields first, followed by request-header or response-
-  # > header fields, and ending with the entity-header fields.
   defp encode_headers(headers) do
-    # TODO: Consider validating header names and values, CRLF not allowed unless before LWS
     Enum.reduce(headers, "", fn {name, value}, acc ->
       validate_header_name!(name)
       validate_header_value!(name, value)
