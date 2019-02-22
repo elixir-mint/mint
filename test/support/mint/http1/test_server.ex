@@ -6,7 +6,9 @@ defmodule Mint.HTTP1.TestServer do
   end
 
   defp loop(listen_socket) do
-    {:ok, _socket} = :gen_tcp.accept(listen_socket)
-    loop(listen_socket)
+    case :gen_tcp.accept(listen_socket) do
+      {:ok, _socket} -> loop(listen_socket)
+      {:error, :closed} -> :ok
+    end
   end
 end
