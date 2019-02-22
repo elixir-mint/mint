@@ -349,9 +349,14 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode(:body, conn, data, responses) do
-    body = message_body(conn.request)
-    conn = put_in(conn.request.body, body)
-    decode_body(body, conn, data, conn.request.ref, responses)
+    case message_body(conn.request) do
+      {:ok, body} ->
+        conn = put_in(conn.request.body, body)
+        decode_body(body, conn, data, conn.request.ref, responses)
+
+      {:error, reason} ->
+        {:error, conn, reason, responses}
+    end
   end
 
   defp decode_headers(conn, request, data, responses, headers) do
@@ -549,8 +554,6 @@ defmodule Mint.HTTP1 do
   end
 
   defp request_done(%{request: request} = conn) do
-    # TODO: Figure out what to do if connection is closed or there is no next
-    # request and we still have data on the socket. RFC7230 3.4
     conn = pop_request(conn)
 
     cond do
@@ -593,23 +596,26 @@ defmodule Mint.HTTP1 do
   defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       method == "HEAD" or status in 100..199 or status in [204, 304] ->
-        :none
+        {:ok, :none}
 
       # method == "CONNECT" and status in 200..299 -> nil
 
+      request.transfer_encoding != [] && request.content_length ->
+        {:error, :transfer_encoding_and_content_length}
+
       "chunked" == List.first(request.transfer_encoding) ->
-        {:chunked, nil}
+        {:ok, {:chunked, nil}}
 
       request.content_length ->
-        {:content_length, request.content_length}
+        {:ok, {:content_length, request.content_length}}
 
       true ->
-        :until_closed
+        {:ok, :until_closed}
     end
   end
 
   defp message_body(%{body: body}) do
-    body
+    {:ok, body}
   end
 
   defp new_request(ref, state, method) do
