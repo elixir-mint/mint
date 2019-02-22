@@ -9,7 +9,7 @@ defmodule Mint.HTTP1.Parse do
 
   defmacro is_tchar(char) do
     quote do
-      unquote(char) in '!#$%&\'*+-.^_`|~' or is_digit(unquote(char)) or is_alpha(unquote(char))
+      is_digit(unquote(char)) or is_alpha(unquote(char)) or unquote(char) in '!#$%&\'*+-.^_`|~'
     end
   end
 
