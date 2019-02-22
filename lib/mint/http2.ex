@@ -142,16 +142,14 @@ defmodule Mint.HTTP2 do
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, term()}
   def connect(scheme, hostname, port, opts \\ []) do
-    transport = scheme_to_transport(scheme)
-
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case negotiate(hostname, port, transport, transport_opts) do
+    case negotiate(hostname, port, scheme, transport_opts) do
       {:ok, socket} ->
-        initiate(transport, socket, hostname, port, opts)
+        initiate(scheme, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -160,24 +158,24 @@ defmodule Mint.HTTP2 do
 
   @doc false
   @spec upgrade(
-          module(),
+          Types.scheme(),
           Mint.Core.Transport.socket(),
           Types.scheme(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, socket, scheme, hostname, port, opts) do
-    new_transport = scheme_to_transport(scheme)
+  def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
+    transport = scheme_to_transport(new_scheme)
 
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case new_transport.upgrade(socket, old_transport, hostname, port, transport_opts) do
-      {:ok, {new_transport, socket}} ->
-        initiate(new_transport, socket, hostname, port, opts)
+    case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+      {:ok, socket} ->
+        initiate(new_scheme, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -469,23 +467,23 @@ defmodule Mint.HTTP2 do
   @doc false
   @impl true
   @spec initiate(
-          module(),
+          Types.scheme(),
           Mint.Core.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate(transport, socket, hostname, port, opts) do
+  def initiate(scheme, socket, hostname, port, opts) do
+    transport = scheme_to_transport(scheme)
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
     conn = %Mint.HTTP2{
       hostname: hostname,
       port: port,
-      transport: transport,
+      transport: scheme_to_transport(scheme),
       socket: socket,
-      # TODO: should we replace this with the scheme given in connect?
-      scheme: Keyword.get(opts, :scheme, "https"),
+      scheme: Atom.to_string(scheme),
       state: :open
     }
 
@@ -521,7 +519,9 @@ defmodule Mint.HTTP2 do
 
   ## Helpers
 
-  defp negotiate(hostname, port, transport, transport_opts) do
+  defp negotiate(hostname, port, scheme, transport_opts) do
+    transport = scheme_to_transport(scheme)
+
     with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(socket) do
       if protocol == "h2" do

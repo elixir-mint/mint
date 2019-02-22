@@ -61,22 +61,22 @@ defmodule Mint.HTTP1 do
 
   @doc false
   @spec upgrade(
-          module(),
+          Types.scheme(),
           Mint.Core.Transport.socket(),
           Types.scheme(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def upgrade(old_transport, socket, scheme, hostname, port, opts) do
+  def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
     # TODO: Also ALPN negotiate HTTP1?
 
-    new_transport = scheme_to_transport(scheme)
+    transport = scheme_to_transport(new_scheme)
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    case new_transport.upgrade(socket, old_transport, hostname, port, transport_opts) do
-      {:ok, {new_transport, socket}} ->
-        initiate(new_transport, socket, hostname, port, opts)
+    case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+      {:ok, socket} ->
+        initiate(new_scheme, socket, hostname, port, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -86,13 +86,15 @@ defmodule Mint.HTTP1 do
   @doc false
   @impl true
   @spec initiate(
-          module(),
+          Types.scheme(),
           Mint.Core.Transport.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, term()}
-  def initiate(transport, socket, hostname, _port, _opts) do
+  def initiate(scheme, socket, hostname, _port, _opts) do
+    transport = scheme_to_transport(scheme)
+
     with :ok <- inet_opts(transport, socket),
          :ok <- transport.setopts(socket, active: :once) do
       conn = %__MODULE__{

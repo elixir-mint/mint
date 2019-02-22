@@ -25,8 +25,8 @@ defmodule Mint.Core.Transport.TCP do
   end
 
   @impl true
-  def upgrade(socket, transport, _hostname, _port, _opts) do
-    {:ok, {transport, socket}}
+  def upgrade(socket, _scheme, _hostname, _port, _opts) do
+    {:ok, socket}
   end
 
   @impl true
