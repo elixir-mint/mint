@@ -319,7 +319,7 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @impl true
-  def upgrade(socket, Mint.Core.Transport.TCP, hostname, _port, opts) do
+  def upgrade(socket, :http, hostname, _port, opts) do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
@@ -327,19 +327,13 @@ defmodule Mint.Core.Transport.SSL do
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
     case :ssl.connect(socket, ssl_opts(hostname, opts), timeout) do
-      {:ok, socket} -> {:ok, {__MODULE__, socket}}
+      {:ok, socket} -> {:ok, socket}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def upgrade(_socket, Mint.Core.Transport.SSL, _hostname, _port, _opts) do
+  def upgrade(_socket, :https, _hostname, _port, _opts) do
     raise "nested SSL sessions are not supported"
-  end
-
-  def upgrade(state, transport, hostname, port, opts) do
-    socket = transport.socket(state)
-    transport = transport.actual_transport(state)
-    upgrade(socket, transport, hostname, port, opts)
   end
 
   @impl true

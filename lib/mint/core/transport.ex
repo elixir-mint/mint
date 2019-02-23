@@ -10,11 +10,11 @@ defmodule Mint.Core.Transport do
 
   @callback upgrade(
               Types.socket(),
-              old_transport :: module(),
+              original_scheme :: Types.scheme(),
               hostname :: String.t(),
               :inet.port_number(),
               opts :: keyword()
-            ) :: {:ok, {module(), Types.socket()}} | error()
+            ) :: {:ok, Types.socket()} | error()
 
   @callback negotiated_protocol(Types.socket()) ::
               {:ok, protocol :: binary()} | {:error, :protocol_not_negotiated}

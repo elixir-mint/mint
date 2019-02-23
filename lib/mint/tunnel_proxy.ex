@@ -1,8 +1,6 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  import Mint.Core.Util
-
   alias Mint.{HTTP1, Negotiate}
 
   def connect(proxy, host) do
@@ -32,9 +30,10 @@ defmodule Mint.TunnelProxy do
 
   defp upgrade_connection(conn, proxy, {scheme, hostname, port, opts}) do
     {proxy_scheme, _proxy_hostname, _proxy_port, _proxy_opts} = proxy
-    transport = scheme_to_transport(proxy_scheme)
     socket = HTTP1.get_socket(conn)
-    Negotiate.upgrade(transport, socket, scheme, hostname, port, opts)
+
+    # Note that we may leak messages if the server sent data after the CONNECT response
+    Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts)
   end
 
   defp receive_response(conn, ref) do
