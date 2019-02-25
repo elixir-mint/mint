@@ -1,12 +1,12 @@
 defmodule Mint.HTTP2.HPACK do
-  @moduledoc """
-  Support for the HPACK header compression algorithm.
+  @moduledoc false
 
-  This module provides support for the HPACK header compression algorithm used mainly in HTTP/2.
-  The HPACK algorithm requires an encoding context on the encoder side and a decoding context on
-  the decoder side. These contexts are semantically different but structurally the same and they
-  can both be created through `new/1`.
-  """
+  # Support for the HPACK header compression algorithm.
+  #
+  # This module provides support for the HPACK header compression algorithm used mainly in HTTP/2.
+  # The HPACK algorithm requires an encoding context on the encoder side and a decoding context on
+  # the decoder side. These contexts are semantically different but structurally the same and they
+  # can both be created through `new/1`.
 
   alias Mint.HTTP2.HPACK.{Table, Types}
 
