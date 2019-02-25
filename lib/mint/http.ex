@@ -305,8 +305,7 @@ defmodule Mint.HTTP do
 
   ## Examples
 
-      Mint.HTTP.close(conn)
-      #=> :ok
+      {:ok, conn} = Mint.HTTP.close(conn)
 
   """
   @impl true
