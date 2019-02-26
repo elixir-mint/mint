@@ -230,11 +230,6 @@ defmodule Mint.HTTP1 do
           | :unknown
   def stream(conn, message)
 
-  def stream(%__MODULE__{request: %{state: :stream_request}} = conn, _message) do
-    conn = internal_close(conn)
-    {:error, conn, :request_body_not_streamed, []}
-  end
-
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
