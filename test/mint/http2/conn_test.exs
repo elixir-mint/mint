@@ -260,6 +260,55 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "server pushes" do
+    test "a PUSH_PROMISE frame and a few CONTINUATION frames are received", context do
+      promised_stream_id = 4
+
+      TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
+        headers = [
+          {:store_name, ":method", "GET"},
+          {:store_name, "foo", "bar"},
+          {:store_name, "baz", "bong"}
+        ]
+
+        {state, hbf} = TestServer.encode_headers(state, headers)
+
+        <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
+        frame1 =
+          push_promise(stream_id: stream_id, hbf: hbf1, promised_stream_id: promised_stream_id)
+
+        state = TestServer.send_frame(state, frame1)
+
+        frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+        state = TestServer.send_frame(state, frame2)
+
+        frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
+        state = TestServer.send_frame(state, frame3)
+
+        headers = [{:store_name, ":status", "200"}]
+        {state, hbf} = TestServer.encode_headers(state, headers)
+        final_frame = headers(stream_id: stream_id, hbf: hbf, flags: 0x04)
+        state = TestServer.send_frame(state, final_frame)
+
+        state
+      end)
+
+      {:ok, conn, ref} = HTTP2.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:push_promise, ^ref, metadata}] = responses
+      assert %{promised_request_ref: promised_request_ref, headers: headers} = metadata
+      assert is_reference(promised_request_ref)
+      assert headers == [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}] = responses
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "frame encoding errors by the server" do
     test "server sends a frame with the wrong stream id", context do
       context.server

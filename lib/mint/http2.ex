@@ -131,7 +131,7 @@ defmodule Mint.HTTP2 do
             server_max_concurrent_streams: non_neg_integer(),
             initial_window_size: pos_integer(),
             max_frame_size: pos_integer(),
-            headers_being_processed: {stream_id :: non_neg_integer(), iodata(), boolean()} | nil
+            headers_being_processed: {stream_id :: non_neg_integer(), iodata(), fun()} | nil
           }
 
   ## Public interface
@@ -847,8 +847,8 @@ defmodule Mint.HTTP2 do
 
   defp handle_frame(conn, settings() = frame, resps), do: handle_settings(conn, frame, resps)
 
-  # TODO: implement PUSH_PROMISE
-  defp handle_frame(_, push_promise(), _resps), do: raise("PUSH_PROMISE handling not implemented")
+  defp handle_frame(conn, push_promise() = frame, resps),
+    do: handle_push_promise(conn, frame, resps)
 
   defp handle_frame(conn, Frame.ping() = frame, resps), do: handle_ping(conn, frame, resps)
 
@@ -898,14 +898,16 @@ defmodule Mint.HTTP2 do
     if flag_set?(flags, :headers, :end_headers) do
       decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
     else
-      conn = put_in(conn.headers_being_processed, {stream_id, hbf, end_stream?})
+      callback = &decode_hbf_and_add_responses(&1, &2, &3, &4, end_stream?)
+      conn = put_in(conn.headers_being_processed, {stream_id, hbf, callback})
       {conn, responses}
     end
   end
 
   defp decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?) do
     case decode_hbf(conn, hbf) do
-      {:ok, status, headers, conn} ->
+      {:ok, [{":status", status} | headers], conn} ->
+        status = String.to_integer(status)
         responses = [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]
 
         if end_stream? do
@@ -917,7 +919,7 @@ defmodule Mint.HTTP2 do
         end
 
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-      {:error, :missing_status_header, conn} ->
+      {:ok, _headers, conn} ->
         conn = close_stream!(conn, stream.id, :protocol_error)
         reason = {:protocol_error, :missing_status_header}
         responses = [{:error, stream.ref, reason} | responses]
@@ -929,11 +931,7 @@ defmodule Mint.HTTP2 do
     case HPACK.decode(hbf, conn.decode_table) do
       {:ok, headers, decode_table} ->
         conn = put_in(conn.decode_table, decode_table)
-
-        case headers do
-          [{":status", status} | headers] -> {:ok, String.to_integer(status), headers, conn}
-          _other -> {:error, :missing_status_header, conn}
-        end
+        {:ok, headers, conn}
 
       {:error, reason} ->
         debug_data = "unable to decode headers: #{inspect(reason)}"
@@ -1042,6 +1040,60 @@ defmodule Mint.HTTP2 do
     put_in(conn.initial_window_size, new_iws)
   end
 
+  # PUSH_PROMISE
+
+  defp handle_push_promise(conn, push_promise() = frame, responses) do
+    push_promise(
+      stream_id: stream_id,
+      flags: flags,
+      promised_stream_id: promised_stream_id,
+      hbf: hbf
+    ) = frame
+
+    stream = fetch_stream!(conn, stream_id)
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+
+    if flag_set?(flags, :push_promise, :end_headers) do
+      decode_push_promise_headers_and_add_response(
+        conn,
+        responses,
+        hbf,
+        stream,
+        promised_stream_id
+      )
+    else
+      callback = &decode_push_promise_headers_and_add_response(&1, &2, &3, &4, promised_stream_id)
+      conn = put_in(conn.headers_being_processed, {stream_id, hbf, callback})
+      {conn, responses}
+    end
+  end
+
+  defp decode_push_promise_headers_and_add_response(
+         conn,
+         responses,
+         hbf,
+         stream,
+         promised_stream_id
+       ) do
+    {:ok, headers, conn} = decode_hbf(conn, hbf)
+
+    promised_stream = %{
+      id: promised_stream_id,
+      ref: make_ref(),
+      state: :idle,
+      window_size: conn.initial_window_size
+    }
+
+    conn = put_in(conn.streams[promised_stream.id], promised_stream)
+
+    responses = [
+      {:push_promise, stream.ref, %{promised_request_ref: promised_stream.ref, headers: headers}}
+      | responses
+    ]
+
+    {conn, responses}
+  end
+
   # PING
 
   defp handle_ping(conn, Frame.ping() = frame, responses) do
@@ -1137,13 +1189,14 @@ defmodule Mint.HTTP2 do
     continuation(stream_id: stream_id, flags: flags, hbf: hbf_chunk) = frame
     stream = fetch_stream!(conn, stream_id)
 
-    {^stream_id, hbf_acc, end_stream?} = conn.headers_being_processed
+    {^stream_id, hbf_acc, callback} = conn.headers_being_processed
 
     if flag_set?(flags, :continuation, :end_headers) do
       hbf = IO.iodata_to_binary([hbf_acc, hbf_chunk])
-      decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
+      conn = put_in(conn.headers_being_processed, nil)
+      callback.(conn, responses, hbf, stream)
     else
-      conn = put_in(conn.headers_being_processed, {stream_id, [hbf_acc, hbf_chunk], end_stream?})
+      conn = put_in(conn.headers_being_processed, {stream_id, [hbf_acc, hbf_chunk], callback})
       {conn, responses}
     end
   end
