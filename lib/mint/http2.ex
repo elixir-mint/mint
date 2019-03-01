@@ -24,6 +24,69 @@ defmodule Mint.HTTP2 do
   does not mean that the response to request A will come before the response to request B.
   This is why we identify each request with a unique reference returned by `request/5`.
   See `request/5` for more information.
+
+  ## Server push
+
+  HTTP/2 supports [server push](https://en.wikipedia.org/wiki/HTTP/2_Server_Push), which
+  is a way for a server to send a response to a client without the client needing to make
+  the corresponding request. The server sends a `:push_promise` response to a normal request:
+  this creates a new request reference. Then, the server sends normal responses for the newly
+  created request reference.
+
+  Let's see an example. We will ask the server for `"/index.html"` and the server will
+  send us a push promise for `"/style.css"`.
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, "example.com", 443)
+      {:ok, conn, request_ref} = Mint.HTTP2.request(conn, "GET", "/index.html", _headers = [])
+
+      next_message =
+        receive do
+          msg -> msg
+        end
+
+      {:ok, conn, responses} = Mint.HTTP2.stream(conn, next_message)
+
+      [
+        {:push_promise, ^request_ref, promised_request_ref, promised_headers},
+        {:status, ^request_ref, 200},
+        {:headers, ^request_ref, []},
+        {:data, ^request_ref, "<html>..."},
+        {:done, ^request_ref}
+      ] = responses
+
+      promised_headers
+      #=> [{":method", "GET"}, {":path", "/style.css"}]
+
+  As you can see in the example above, when the server sends a push promise then a
+  `:push_promise` response is returned as a response to a request. The `:push_promise`
+  response contains a `promised_request_ref` and some `promised_headers`. The
+  `promised_request_ref` is the new request ref that pushed responses will be tagged with.
+  `promised_headers` are headers that tell the client *what request* the promised response
+  will respond to. The idea is that the server tells the client a request the client will
+  want to make and then preemptively sends a response for that request. Promised headers
+  will always include `:method`, `:path`, and `:authority`.
+
+      next_message =
+        receive do
+          msg -> msg
+        end
+
+      {:ok, conn, responses} = Mint.HTTP2.stream(conn, next_message)
+
+      [
+        {:status, ^promised_request_ref, 200},
+        {:headers, ^promised_request_ref, []},
+        {:data, ^promised_request_ref, "body { ... }"},
+        {:done, ^promised_request_ref}
+      ]
+
+  The response to a promised request is like a response to any normal request.
+
+  ### Disabling server pushes
+
+  HTTP/2 exposes a boolean setting for enabling or disabling server pushes with `:enable_push`.
+  You can pass this option when connecting or in `put_settings/2`. By default server push
+  is enabled.
   """
 
   use Bitwise, skip_operators: true
@@ -1093,13 +1156,8 @@ defmodule Mint.HTTP2 do
     }
 
     conn = put_in(conn.streams[promised_stream.id], promised_stream)
-
-    responses = [
-      {:push_promise, stream.ref, %{promised_request_ref: promised_stream.ref, headers: headers}}
-      | responses
-    ]
-
-    {conn, responses}
+    new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
+    {conn, [new_response | responses]}
   end
 
   # PING

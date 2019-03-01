@@ -23,6 +23,7 @@ defmodule Mint.Types do
           | {:data, request_ref(), body_chunk :: binary()}
           | {:done, request_ref()}
           | {:pong, request_ref()}
+          | {:push_promise, request_ref(), promised_request_ref :: request_ref(), headers()}
           | {:error, request_ref(), reason :: term()}
 
   @typedoc """

@@ -307,8 +307,7 @@ defmodule Mint.HTTP2Test do
       {:ok, conn, ref} = HTTP2.request(context.conn, "GET", "/", [])
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:push_promise, ^ref, metadata}] = responses
-      assert %{promised_request_ref: promised_ref, headers: headers} = metadata
+      assert [{:push_promise, ^ref, promised_ref, headers}] = responses
       assert is_reference(promised_ref)
       assert headers == [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
 
