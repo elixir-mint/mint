@@ -892,7 +892,7 @@ defmodule Mint.HTTP2 do
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote])
     end_stream? = flag_set?(flags, :headers, :end_stream)
 
     if flag_set?(flags, :headers, :end_headers) do
@@ -910,12 +910,20 @@ defmodule Mint.HTTP2 do
         status = String.to_integer(status)
         responses = [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]
 
-        if end_stream? do
-          conn = put_in(conn.streams[stream.id].state, :half_closed_remote)
-          conn = update_in(conn.open_stream_count, &(&1 - 1))
-          {conn, [{:done, stream.ref} | responses]}
-        else
-          {conn, responses}
+        cond do
+          end_stream? ->
+            conn = put_in(conn.streams[stream.id].state, :half_closed_remote)
+            conn = update_in(conn.open_stream_count, &(&1 - 1))
+            {conn, [{:done, stream.ref} | responses]}
+
+          # If this was a promised stream, it goes in the :half_closed_local state as
+          # soon as it receives headers.
+          stream.state == :reserved_remote ->
+            conn = put_in(conn.streams[stream.id].state, :half_closed_local)
+            {conn, responses}
+
+          true ->
+            {conn, responses}
         end
 
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
@@ -1080,7 +1088,7 @@ defmodule Mint.HTTP2 do
     promised_stream = %{
       id: promised_stream_id,
       ref: make_ref(),
-      state: :idle,
+      state: :reserved_remote,
       window_size: conn.initial_window_size
     }
 

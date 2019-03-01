@@ -288,8 +288,18 @@ defmodule Mint.HTTP2Test do
 
         headers = [{:store_name, ":status", "200"}]
         {state, hbf} = TestServer.encode_headers(state, headers)
-        final_frame = headers(stream_id: stream_id, hbf: hbf, flags: 0x04)
+        flags = set_flags(:headers, [:end_stream, :end_headers])
+        final_frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
         state = TestServer.send_frame(state, final_frame)
+
+        # Pushed response.
+        headers = [{:store_name, ":status", "200"}]
+        {state, hbf} = TestServer.encode_headers(state, headers)
+        promised_headers_frame = headers(stream_id: promised_stream_id, hbf: hbf, flags: 0x04)
+        state = TestServer.send_frame(state, promised_headers_frame)
+
+        promised_data_frame = data(stream_id: promised_stream_id, data: "hello", flags: 0x01)
+        state = TestServer.send_frame(state, promised_data_frame)
 
         state
       end)
@@ -298,12 +308,18 @@ defmodule Mint.HTTP2Test do
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:push_promise, ^ref, metadata}] = responses
-      assert %{promised_request_ref: promised_request_ref, headers: headers} = metadata
-      assert is_reference(promised_request_ref)
+      assert %{promised_request_ref: promised_ref, headers: headers} = metadata
+      assert is_reference(promised_ref)
       assert headers == [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, 200}, {:headers, ^ref, []}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}] = responses
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:data, ^promised_ref, "hello"}, {:done, ^promised_ref}] = responses
 
       assert HTTP2.open?(conn)
     end
