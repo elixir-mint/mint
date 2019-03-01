@@ -19,7 +19,7 @@ defmodule HTTP2.IntegrationTest do
   end
 
   describe "http2.golang.org" do
-    @moduletag connect: {"http2.golang.org", 443}
+    @describetag connect: {"http2.golang.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [])
@@ -107,6 +107,19 @@ defmodule HTTP2.IntegrationTest do
       assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
+    end
+
+    test "GET /serverpush", %{conn: conn} do
+      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [])
+      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+      # TODO: improve this test by improving receive_stream/1.
+      assert [
+               {:push_promise, ^req_id, _promised_req_id1, _headers1},
+               {:push_promise, ^req_id, _promised_req_id2, _headers2},
+               {:push_promise, ^req_id, _promised_req_id3, _headers3},
+               {:push_promise, ^req_id, _promised_req_id4, _headers4} | _
+             ] = responses
     end
   end
 

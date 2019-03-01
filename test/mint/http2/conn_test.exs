@@ -5,25 +5,8 @@ defmodule Mint.HTTP2Test do
 
   alias Mint.{HTTP2, HTTP2.TestServer}
 
-  setup context do
-    if context[:connect] == false do
-      []
-    else
-      {:ok, server} = TestServer.start_link()
-      port = TestServer.port(server)
-      TestServer.start_accepting(server)
-
-      {:ok, conn} =
-        HTTP2.connect(
-          :https,
-          "localhost",
-          port,
-          transport_opts: [verify: :verify_none]
-        )
-
-      [conn: conn, server: server]
-    end
-  end
+  setup :start_server
+  setup :maybe_start_connection
 
   test "unknown message", %{conn: conn} do
     assert HTTP2.stream(conn, :unknown_message) == :unknown
@@ -257,6 +240,86 @@ defmodule Mint.HTTP2Test do
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
       assert HTTP2.open?(conn)
+    end
+  end
+
+  describe "server pushes" do
+    test "a PUSH_PROMISE frame and a few CONTINUATION frames are received", context do
+      promised_stream_id = 4
+
+      TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
+        headers = [
+          {:store_name, ":method", "GET"},
+          {:store_name, "foo", "bar"},
+          {:store_name, "baz", "bong"}
+        ]
+
+        {state, hbf} = TestServer.encode_headers(state, headers)
+
+        <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
+
+        frame1 =
+          push_promise(stream_id: stream_id, hbf: hbf1, promised_stream_id: promised_stream_id)
+
+        state = TestServer.send_frame(state, frame1)
+
+        frame2 = continuation(stream_id: stream_id, hbf: hbf2)
+        state = TestServer.send_frame(state, frame2)
+
+        frame3 = continuation(stream_id: stream_id, hbf: hbf3, flags: 0x04)
+        state = TestServer.send_frame(state, frame3)
+
+        headers = [{:store_name, ":status", "200"}]
+        {state, hbf} = TestServer.encode_headers(state, headers)
+        flags = set_flags(:headers, [:end_stream, :end_headers])
+        final_frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+        state = TestServer.send_frame(state, final_frame)
+
+        # Pushed response.
+        headers = [{:store_name, ":status", "200"}]
+        {state, hbf} = TestServer.encode_headers(state, headers)
+        promised_headers_frame = headers(stream_id: promised_stream_id, hbf: hbf, flags: 0x04)
+        state = TestServer.send_frame(state, promised_headers_frame)
+
+        promised_data_frame = data(stream_id: promised_stream_id, data: "hello", flags: 0x01)
+        state = TestServer.send_frame(state, promised_data_frame)
+
+        state
+      end)
+
+      {:ok, conn, ref} = HTTP2.request(context.conn, "GET", "/", [])
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:push_promise, ^ref, promised_ref, headers}] = responses
+      assert is_reference(promised_ref)
+      assert headers == [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}] = responses
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:data, ^promised_ref, "hello"}, {:done, ^promised_ref}] = responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect: false
+    test "receiving PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH is false causes an error",
+         %{server: server, port: port} do
+      options = [transport_opts: [verify: :verify_none], client_settings: [enable_push: false]]
+      {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
+
+      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+        {state, hbf} = TestServer.encode_headers(state, [{:store_name, ":method", "GET"}])
+        frame = push_promise(stream_id: stream_id, hbf: hbf, promised_stream_id: 4, flags: 0x04)
+        TestServer.send_frame(state, frame)
+      end)
+
+      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{}, :protocol_error, []} = stream_until_responses_or_error(conn)
     end
   end
 
@@ -498,6 +561,29 @@ defmodule Mint.HTTP2Test do
     case stream_next_message(conn) do
       {:ok, %HTTP2{} = conn, []} -> stream_until_responses_or_error(conn)
       other -> other
+    end
+  end
+
+  defp start_server(_context) do
+    {:ok, server} = TestServer.start_link()
+    port = TestServer.port(server)
+    TestServer.start_accepting(server)
+    [port: port, server: server]
+  end
+
+  defp maybe_start_connection(context) do
+    if context[:connect] == false do
+      []
+    else
+      {:ok, conn} =
+        HTTP2.connect(
+          :https,
+          "localhost",
+          context.port,
+          transport_opts: [verify: :verify_none]
+        )
+
+      [conn: conn]
     end
   end
 end

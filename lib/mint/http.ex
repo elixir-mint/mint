@@ -494,6 +494,11 @@ defmodule Mint.HTTP do
       and will never be returned by an HTTP/1 connection. See `Mint.HTTP2.ping/2`
       for more information.
 
+    * `{:push_promise, request_ref, promised_request_ref, headers}` - returned when
+      the server sends a server push to the client. This response type is HTTP/2 specific
+      and will never be returned by an HTTP/1 connection. See `Mint.HTTP2` for more
+      information on server pushes.
+
   ## Examples
 
   Let's assume we have a function called `receive_next_and_stream/1` that takes
