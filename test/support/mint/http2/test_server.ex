@@ -57,8 +57,13 @@ defmodule Mint.HTTP2.TestServer do
   end
 
   def encode_headers(%__MODULE__{} = state, headers) do
-    {hbf, encode_table} = HPACK.encode(headers, state.encode_table)
-    state = put_in(state.encode_table, encode_table)
+    {hbf, state} =
+      get_and_update_in(state.encode_table, fn encode_table ->
+        headers
+        |> Enum.map(fn {name, value} -> {:store_name, name, value} end)
+        |> HPACK.encode(encode_table)
+      end)
+
     {state, hbf}
   end
 
