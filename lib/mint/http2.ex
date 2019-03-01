@@ -1126,6 +1126,13 @@ defmodule Mint.HTTP2 do
       hbf: hbf
     ) = frame
 
+    # TODO: improve this by checking that the promised_stream_id is not in use or has been used
+    # before.
+    unless promised_stream_id > 0 and Integer.is_even(promised_stream_id) do
+      debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
+      send_connection_error(conn, :protocol_error, debug_data)
+    end
+
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state(conn, stream, [:open, :half_closed_local])
 
