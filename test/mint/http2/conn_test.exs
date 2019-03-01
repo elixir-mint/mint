@@ -5,25 +5,8 @@ defmodule Mint.HTTP2Test do
 
   alias Mint.{HTTP2, HTTP2.TestServer}
 
-  setup context do
-    if context[:connect] == false do
-      []
-    else
-      {:ok, server} = TestServer.start_link()
-      port = TestServer.port(server)
-      TestServer.start_accepting(server)
-
-      {:ok, conn} =
-        HTTP2.connect(
-          :https,
-          "localhost",
-          port,
-          transport_opts: [verify: :verify_none]
-        )
-
-      [conn: conn, server: server]
-    end
-  end
+  setup :start_server
+  setup :maybe_start_connection
 
   test "unknown message", %{conn: conn} do
     assert HTTP2.stream(conn, :unknown_message) == :unknown
@@ -322,6 +305,22 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    @tag connect: false
+    test "receiving PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH is false causes an error",
+         %{server: server, port: port} do
+      options = [transport_opts: [verify: :verify_none], client_settings: [enable_push: false]]
+      {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
+
+      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+        {state, hbf} = TestServer.encode_headers(state, [{:store_name, ":method", "GET"}])
+        frame = push_promise(stream_id: stream_id, hbf: hbf, promised_stream_id: 4, flags: 0x04)
+        TestServer.send_frame(state, frame)
+      end)
+
+      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{}, :protocol_error, []} = stream_until_responses_or_error(conn)
+    end
   end
 
   describe "frame encoding errors by the server" do
@@ -562,6 +561,29 @@ defmodule Mint.HTTP2Test do
     case stream_next_message(conn) do
       {:ok, %HTTP2{} = conn, []} -> stream_until_responses_or_error(conn)
       other -> other
+    end
+  end
+
+  defp start_server(_context) do
+    {:ok, server} = TestServer.start_link()
+    port = TestServer.port(server)
+    TestServer.start_accepting(server)
+    [port: port, server: server]
+  end
+
+  defp maybe_start_connection(context) do
+    if context[:connect] == false do
+      []
+    else
+      {:ok, conn} =
+        HTTP2.connect(
+          :https,
+          "localhost",
+          context.port,
+          transport_opts: [verify: :verify_none]
+        )
+
+      [conn: conn]
     end
   end
 end

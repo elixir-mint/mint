@@ -128,7 +128,7 @@ defmodule Mint.HTTP2 do
     :port,
     :scheme,
 
-    # Mint.HTTP2ection state (open, closed, and so on).
+    # Connection state (open, closed, and so on).
     :state,
 
     # Fields of the connection.
@@ -158,6 +158,7 @@ defmodule Mint.HTTP2 do
     # SETTINGS-related things for client.
     client_max_frame_size: @default_max_frame_size,
     client_max_concurrent_streams: 100,
+    client_enable_push: true,
 
     # Headers being processed (when headers are split into multiple frames with CONTINUATIONS, all
     # the continuation frames must come one right after the other).
@@ -770,16 +771,8 @@ defmodule Mint.HTTP2 do
         end
 
       {:enable_push, value} ->
-        case value do
-          true ->
-            raise ArgumentError,
-                  "push promises are not supported yet, so :enable_push must be false"
-
-          false ->
-            :ok
-
-          _other ->
-            raise ArgumentError, ":enable_push must be a boolean, got: #{inspect(value)}"
+        unless is_boolean(value) do
+          raise ArgumentError, ":enable_push must be a boolean, got: #{inspect(value)}"
         end
 
       {:max_concurrent_streams, value} ->
@@ -1086,6 +1079,9 @@ defmodule Mint.HTTP2 do
 
       {:max_concurrent_streams, value}, conn ->
         put_in(conn.client_max_concurrent_streams, value)
+
+      {:enable_push, value}, conn ->
+        put_in(conn.client_enable_push, value)
     end)
   end
 
@@ -1112,6 +1108,15 @@ defmodule Mint.HTTP2 do
   end
 
   # PUSH_PROMISE
+
+  defp handle_push_promise(
+         %Mint.HTTP2{client_enable_push: false} = conn,
+         push_promise(),
+         _responses
+       ) do
+    debug_data = "received PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH was false"
+    send_connection_error!(conn, :protocol_error, debug_data)
+  end
 
   defp handle_push_promise(conn, push_promise() = frame, responses) do
     push_promise(
