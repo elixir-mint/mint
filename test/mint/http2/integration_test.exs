@@ -162,7 +162,6 @@ defmodule HTTP2.IntegrationTest do
   end
 
   describe "nghttp2.org/httpbin" do
-    @describetag :focus
     @describetag connect: {"nghttp2.org", 443}
 
     test "ping", %{conn: conn} do
