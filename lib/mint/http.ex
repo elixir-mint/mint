@@ -137,7 +137,8 @@ defmodule Mint.HTTP do
   The following options are HTTP/2-specific and will only be used on HTTP/2 connections.
 
     * `:client_settings` - (keyword) a list of client HTTP/2 settings to send to the
-      server. See `put_settings/2` for more information.
+      server. See `Mint.HTTP2.put_settings/2` for more information. This is only used
+      in HTTP/2 connections.
 
   ## Protocol negotiation
 
