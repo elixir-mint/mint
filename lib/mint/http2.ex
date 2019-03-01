@@ -102,6 +102,7 @@ defmodule Mint.HTTP2 do
   }
 
   require Logger
+  require Integer
 
   @behaviour Mint.Core.Conn
 
@@ -1130,7 +1131,7 @@ defmodule Mint.HTTP2 do
     # before.
     unless promised_stream_id > 0 and Integer.is_even(promised_stream_id) do
       debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
-      send_connection_error(conn, :protocol_error, debug_data)
+      send_connection_error!(conn, :protocol_error, debug_data)
     end
 
     stream = fetch_stream!(conn, stream_id)
