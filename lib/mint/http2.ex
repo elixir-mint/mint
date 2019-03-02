@@ -471,7 +471,7 @@ defmodule Mint.HTTP2 do
 
   This function is HTTP/2 specific. It cancels an in-flight request. The server could have
   already sent responses for the request you want to cancel: those responses will be parsed
-  by the connection but not returned to the user. You can consider that no more responses
+  by the connection but not returned to the user. No more responses
   to a request will be returned after you call `cancel_request/2` on that request.
 
   ## Examples
