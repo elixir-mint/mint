@@ -486,9 +486,14 @@ defmodule Mint.HTTP2 do
 
   @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()}
   def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
-    stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
-    conn = close_stream!(conn, stream_id, _error_code = :cancel)
-    {:ok, conn}
+    case Map.fetch(conn.ref_to_stream_id, request_ref) do
+      {:ok, stream_id} ->
+        conn = close_stream!(conn, stream_id, _error_code = :cancel)
+        {:ok, conn}
+
+      :error ->
+        {:ok, conn}
+    end
   end
 
   @doc """
