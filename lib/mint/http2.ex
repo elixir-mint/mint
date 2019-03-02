@@ -480,7 +480,10 @@ defmodule Mint.HTTP2 do
       {:ok, conn} = Mint.HTTP2.cancel_request(conn, ref)
 
   """
-  @doc since: "0.2.0"
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.2.0"
+  end
+
   @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()}
   def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
     stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
