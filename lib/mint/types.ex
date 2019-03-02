@@ -12,6 +12,16 @@ defmodule Mint.Types do
   @type request_ref() :: reference()
 
   @typedoc """
+  An HTTP/2-specific response to a request.
+
+  This type of response is only returned on HTTP/2 connections. See `t:response/0` for
+  more response types.
+  """
+  @type http2_response() ::
+          {:pong, request_ref()}
+          | {:push_promise, request_ref(), promised_request_ref :: request_ref(), headers()}
+
+  @typedoc """
   A response to a request.
 
   Terms of this type are returned as responses to requests. See `Mint.HTTP.stream/2`
@@ -22,9 +32,8 @@ defmodule Mint.Types do
           | {:headers, request_ref(), headers()}
           | {:data, request_ref(), body_chunk :: binary()}
           | {:done, request_ref()}
-          | {:pong, request_ref()}
-          | {:push_promise, request_ref(), promised_request_ref :: request_ref(), headers()}
           | {:error, request_ref(), reason :: term()}
+          | http2_response()
 
   @typedoc """
   An HTTP status code.
