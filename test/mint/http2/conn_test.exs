@@ -24,16 +24,70 @@ defmodule Mint.HTTP2Test do
     refute HTTP2.open?(conn)
   end
 
-  test "server closes a stream with RST_STREAM", context do
-    TestServer.expect(context.server, fn state, headers(stream_id: stream_id) ->
-      TestServer.send_frame(state, rst_stream(stream_id: stream_id, error_code: :protocol_error))
-    end)
+  describe "closed streams (RST_STREAM)" do
+    test "server closes a stream with RST_STREAM", %{conn: conn, server: server} do
+      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+        TestServer.send_frame(
+          state,
+          rst_stream(stream_id: stream_id, error_code: :protocol_error)
+        )
+      end)
 
-    {:ok, conn, ref} = HTTP2.request(context.conn, "GET", "/", [])
+      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
 
-    assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-    assert [{:error, ^ref, {:rst_stream, :protocol_error}}] = responses
-    assert HTTP2.open?(conn)
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:error, ^ref, {:rst_stream, :protocol_error}}] = responses
+      assert HTTP2.open?(conn)
+    end
+
+    test "when server sends frames after sending RST_STREAM, an error is returned",
+         %{conn: conn, server: server} do
+      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+        state =
+          TestServer.send_frame(state, rst_stream(stream_id: stream_id, error_code: :cancel))
+
+        # The server is not supposed to send frames anymore here. If it does, it's a stream
+        # error (of type :stream_closed).
+        {state, hbf} = TestServer.encode_headers(state, [{":status", "200"}])
+        flags = set_flags(:headers, [:end_headers, :end_stream])
+        TestServer.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
+      end)
+
+      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert responses == [{:error, ref, {:rst_stream, :cancel}}]
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+    end
+
+    test "closing a stream with cancel_request/2", %{conn: conn, server: server} do
+      server
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
+        {state, hbf} = TestServer.encode_headers(state, [{":status", "200"}])
+        flags = set_flag(:headers, :end_headers)
+
+        state =
+          TestServer.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
+
+        flags = set_flag(:data, :end_stream)
+        TestServer.send_frame(state, data(stream_id: stream_id, data: "hello", flags: flags))
+      end)
+      |> TestServer.expect(fn state, rst_stream() = frame ->
+        assert rst_stream(error_code: :cancel) = frame
+        state
+      end)
+      |> TestServer.expect(fn state, window_update(stream_id: 3) -> state end)
+      |> TestServer.expect(fn state, window_update(stream_id: 0) -> state end)
+
+      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_next_message(conn)
+      assert responses == []
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   test "server closes the connection with GOAWAY", %{server: server, conn: conn} do
