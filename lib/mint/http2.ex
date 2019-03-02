@@ -467,6 +467,28 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
+  Cancels an in-flight request.
+
+  This function is HTTP/2 specific. It cancels an in-flight request. The server could have
+  already sent responses for the request you want to cancel: those responses will be parsed
+  by the connection but not returned to the user. You can consider that no more responses
+  to a request will be returned after you call `cancel_request/2` on that request.
+
+  ## Examples
+
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "GET", "/", _headers = [])
+      {:ok, conn} = Mint.HTTP2.cancel_request(conn, ref)
+
+  """
+  @doc since: "0.2.0"
+  @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()}
+  def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
+    stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
+    conn = close_stream!(conn, stream_id, _error_code = :cancel)
+    {:ok, conn}
+  end
+
+  @doc """
   See `Mint.HTTP.stream/2`.
   """
   @impl true
@@ -923,18 +945,25 @@ defmodule Mint.HTTP2 do
     data(stream_id: stream_id, flags: flags, data: data, padding: padding) = frame
     stream = fetch_stream!(conn, stream_id)
 
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :closed])
 
     conn = refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
 
-    responses = [{:data, stream.ref, data} | responses]
+    new_responses = [{:data, stream.ref, data} | responses]
 
-    if flag_set?(flags, :data, :end_stream) do
-      conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
-      conn = update_in(conn.open_stream_count, &(&1 - 1))
-      {conn, [{:done, stream.ref} | responses]}
-    else
-      {conn, responses}
+    cond do
+      # We might still receive frames on a stream that was closed by us sending RST_STREAM.
+      # In that case, we ignore the data that we receive by not returning it as responses.
+      stream.state == :closed ->
+        {conn, responses}
+
+      flag_set?(flags, :data, :end_stream) ->
+        conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
+        conn = update_in(conn.open_stream_count, &(&1 - 1))
+        {conn, [{:done, stream.ref} | new_responses]}
+
+      true ->
+        {conn, new_responses}
     end
   end
 
@@ -949,7 +978,7 @@ defmodule Mint.HTTP2 do
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote])
+    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote, :closed])
     end_stream? = flag_set?(flags, :headers, :end_stream)
 
     if flag_set?(flags, :headers, :end_headers) do
@@ -965,22 +994,31 @@ defmodule Mint.HTTP2 do
     case decode_hbf(conn, hbf) do
       {:ok, [{":status", status} | headers], conn} ->
         status = String.to_integer(status)
-        responses = [{:headers, stream.ref, headers}, {:status, stream.ref, status} | responses]
+
+        new_responses = [
+          {:headers, stream.ref, headers},
+          {:status, stream.ref, status} | responses
+        ]
 
         cond do
+          # We might still receive frames on a stream that was closed by us sending RST_STREAM.
+          # In that case, we ignore the data that we receive by not returning it as responses.
+          stream.state == :closed ->
+            {conn, responses}
+
           end_stream? ->
             conn = put_in(conn.streams[stream.id].state, :half_closed_remote)
             conn = update_in(conn.open_stream_count, &(&1 - 1))
-            {conn, [{:done, stream.ref} | responses]}
+            {conn, [{:done, stream.ref} | new_responses]}
 
           # If this was a promised stream, it goes in the :half_closed_local state as
           # soon as it receives headers.
           stream.state == :reserved_remote ->
             conn = put_in(conn.streams[stream.id].state, :half_closed_local)
-            {conn, responses}
+            {conn, new_responses}
 
           true ->
-            {conn, responses}
+            {conn, new_responses}
         end
 
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
