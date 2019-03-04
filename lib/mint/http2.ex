@@ -931,28 +931,13 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
-  defp handle_frame(conn, data() = frame, resps), do: handle_data(conn, frame, resps)
+  for frame_name <- stream_level_frames ++ connection_level_frames ++ [:window_update] do
+    function_name = :"handle_#{frame_name}"
 
-  defp handle_frame(conn, headers() = frame, resps), do: handle_headers(conn, frame, resps)
-
-  defp handle_frame(conn, priority() = frame, resps), do: handle_priority(conn, frame, resps)
-
-  defp handle_frame(conn, rst_stream() = frame, resps), do: handle_rst_stream(conn, frame, resps)
-
-  defp handle_frame(conn, settings() = frame, resps), do: handle_settings(conn, frame, resps)
-
-  defp handle_frame(conn, push_promise() = frame, resps),
-    do: handle_push_promise(conn, frame, resps)
-
-  defp handle_frame(conn, Frame.ping() = frame, resps), do: handle_ping(conn, frame, resps)
-
-  defp handle_frame(conn, goaway() = frame, resps), do: handle_goaway(conn, frame, resps)
-
-  defp handle_frame(conn, window_update() = frame, resps),
-    do: handle_window_update(conn, frame, resps)
-
-  defp handle_frame(conn, continuation() = frame, resps),
-    do: handle_continuation(conn, frame, resps)
+    defp handle_frame(conn, Frame.unquote(frame_name)() = frame, responses) do
+      unquote(function_name)(conn, frame, responses)
+    end
+  end
 
   # DATA
 
