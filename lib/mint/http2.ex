@@ -474,6 +474,10 @@ defmodule Mint.HTTP2 do
   by the connection but not returned to the user. No more responses
   to a request will be returned after you call `cancel_request/2` on that request.
 
+  If there's no error in canceling the request, `{:ok, conn}` is returned where `conn` is
+  the updated connection. If there's an error, `{:error, conn, reason}` is returned where
+  `conn` is the updated connection and `reason` is the error reason.
+
   ## Examples
 
       {:ok, conn, ref} = Mint.HTTP2.request(conn, "GET", "/", _headers = [])
@@ -484,7 +488,7 @@ defmodule Mint.HTTP2 do
     @doc since: "0.2.0"
   end
 
-  @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()}
+  @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()} | {:error, t(), term()}
   def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
@@ -494,6 +498,8 @@ defmodule Mint.HTTP2 do
       :error ->
         {:ok, conn}
     end
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
   end
 
   @doc """
