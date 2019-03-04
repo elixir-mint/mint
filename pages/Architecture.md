@@ -74,7 +74,7 @@ defmodule ConnectionProcess do
     # We should handle the error case here as well, but we're omitting it for brevity.
     case Mint.HTTP.stream(state.conn, message) do
       :unknown ->
-        Logger.error(fn -> "Received unknown message: " <> inspect(message) end)
+        _ = Logger.error(fn -> "Received unknown message: " <> inspect(message) end)
         {:noreply, state}
 
       {:ok, conn, responses} ->

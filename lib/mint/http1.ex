@@ -574,7 +574,7 @@ defmodule Mint.HTTP1 do
 
   defp internal_close(conn) do
     if conn.buffer != "" do
-      Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
+      _ = Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
     :ok = conn.transport.close(conn.socket)

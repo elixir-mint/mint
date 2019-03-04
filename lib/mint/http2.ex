@@ -853,7 +853,7 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_max_frame_size) do
       {:ok, frame, rest} ->
-        Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
+        _ = Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
         assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
@@ -1053,7 +1053,7 @@ defmodule Mint.HTTP2 do
   # PRIORITY
 
   defp handle_priority(conn, frame, responses) do
-    Logger.warn(fn -> "Ignoring PRIORITY frame: #{inspect(frame)}" end)
+    _ = Logger.warn(fn -> "Ignoring PRIORITY frame: #{inspect(frame)}" end)
     {conn, responses}
   end
 
@@ -1111,9 +1111,10 @@ defmodule Mint.HTTP2 do
         put_in(conn.max_frame_size, max_frame_size)
 
       {:max_header_list_size, max_header_list_size}, conn ->
-        Logger.debug(fn ->
-          "Ignoring MAX_HEADERS_LIST_SIZE parameter with value #{max_header_list_size}"
-        end)
+        _ =
+          Logger.debug(fn ->
+            "Ignoring MAX_HEADERS_LIST_SIZE parameter with value #{max_header_list_size}"
+          end)
 
         conn
     end)
@@ -1240,11 +1241,11 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {{:value, _}, _} ->
-        Logger.error("Received PING ack that doesn't match next PING request in the queue")
+        _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
         throw({:mint, conn, :protocol_error, responses})
 
       {:empty, _ping_queue} ->
-        Logger.error("Received PING ack but no PING requests had been sent")
+        _ = Logger.error("Received PING ack but no PING requests had been sent")
         throw({:mint, conn, :protocol_error, responses})
     end
   end
