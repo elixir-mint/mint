@@ -522,7 +522,6 @@ defmodule Mint.HTTP2 do
     _ = transport.setopts(socket, active: :once)
     {:ok, conn, Enum.reverse(responses)}
   catch
-    :throw, {:mint, conn, error} -> {:error, conn, error, []}
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
   end
 
@@ -877,8 +876,8 @@ defmodule Mint.HTTP2 do
         send_connection_error!(conn, :protocol_error, debug_data)
     end
   catch
-    :throw, {:mint, conn, error} ->
-      throw({:mint, conn, error, responses})
+    :throw, {:mint, conn, error} -> throw({:mint, conn, error, responses})
+    :throw, {:mint, conn, error, responses} -> throw({:mint, conn, error, responses})
   end
 
   defp assert_valid_frame(conn, frame) do
