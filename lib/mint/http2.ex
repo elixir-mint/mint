@@ -341,6 +341,8 @@ defmodule Mint.HTTP2 do
       end
 
     {:ok, conn}
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
   end
 
   @doc """
