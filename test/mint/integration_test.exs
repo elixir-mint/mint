@@ -73,6 +73,8 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "ssl certificate verification" do
+    @describetag :integration
+
     test "bad certificate - badssl.com" do
       assert {:error, {:tls_alert, 'unknown ca'}} =
                HTTP.connect(
