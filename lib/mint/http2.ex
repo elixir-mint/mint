@@ -1289,13 +1289,13 @@ defmodule Mint.HTTP2 do
          window_update(stream_id: 0, window_size_increment: wsi),
          responses
        ) do
-    case conn.window_size do
-      ws when ws + wsi > @max_window_size ->
-        send_connection_error!(conn, :flow_control_error, "window size too big")
+    new_window_size = conn.window_size + wsi
 
-      ws ->
-        conn = put_in(conn.window_size, ws)
-        {conn, responses}
+    if new_window_size > @max_window_size do
+      send_connection_error!(conn, :flow_control_error, "window size too big")
+    else
+      conn = put_in(conn.window_size, new_window_size)
+      {conn, responses}
     end
   end
 
@@ -1305,15 +1305,14 @@ defmodule Mint.HTTP2 do
          responses
        ) do
     stream = fetch_stream!(conn, stream_id)
+    new_window_size = conn.streams[stream_id].window_size + wsi
 
-    case conn.streams[stream_id].window_size do
-      ws when ws + wsi > @max_window_size ->
-        conn = close_stream!(conn, stream_id, :flow_control_error)
-        {conn, [{:error, stream.ref, :flow_control_error} | responses]}
-
-      ws ->
-        conn = put_in(conn.streams[stream_id].window_size, ws + wsi)
-        {conn, responses}
+    if new_window_size > @max_window_size do
+      conn = close_stream!(conn, stream_id, :flow_control_error)
+      {conn, [{:error, stream.ref, :flow_control_error} | responses]}
+    else
+      conn = put_in(conn.streams[stream_id].window_size, new_window_size)
+      {conn, responses}
     end
   end
 
