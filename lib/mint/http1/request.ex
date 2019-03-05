@@ -3,6 +3,8 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
+  alias Mint.Core.Util
+
   @user_agent "mint/" <> Mix.Project.config()[:version]
 
   def encode(method, target, host, headers, body) do
@@ -24,8 +26,8 @@ defmodule Mint.HTTP1.Request do
   defp add_default_headers(headers, host, body) do
     headers
     |> add_content_length(body)
-    |> put_new_header("user-agent", @user_agent)
-    |> put_new_header("host", host)
+    |> Util.put_new_header("user-agent", @user_agent)
+    |> Util.put_new_header("host", host)
   end
 
   defp add_content_length(headers, nil), do: headers
@@ -34,19 +36,7 @@ defmodule Mint.HTTP1.Request do
 
   defp add_content_length(headers, body) do
     length = body |> IO.iodata_length() |> Integer.to_string()
-    put_new_header(headers, "content-length", length)
-  end
-
-  defp put_new_header(headers, _name, nil) do
-    headers
-  end
-
-  defp put_new_header(headers, name, value) do
-    if List.keymember?(headers, name, 0) do
-      headers
-    else
-      [{name, value} | headers]
-    end
+    Util.put_new_header(headers, "content-length", length)
   end
 
   defp encode_headers(headers) do

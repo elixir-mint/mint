@@ -95,6 +95,7 @@ defmodule Mint.HTTP2 do
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
 
   alias Mint.Types
+  alias Mint.Core.Util
 
   alias Mint.HTTP2.{
     Frame,
@@ -844,15 +845,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp add_default_headers(headers) do
-    put_new_header(headers, "user-agent", @user_agent)
-  end
-
-  defp put_new_header(headers, name, value) do
-    if List.keymember?(headers, name, 0) do
-      headers
-    else
-      [{name, value} | headers]
-    end
+    Util.put_new_header(headers, "user-agent", @user_agent)
   end
 
   ## Frame handling
