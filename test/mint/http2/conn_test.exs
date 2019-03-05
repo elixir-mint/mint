@@ -398,7 +398,8 @@ defmodule Mint.HTTP2Test do
       options = [transport_opts: [verify: :verify_none], client_settings: [enable_push: false]]
       {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
 
-      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+      server
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         {state, hbf} = TestServer.encode_headers(state, [{":method", "GET"}])
 
         TestServer.send_frame(
@@ -410,6 +411,10 @@ defmodule Mint.HTTP2Test do
             flags: set_flags(:push_promise, [:end_headers])
           )
         )
+      end)
+      |> TestServer.expect(fn state, goaway() = frame ->
+        assert goaway(frame, :error_code) == :protocol_error
+        state
       end)
 
       {conn, _ref} = open_request(conn)
