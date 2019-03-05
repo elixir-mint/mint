@@ -5,6 +5,8 @@ defmodule Mint.HTTP2.TestServer do
 
   alias Mint.HTTP2.HPACK
 
+  require Logger
+
   defstruct [
     :listen_socket,
     :socket,
@@ -44,6 +46,11 @@ defmodule Mint.HTTP2.TestServer do
     server
   end
 
+  def allow_anything(server) do
+    :ok = GenServer.call(server, :allow_anything)
+    server
+  end
+
   def start_accepting(server) do
     GenServer.cast(server, :start_accepting)
   end
@@ -76,6 +83,13 @@ defmodule Mint.HTTP2.TestServer do
     __MODULE__.send(state, encode(frame))
   end
 
+  def send_headers(%__MODULE__{} = state, stream_id, headers, flags) do
+    {state, hbf} = __MODULE__.encode_headers(state, headers)
+    flags = set_flags(:headers, flags)
+    frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+    send_frame(state, frame)
+  end
+
   ## Callbacks
 
   @impl true
@@ -95,6 +109,11 @@ defmodule Mint.HTTP2.TestServer do
 
   def handle_call({:expect, fun}, _from, state) do
     state = update_in(state.frame_handlers, &:queue.in(fun, &1))
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:allow_anything, _from, state) do
+    state = update_in(state.frame_handlers, &:queue.in(:allow_anything, &1))
     {:reply, :ok, state}
   end
 
@@ -127,6 +146,11 @@ defmodule Mint.HTTP2.TestServer do
     case decode_next(data) do
       {:ok, frame, rest} ->
         case get_and_update_in(state.frame_handlers, &:queue.out/1) do
+          {{:value, :allow_anything}, state} ->
+            _ = Logger.debug("Ignoring frame #{inspect(frame)}")
+            state = update_in(state.frame_handlers, &:queue.in_r(:allow_anything, &1))
+            handle_data(state, rest)
+
           {{:value, handler}, state} ->
             %__MODULE__{} = state = handler.(state, frame)
             handle_data(state, rest)

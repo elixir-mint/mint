@@ -25,6 +25,18 @@ defmodule Mint.HTTP2Test do
     refute HTTP2.open?(conn)
   end
 
+  test "receiving a frame on a stream with a stream ID bigger than our biggest is an error",
+       %{server: server, conn: conn} do
+    stream_id = 3
+
+    TestServer.expect(server, fn state, headers(stream_id: ^stream_id) ->
+      TestServer.send_headers(state, _stream_id = 5, [{":status", "200"}], [:end_headers])
+    end)
+
+    {conn, _ref} = open_request(conn)
+    assert {:error, %HTTP2{} = conn, :protocol_error, []} = stream_until_responses_or_error(conn)
+  end
+
   describe "closed streams (RST_STREAM)" do
     test "server closes a stream with RST_STREAM", %{conn: conn, server: server} do
       TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
@@ -41,7 +53,7 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "when server sends frames after sending RST_STREAM, an error is returned",
+    test "when server sends frames after sending RST_STREAM it is ignored",
          %{conn: conn, server: server} do
       TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
         state =
@@ -65,11 +77,8 @@ defmodule Mint.HTTP2Test do
     test "closing a stream with cancel_request/2", %{conn: conn, server: server} do
       server
       |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
-        {state, hbf} = TestServer.encode_headers(state, [{":status", "200"}])
-        flags = set_flag(:headers, :end_headers)
-
-        state =
-          TestServer.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
+        headers = [{":status", "200"}]
+        state = TestServer.send_headers(state, stream_id, headers, [:end_headers])
 
         flags = set_flag(:data, :end_stream)
         TestServer.send_frame(state, data(stream_id: stream_id, data: "hello", flags: flags))
@@ -78,8 +87,7 @@ defmodule Mint.HTTP2Test do
         assert rst_stream(error_code: :cancel) = frame
         state
       end)
-      |> TestServer.expect(fn state, window_update(stream_id: 3) -> state end)
-      |> TestServer.expect(fn state, window_update(stream_id: 0) -> state end)
+      |> TestServer.allow_anything()
 
       {conn, ref} = open_request(conn)
       {:ok, conn} = HTTP2.cancel_request(conn, ref)
@@ -88,6 +96,93 @@ defmodule Mint.HTTP2Test do
       assert responses == []
 
       assert HTTP2.open?(conn)
+    end
+
+    test "if we cancel a stream and the server sends DATA after, we ignore the DATA",
+         %{server: server, conn: conn} do
+      server
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
+        TestServer.send_headers(state, stream_id, [{":status", "200"}], [:end_headers])
+      end)
+      |> TestServer.expect(fn state, rst_stream(stream_id: stream_id) ->
+        flags = set_flag(:data, :end_stream)
+        TestServer.send_frame(state, data(stream_id: stream_id, data: "hello", flags: flags))
+      end)
+      |> TestServer.allow_anything()
+
+      {conn, ref} = open_request(conn)
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+      assert HTTP2.open?(conn)
+    end
+
+    test "receiving a RST_STREAM on a closed stream is ignored", %{server: server, conn: conn} do
+      stream_id = 3
+
+      server
+      |> TestServer.expect(fn state, headers(stream_id: ^stream_id) ->
+        headers = [{":status", "200"}]
+        TestServer.send_headers(state, stream_id, headers, [:end_headers, :end_stream])
+      end)
+      |> TestServer.expect(fn state, rst_stream(stream_id: ^stream_id) ->
+        state
+        |> TestServer.send_frame(rst_stream(stream_id: stream_id, error_code: :no_error))
+        |> TestServer.send_frame(rst_stream(stream_id: stream_id, error_code: :no_error))
+      end)
+      |> TestServer.allow_anything()
+
+      {conn, ref} = open_request(conn)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+    end
+  end
+
+  describe "stream state transition nooks and crannies" do
+    test "if client receives DATA after receiving a END_STREAM flag, it errors",
+         %{server: server, conn: conn} do
+      stream_id = 3
+
+      server
+      |> TestServer.expect(fn state, headers(stream_id: ^stream_id) ->
+        headers = [{":status", "200"}]
+        state = TestServer.send_headers(state, stream_id, headers, [:end_headers, :end_stream])
+
+        flags = set_flags(:data, [:end_stream])
+        TestServer.send_frame(state, data(stream_id: stream_id, data: "hello", flags: flags))
+      end)
+      |> TestServer.allow_anything()
+
+      {conn, ref} = open_request(conn)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+    end
+
+    test "if client receives HEADERS after receiving a END_STREAM flag, it errors",
+         %{server: server, conn: conn} do
+      stream_id = 3
+
+      server
+      |> TestServer.expect(fn state, headers(stream_id: ^stream_id) ->
+        headers = [{":status", "200"}]
+        state = TestServer.send_headers(state, stream_id, headers, [:end_headers, :end_stream])
+        TestServer.send_headers(state, stream_id, headers, [:end_headers, :end_stream])
+      end)
+      |> TestServer.allow_anything()
+
+      {conn, ref} = open_request(conn)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
     end
   end
 
@@ -384,10 +479,13 @@ defmodule Mint.HTTP2Test do
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}] = responses
 
-      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:data, ^promised_ref, "hello"}, {:done, ^promised_ref}] = responses
+      assert [
+               {:status, ^promised_ref, 200},
+               {:headers, ^promised_ref, []},
+               {:data, ^promised_ref, "hello"},
+               {:done, ^promised_ref}
+             ] = responses
 
       assert HTTP2.open?(conn)
     end

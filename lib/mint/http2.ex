@@ -882,7 +882,10 @@ defmodule Mint.HTTP2 do
   end
 
   defp assert_valid_frame(conn, frame) do
-    assert_frame_on_right_level(conn, elem(frame, 0), elem(frame, 1))
+    stream_id = elem(frame, 1)
+
+    assert_frame_on_right_level(conn, elem(frame, 0), stream_id)
+    assert_stream_id_is_allowed(conn, stream_id)
     assert_frame_doesnt_interrupt_header_streaming(conn, frame)
   end
 
@@ -924,6 +927,15 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
+  defp assert_stream_id_is_allowed(conn, stream_id) do
+    if Integer.is_odd(stream_id) and stream_id >= conn.next_stream_id do
+      debug_data = "frame with stream ID #{inspect(stream_id)} has not been opened yet"
+      send_connection_error!(conn, :protocol_error, debug_data)
+    else
+      :ok
+    end
+  end
+
   for frame_name <- stream_level_frames ++ connection_level_frames ++ [:window_update] do
     function_name = :"handle_#{frame_name}"
 
@@ -936,27 +948,27 @@ defmodule Mint.HTTP2 do
 
   defp handle_data(conn, frame, responses) do
     data(stream_id: stream_id, flags: flags, data: data, padding: padding) = frame
-    stream = fetch_stream!(conn, stream_id)
 
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :closed])
+    # Regardless of whether we have the stream or not, we need to abide by flow
+    # control rules so we still refill the client window for the stream_id we got.
+    window_size_increment = byte_size(data) + byte_size(padding || "")
+    conn = refill_client_windows(conn, stream_id, window_size_increment)
 
-    conn = refill_client_windows(conn, stream_id, byte_size(data) + byte_size(padding || ""))
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+        responses = [{:data, stream.ref, data} | responses]
 
-    new_responses = [{:data, stream.ref, data} | responses]
+        if flag_set?(flags, :data, :end_stream) do
+          conn = close_stream!(conn, stream.id, :no_error)
+          {conn, [{:done, stream.ref} | responses]}
+        else
+          {conn, responses}
+        end
 
-    cond do
-      # We might still receive frames on a stream that was closed by us sending RST_STREAM.
-      # In that case, we ignore the data that we receive by not returning it as responses.
-      stream.state == :closed ->
+      :error ->
+        _ = Logger.debug(fn -> "Received DATA frame on closed stream ID #{stream_id}" end)
         {conn, responses}
-
-      flag_set?(flags, :data, :end_stream) ->
-        conn = put_in(conn.streams[stream_id].state, :half_closed_remote)
-        conn = update_in(conn.open_stream_count, &(&1 - 1))
-        {conn, [{:done, stream.ref} | new_responses]}
-
-      true ->
-        {conn, new_responses}
     end
   end
 
@@ -970,9 +982,13 @@ defmodule Mint.HTTP2 do
 
   defp handle_headers(conn, frame, responses) do
     headers(stream_id: stream_id, flags: flags, hbf: hbf) = frame
-    stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote, :closed])
+
+    stream = Map.get(conn.streams, stream_id)
     end_stream? = flag_set?(flags, :headers, :end_stream)
+
+    if stream do
+      assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote])
+    end
 
     if flag_set?(flags, :headers, :end_headers) do
       decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
@@ -983,29 +999,24 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # Here, "stream" can be nil in case the stream was closed. In that case, we
+  # still need to process the hbf so that the HPACK table is updated, but then
+  # we don't add any responses.
   defp decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?) do
     case decode_hbf(conn, hbf) do
-      {:ok, [{":status", status} | headers], conn} ->
+      {conn, [{":status", status} | headers]} when not is_nil(stream) ->
+        ref = stream.ref
         status = String.to_integer(status)
-
-        new_responses = [
-          {:headers, stream.ref, headers},
-          {:status, stream.ref, status} | responses
-        ]
+        new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
         cond do
-          # We might still receive frames on a stream that was closed by us sending RST_STREAM.
-          # In that case, we ignore the data that we receive by not returning it as responses.
-          stream.state == :closed ->
-            {conn, responses}
-
           end_stream? ->
-            conn = put_in(conn.streams[stream.id].state, :half_closed_remote)
-            conn = update_in(conn.open_stream_count, &(&1 - 1))
-            {conn, [{:done, stream.ref} | new_responses]}
+            conn = close_stream!(conn, stream.id, :no_error)
+            {conn, [{:done, ref} | new_responses]}
 
           # If this was a promised stream, it goes in the :half_closed_local state as
-          # soon as it receives headers.
+          # soon as it receives headers. We cannot send any frames other than
+          # WINDOW_UPDATE, PRIORITY, or RST_STREAM in the :half_closed_local state.
           stream.state == :reserved_remote ->
             conn = put_in(conn.streams[stream.id].state, :half_closed_local)
             {conn, new_responses}
@@ -1015,10 +1026,13 @@ defmodule Mint.HTTP2 do
         end
 
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-      {:ok, _headers, conn} ->
+      {conn, _headers} when not is_nil(stream) ->
         conn = close_stream!(conn, stream.id, :protocol_error)
-        reason = {:protocol_error, :missing_status_header}
-        responses = [{:error, stream.ref, reason} | responses]
+        responses = [{:error, stream.ref, {:protocol_error, :missing_status_header}} | responses]
+        {conn, responses}
+
+      {conn, _headers} when is_nil(stream) ->
+        _ = Logger.debug(fn -> "Received HEADERS frame on closed stream ID" end)
         {conn, responses}
     end
   end
@@ -1027,7 +1041,7 @@ defmodule Mint.HTTP2 do
     case HPACK.decode(hbf, conn.decode_table) do
       {:ok, headers, decode_table} ->
         conn = put_in(conn.decode_table, decode_table)
-        {:ok, headers, conn}
+        {conn, headers}
 
       {:error, reason} ->
         debug_data = "unable to decode headers: #{inspect(reason)}"
@@ -1045,11 +1059,24 @@ defmodule Mint.HTTP2 do
 
   # RST_STREAM
 
+  # If we receive RST_STREAM on a closed stream, we ignore it.
   defp handle_rst_stream(conn, frame, responses) do
     rst_stream(stream_id: stream_id, error_code: error_code) = frame
-    stream = fetch_stream!(conn, stream_id)
-    conn = put_in(conn.streams[stream_id].state, :closed)
-    {conn, [{:error, stream.ref, {:rst_stream, error_code}} | responses]}
+
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        # If we receive RST_STREAM then the stream is definitely closed.
+        # We won't send anything else on the stream so we can simply delete
+        # it, so that if we get things like DATA on that stream we error out.
+        conn = delete_stream(conn, stream)
+
+        # TODO: is this an error?
+        response = {:error, stream.ref, {:rst_stream, error_code}}
+        {conn, [response | responses]}
+
+      :error ->
+        {conn, responses}
+    end
   end
 
   # SETTINGS
@@ -1192,7 +1219,7 @@ defmodule Mint.HTTP2 do
          stream,
          promised_stream_id
        ) do
-    {:ok, headers, conn} = decode_hbf(conn, hbf)
+    {conn, headers} = decode_hbf(conn, hbf)
 
     promised_stream = %{
       id: promised_stream_id,
@@ -1298,7 +1325,11 @@ defmodule Mint.HTTP2 do
 
   defp handle_continuation(conn, frame, responses) do
     continuation(stream_id: stream_id, flags: flags, hbf: hbf_chunk) = frame
-    stream = fetch_stream!(conn, stream_id)
+    stream = Map.get(conn.streams, stream_id)
+
+    if stream do
+      assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote])
+    end
 
     {^stream_id, hbf_acc, callback} = conn.headers_being_processed
 
@@ -1325,15 +1356,31 @@ defmodule Mint.HTTP2 do
   end
 
   defp close_stream!(conn, stream_id, error_code) do
-    frame = rst_stream(stream_id: stream_id, error_code: error_code)
-    conn = send!(conn, Frame.encode(frame))
-    put_in(conn.streams[stream_id].state, :closed)
+    stream = Map.fetch!(conn.streams, stream_id)
+
+    # First of all we send a RST_STREAM with the given error code so that we
+    # move the stream to the :closed state (that is, we remove it).
+    rst_stream_frame = rst_stream(stream_id: stream_id, error_code: error_code)
+    conn = send!(conn, Frame.encode(rst_stream_frame))
+
+    delete_stream(conn, stream)
+  end
+
+  defp delete_stream(conn, stream) do
+    conn = update_in(conn.open_stream_count, &(&1 - 1))
+    conn = update_in(conn.streams, &Map.delete(&1, stream.id))
+    conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
+    conn
   end
 
   defp fetch_stream!(conn, stream_id) do
+    fetch_stream!(conn, stream_id, {:stream_not_found, stream_id})
+  end
+
+  defp fetch_stream!(conn, stream_id, error) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw({:mint, conn, {:stream_not_found, stream_id}})
+      :error -> throw({:mint, conn, error})
     end
   end
 
