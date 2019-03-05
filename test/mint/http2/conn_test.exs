@@ -53,7 +53,7 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "when server sends frames after sending RST_STREAM, an error is returned",
+    test "when server sends frames after sending RST_STREAM it is ignored",
          %{conn: conn, server: server} do
       TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
         state =
@@ -71,8 +71,7 @@ defmodule Mint.HTTP2Test do
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert responses == [{:error, ref, {:rst_stream, :cancel}}]
 
-      assert {:error, %HTTP2{} = conn, reason, []} = stream_until_responses_or_error(conn)
-      assert {:bad_frame_on_closed_stream, headers(), _stream_id} = reason
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
     end
 
     test "closing a stream with cancel_request/2", %{conn: conn, server: server} do
@@ -114,12 +113,7 @@ defmodule Mint.HTTP2Test do
       {conn, ref} = open_request(conn)
       {:ok, conn} = HTTP2.cancel_request(conn, ref)
 
-      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^ref, 200}, {:headers, ^ref, []}] = responses
-
-      assert {:ok, %HTTP2{} = conn, responses} = stream_next_message(conn)
-      assert responses == []
-
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
       assert HTTP2.open?(conn)
     end
 
@@ -168,8 +162,7 @@ defmodule Mint.HTTP2Test do
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
-      assert {:error, %HTTP2{} = conn, reason, []} = stream_until_responses_or_error(conn)
-      assert {:bad_frame_on_closed_stream, data(), ^stream_id} = reason
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
     end
 
     test "if client receives HEADERS after receiving a END_STREAM flag, it errors",
@@ -189,8 +182,7 @@ defmodule Mint.HTTP2Test do
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
-      assert {:error, %HTTP2{} = conn, reason, []} = stream_until_responses_or_error(conn)
-      assert {:bad_frame_on_closed_stream, headers(), ^stream_id} = reason
+      assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
     end
   end
 
@@ -487,10 +479,13 @@ defmodule Mint.HTTP2Test do
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}] = responses
 
-      assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
-      assert [{:data, ^promised_ref, "hello"}, {:done, ^promised_ref}] = responses
+      assert [
+               {:status, ^promised_ref, 200},
+               {:headers, ^promised_ref, []},
+               {:data, ^promised_ref, "hello"},
+               {:done, ^promised_ref}
+             ] = responses
 
       assert HTTP2.open?(conn)
     end
