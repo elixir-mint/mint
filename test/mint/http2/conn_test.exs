@@ -34,7 +34,7 @@ defmodule Mint.HTTP2Test do
         )
       end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:error, ^ref, {:rst_stream, :protocol_error}}] = responses
@@ -54,7 +54,7 @@ defmodule Mint.HTTP2Test do
         TestServer.send_frame(state, headers(stream_id: stream_id, hbf: hbf, flags: flags))
       end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert responses == [{:error, ref, {:rst_stream, :cancel}}]
@@ -81,7 +81,7 @@ defmodule Mint.HTTP2Test do
       |> TestServer.expect(fn state, window_update(stream_id: 3) -> state end)
       |> TestServer.expect(fn state, window_update(stream_id: 0) -> state end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
       {:ok, conn} = HTTP2.cancel_request(conn, ref)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_next_message(conn)
@@ -109,9 +109,9 @@ defmodule Mint.HTTP2Test do
       %{state | socket: nil}
     end)
 
-    {:ok, conn, _ref1} = HTTP2.request(conn, "GET", "/", [])
-    {:ok, conn, ref2} = HTTP2.request(conn, "GET", "/", [])
-    {:ok, conn, ref3} = HTTP2.request(conn, "GET", "/", [])
+    {conn, _ref1} = open_request(conn)
+    {conn, ref2} = open_request(conn)
+    {conn, ref3} = open_request(conn)
 
     assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
 
@@ -149,7 +149,7 @@ defmodule Mint.HTTP2Test do
         state
       end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:status, ^ref, 200}, {:headers, ^ref, headers}] = responses
@@ -169,7 +169,7 @@ defmodule Mint.HTTP2Test do
         state
       end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :compression_error, []} =
                stream_until_responses_or_error(conn)
@@ -187,7 +187,7 @@ defmodule Mint.HTTP2Test do
         state
       end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :protocol_error, []} =
                stream_until_responses_or_error(conn)
@@ -207,7 +207,7 @@ defmodule Mint.HTTP2Test do
         state
       end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :protocol_error, []} =
                stream_until_responses_or_error(conn)
@@ -246,7 +246,7 @@ defmodule Mint.HTTP2Test do
         )
       end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:status, ^ref, 200}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
@@ -262,7 +262,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, rst_stream() -> state end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:error, ^ref, {:protocol_error, :missing_status_header}}] = responses
@@ -373,7 +373,7 @@ defmodule Mint.HTTP2Test do
         )
       end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:push_promise, ^ref, promised_ref, headers}] = responses
@@ -412,7 +412,7 @@ defmodule Mint.HTTP2Test do
         )
       end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
       assert {:error, %HTTP2{}, :protocol_error, []} = stream_until_responses_or_error(conn)
     end
   end
@@ -425,7 +425,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, goaway(error_code: :protocol_error) -> state end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :protocol_error, []} =
                stream_until_responses_or_error(conn)
@@ -441,7 +441,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :frame_size_error, []} =
                stream_until_responses_or_error(conn)
@@ -464,7 +464,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, rst_stream() -> state end)
 
-      {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_until_responses_or_error(conn)
       assert [{:error, ^ref, :flow_control_error}] = responses
@@ -484,7 +484,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, goaway(error_code: :flow_control_error) -> state end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :flow_control_error, []} =
                stream_until_responses_or_error(conn)
@@ -500,7 +500,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, goaway(error_code: :frame_size_error) -> state end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, :frame_size_error, []} =
                stream_until_responses_or_error(conn)
@@ -577,7 +577,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, settings(flags: 0x01, params: []) -> state end)
 
-      {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", [])
+      {conn, _ref} = open_request(conn)
 
       assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
       assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
