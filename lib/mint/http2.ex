@@ -516,12 +516,12 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    {:error, %{conn | state: :closed}, reason, []}
+    {:error, %{conn | state: :closed}, reason, _responses = []}
   end
 
   def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
-    {:error, %{conn | state: :closed}, :closed, []}
+    {:error, %{conn | state: :closed}, :closed, _responses = []}
   end
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
@@ -915,7 +915,7 @@ defmodule Mint.HTTP2 do
   stream_level_frames = [:data, :headers, :priority, :rst_stream, :push_promise, :continuation]
   connection_level_frames = [:settings, :ping, :goaway]
 
-  defp assert_frame_on_right_level(conn, frame, 0)
+  defp assert_frame_on_right_level(conn, frame, _stream_id = 0)
        when frame in unquote(stream_level_frames) do
     debug_data = "frame #{frame} not allowed at the connection level (stream_id = 0)"
     send_connection_error!(conn, :protocol_error, debug_data)
@@ -1059,6 +1059,7 @@ defmodule Mint.HTTP2 do
 
   # PRIORITY
 
+  # For now we ignore all PRIORITY frames. This shouldn't cause practical trouble.
   defp handle_priority(conn, frame, responses) do
     _ = Logger.warn(fn -> "Ignoring PRIORITY frame: #{inspect(frame)}" end)
     {conn, responses}
