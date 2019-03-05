@@ -18,4 +18,19 @@ defmodule Mint.Core.Util do
     |> max(Keyword.fetch!(opts, :sndbuf))
     |> max(Keyword.fetch!(opts, :recbuf))
   end
+
+  # Adds a header to the list of headers unless it's nil or it's already there.
+  def put_new_header(headers, name, value)
+
+  def put_new_header(headers, _name, nil) do
+    headers
+  end
+
+  def put_new_header(headers, name, value) do
+    if List.keymember?(headers, name, 0) do
+      headers
+    else
+      [{name, value} | headers]
+    end
+  end
 end
