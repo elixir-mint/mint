@@ -2,6 +2,7 @@ defmodule Mint.HTTP2Test do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.Frame
+  import ExUnit.CaptureLog
 
   alias Mint.{HTTP2, HTTP2.TestServer}
 
@@ -639,6 +640,23 @@ defmodule Mint.HTTP2Test do
     refute HTTP2.open?(conn)
   end
 
+  test "PRIORITY frames are ignored", %{server: server, conn: conn} do
+    TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+      frame = priority(stream_id: stream_id, exclusive?: false, stream_dependency: 1, weight: 1)
+      TestServer.send_frame(state, frame)
+    end)
+
+    {conn, _ref} = open_request(conn)
+    assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
+      end)
+
+    assert log =~ "Ignoring PRIORITY frame"
+  end
+
   defp stream_next_message(conn) do
     assert_receive message, 1000
     HTTP2.stream(conn, message)
@@ -672,5 +690,11 @@ defmodule Mint.HTTP2Test do
 
       [conn: conn]
     end
+  end
+
+  defp open_request(conn) do
+    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [])
+    assert is_reference(ref)
+    {conn, ref}
   end
 end
