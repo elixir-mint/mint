@@ -19,7 +19,7 @@ defmodule Mint.Core.Transport.TCP do
     opts =
       opts
       |> Keyword.merge(@transport_opts)
-      |> Keyword.delete(:alpn_advertised_protocols)
+      |> Keyword.drop(~w(alpn_advertised_protocols timeout)a)
 
     :gen_tcp.connect(hostname, port, opts, timeout)
   end

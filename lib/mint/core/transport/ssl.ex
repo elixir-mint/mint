@@ -358,6 +358,7 @@ defmodule Mint.Core.Transport.SSL do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
+    |> Keyword.delete(:timeout)
     |> add_verify_opts(hostname)
   end
 

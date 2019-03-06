@@ -20,6 +20,14 @@ defmodule Mint.HTTP1.IntegrationTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
+  test "timeout - httpbin.org" do
+    assert {:error, :timeout} =
+             HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 1])
+
+    assert {:error, :timeout} =
+             HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 1])
+  end
+
   test "ssl, path, long body - httpbin.org" do
     assert {:ok, conn} = HTTP1.connect(:https, "httpbin.org", 443)
 
