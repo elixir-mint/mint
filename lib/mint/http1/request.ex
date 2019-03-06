@@ -25,9 +25,17 @@ defmodule Mint.HTTP1.Request do
 
   defp add_default_headers(headers, host, body) do
     headers
+    |> lower_header_keys()
     |> add_content_length(body)
     |> Util.put_new_header("user-agent", @user_agent)
     |> Util.put_new_header("host", host)
+  end
+
+  defp lower_header_keys(headers) do
+    Enum.reduce(headers, [], fn {name, value}, acc ->
+      [{lower(name), value} | acc]
+    end)
+    |> Enum.reverse()
   end
 
   defp add_content_length(headers, nil), do: headers
