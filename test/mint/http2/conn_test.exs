@@ -311,9 +311,10 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "server sends a HEADERS with END_STREAM set but not END_HEADERS",
+    test "server sends HEADERS with END_STREAM but no END_HEADERS and then sends CONTINUATIONs",
          %{conn: conn, server: server} do
-      TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
+      server
+      |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         headers = [
           {":status", "200"},
           {"foo", "bar"},
@@ -324,23 +325,17 @@ defmodule Mint.HTTP2Test do
 
         <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = IO.iodata_to_binary(hbf)
 
-        state =
-          TestServer.send_frame(
-            state,
-            headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream))
-          )
-
-        state = TestServer.send_frame(state, continuation(stream_id: stream_id, hbf: hbf2))
-
-        TestServer.send_frame(
-          state,
+        TestServer.send_frames(state, [
+          headers(stream_id: stream_id, hbf: hbf1, flags: set_flag(:headers, :end_stream)),
+          continuation(stream_id: stream_id, hbf: hbf2),
           continuation(
             stream_id: stream_id,
             hbf: hbf3,
             flags: set_flag(:continuation, :end_headers)
           )
-        )
+        ])
       end)
+      |> TestServer.expect(fn state, rst_stream(error_code: :no_error) -> state end)
 
       {conn, ref} = open_request(conn)
 
