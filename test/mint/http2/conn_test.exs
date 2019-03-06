@@ -381,11 +381,9 @@ defmodule Mint.HTTP2Test do
         {state, headers} = TestServer.decode_headers(state, hbf)
         assert [{":method", "GET"} | _] = headers
 
-        {state, hbf} = TestServer.encode_headers(state, [{":status", "200"}])
-
-        flags = set_flags(:headers, [:end_stream, :end_headers])
-        TestServer.send_frame(state, headers(stream_id: 3, hbf: hbf, flags: flags))
+        TestServer.send_headers(state, 3, [{":status", "200"}], [:end_stream, :end_headers])
       end)
+      |> TestServer.expect(fn state, rst_stream(stream_id: 3, error_code: :no_error) -> state end)
 
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
       # between 2 and 3 times (so that we can test the behaviour above).
@@ -450,6 +448,7 @@ defmodule Mint.HTTP2Test do
           )
         ])
       end)
+      |> TestServer.expect(fn state, rst_stream(error_code: :no_error) -> state end)
 
       {conn, ref} = open_request(conn)
 

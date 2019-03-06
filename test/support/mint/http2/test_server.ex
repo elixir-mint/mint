@@ -215,7 +215,7 @@ defmodule Mint.HTTP2.TestServer do
     assert {:ok, unquote(connection_preface) <> rest} =
              :ssl.recv(socket, 0, @handshake_recv_timeout)
 
-    assert {:ok, settings(flags: no_flags, params: _), ""} = Frame.decode_next(rest)
+    assert {:ok, settings(flags: ^no_flags, params: _), ""} = Frame.decode_next(rest)
 
     assert :ok = :ssl.send(socket, encode(settings(params: [])))
 
