@@ -454,6 +454,7 @@ defmodule Mint.HTTP2Test do
       end)
       |> TestServer.expect(fn state, rst_stream(error_code: :no_error) -> state end)
       |> TestServer.expect(fn state, window_update() -> state end)
+      |> TestServer.expect(fn state, window_update() -> state end)
 
       {conn, ref} = open_request(conn)
 
