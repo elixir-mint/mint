@@ -7,7 +7,7 @@ defmodule Mint.HTTP2Test do
   alias Mint.{HTTP2, HTTP2.TestServer}
 
   setup :start_server
-  setup :maybe_start_connection
+  setup :start_connection
 
   describe "stream/2 (with direct messages)" do
     test "unknown message", %{conn: conn} do
@@ -29,8 +29,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closed streams" do
-    setup :verify_no_frames_left_on_server
-
     test "server closes a stream with RST_STREAM", %{conn: conn, server: server} do
       TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
         TestServer.send_frame(
@@ -135,8 +133,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "stream state transitions" do
-    setup :verify_no_frames_left_on_server
-
     test "if client receives HEADERS after receiving a END_STREAM flag, it ignores it",
          %{server: server, conn: conn} do
       stream_id = 3
@@ -185,8 +181,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closing the connection" do
-    setup :verify_no_frames_left_on_server
-
     test "server closes the connection with GOAWAY", %{server: server, conn: conn} do
       server
       |> TestServer.expect(fn state, headers(stream_id: 3) -> state end)
@@ -238,8 +232,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "headers and continuation" do
-    setup :verify_no_frames_left_on_server
-
     test "server splits headers into multiple CONTINUATION frames", %{server: server, conn: conn} do
       TestServer.expect(server, fn state, headers(stream_id: stream_id) ->
         {state, hbf} =
@@ -461,6 +453,7 @@ defmodule Mint.HTTP2Test do
         ])
       end)
       |> TestServer.expect(fn state, rst_stream(error_code: :no_error) -> state end)
+      |> TestServer.expect(fn state, window_update() -> state end)
 
       {conn, ref} = open_request(conn)
 
@@ -488,12 +481,9 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    @tag connect: false
+    @tag connect_options: [client_settings: [enable_push: false]]
     test "receiving PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH is false causes an error",
-         %{server: server, port: port} do
-      options = [transport_opts: [verify: :verify_none], client_settings: [enable_push: false]]
-      {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
-
+         %{server: server, conn: conn} do
       server
       |> TestServer.expect(fn state, headers(stream_id: stream_id) ->
         {state, hbf} = TestServer.encode_headers(state, [{":method", "GET"}])
@@ -525,8 +515,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "misbehaving server" do
-    setup :verify_no_frames_left_on_server
-
     test "sends a frame with the wrong stream id", %{server: server, conn: conn} do
       server
       |> TestServer.expect(fn state, headers() ->
@@ -578,8 +566,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "flow control" do
-    setup :verify_no_frames_left_on_server
-
     test "server sends a WINDOW_UPDATE with too big of a size on a stream",
          %{server: server, conn: conn} do
       server
@@ -668,8 +654,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "settings" do
-    setup :verify_no_frames_left_on_server
-
     test "put_settings/2 can be used to send settings to server", %{server: server, conn: conn} do
       assert {:ok, %HTTP2{} = conn, []} = stream_next_message(conn)
 
@@ -729,8 +713,6 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "stream_request_body/3" do
-    setup :verify_no_frames_left_on_server
-
     test "streaming a request", %{server: server, conn: conn} do
       server
       |> TestServer.expect(fn state, headers(stream_id: 3, flags: flags) ->
@@ -802,25 +784,13 @@ defmodule Mint.HTTP2Test do
     [port: port, server: server]
   end
 
-  defp maybe_start_connection(context) do
-    if context[:connect] == false do
-      []
-    else
-      {:ok, conn} =
-        HTTP2.connect(
-          :https,
-          "localhost",
-          context.port,
-          transport_opts: [verify: :verify_none]
-        )
+  defp start_connection(context) do
+    connect_options = Map.get(context, :connect_options, [])
+    default_options = [transport_opts: [verify: :verify_none]]
+    options = Keyword.merge(default_options, connect_options)
 
-      [conn: conn]
-    end
-  end
-
-  defp verify_no_frames_left_on_server(context) do
-    assert TestServer.verify(context.server) == :ok
-    :ok
+    assert {:ok, conn} = HTTP2.connect(:https, "localhost", context.port, options)
+    [conn: conn]
   end
 
   defp open_request(conn) do
