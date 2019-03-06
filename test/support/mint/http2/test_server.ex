@@ -1,28 +1,10 @@
 defmodule Mint.HTTP2.TestServer do
-  use GenServer
-
-  import Mint.HTTP2.Frame
   import ExUnit.Assertions
 
-  alias Mint.HTTP2.{Frame, HPACK}
+  alias Mint.{HTTP2, HTTP2.Frame, HTTP2.HPACK}
 
-  require Logger
+  defstruct [:socket, :encode_table, :decode_table]
 
-  defstruct [
-    :listen_socket,
-    :socket,
-    :port,
-    buffer: "",
-    encode_table: Mint.HTTP2.HPACK.new(4096),
-    decode_table: Mint.HTTP2.HPACK.new(4096),
-    frame_handlers: :queue.new(),
-    verifying_from: nil
-  ]
-
-  @handshake_recv_timeout 100
-
-  @certificate Path.absname("certificate.pem", __DIR__)
-  @key Path.absname("key.pem", __DIR__)
   @ssl_opts [
     mode: :binary,
     packet: :raw,
@@ -30,200 +12,153 @@ defmodule Mint.HTTP2.TestServer do
     reuseaddr: true,
     next_protocols_advertised: ["h2"],
     alpn_preferred_protocols: ["h2"],
-    certfile: @certificate,
-    keyfile: @key
+    certfile: Path.absname("certificate.pem", __DIR__),
+    keyfile: Path.absname("key.pem", __DIR__)
   ]
 
-  ## API
+  @spec connect(keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
+  def connect(options) do
+    ref = make_ref()
+    parent = self()
 
-  def start_link() do
-    GenServer.start_link(__MODULE__, nil)
+    task = Task.async(fn -> start_socket_and_accept(parent, ref) end)
+    assert_receive {^ref, port}, 100
+
+    assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
+    assert %HTTP2{} = conn
+
+    {:ok, server_socket} = Task.await(task)
+
+    # SETTINGS here.
+    assert_receive message, 100
+    assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
+
+    server = %__MODULE__{
+      socket: server_socket,
+      encode_table: HPACK.new(4096),
+      decode_table: HPACK.new(4096)
+    }
+
+    {conn, server}
   end
 
-  def port(server) do
-    GenServer.call(server, :get_port)
+  @spec recv_next_frames(%__MODULE__{}, pos_integer()) :: [frame :: term(), ...]
+  def recv_next_frames(%__MODULE__{} = server, frame_count) when frame_count > 0 do
+    recv_next_frames(server, frame_count, [], "")
   end
 
-  def expect(server, fun) when is_function(fun, 2) do
-    :ok = GenServer.call(server, {:expect, fun})
-    server
-  end
-
-  def allow_anything(server) do
-    :ok = GenServer.call(server, :allow_anything)
-    server
-  end
-
-  def start_accepting(server) do
-    GenServer.cast(server, :start_accepting)
-  end
-
-  def decode_headers(%__MODULE__{} = state, hbf) do
-    {:ok, headers, decode_table} = HPACK.decode(hbf, state.decode_table)
-    state = put_in(state.decode_table, decode_table)
-    {state, headers}
-  end
-
-  def encode_headers(%__MODULE__{} = state, headers) do
-    {hbf, state} =
-      get_and_update_in(state.encode_table, fn encode_table ->
-        headers
-        |> Enum.map(fn {name, value} -> {:store_name, name, value} end)
-        |> HPACK.encode(encode_table)
-      end)
-
-    {state, hbf}
-  end
-
-  def send(%__MODULE__{} = state, iodata) do
-    :ok = :ssl.send(state.socket, iodata)
-    state
-  end
-
-  def send_frames(%__MODULE__{} = state, frames) do
-    __MODULE__.send(state, Enum.map(frames, &Frame.encode/1))
-  end
-
-  def send_frame(%__MODULE__{} = state, frame), do: send_frames(state, [frame])
-
-  def send_headers(%__MODULE__{} = state, stream_id, headers, flags) do
-    {state, hbf} = __MODULE__.encode_headers(state, headers)
-    flags = set_flags(:headers, flags)
-    frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
-    send_frame(state, frame)
-  end
-
-  def verify(server) do
-    GenServer.call(server, :verify)
-  end
-
-  ## Callbacks
-
-  @impl true
-  def init(nil) do
-    {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
-    {:ok, {_address, port}} = :ssl.sockname(listen_socket)
-    state = %__MODULE__{listen_socket: listen_socket, port: port}
-    {:ok, state}
-  end
-
-  @impl true
-  def handle_call(call, from, state)
-
-  def handle_call(:get_port, _from, %{port: port} = state) do
-    {:reply, port, state}
-  end
-
-  def handle_call({:expect, fun}, _from, state) do
-    if state.verifying_from do
-      flunk("Cannot add a frame expectation when verify/1 has been called")
+  defp recv_next_frames(_server, 0, frames, buffer) do
+    if buffer == "" do
+      Enum.reverse(frames)
     else
-      state = update_in(state.frame_handlers, &:queue.in(fun, &1))
-      {:reply, :ok, state}
+      flunk("Expected no more data, got: #{inspect(buffer)}")
     end
   end
 
-  def handle_call(:verify, from, state) do
-    case :queue.peek(state.frame_handlers) do
-      :empty -> {:reply, :ok, state}
-      _other -> {:noreply, put_in(state.verifying_from, from)}
+  defp recv_next_frames(server, n, frames, buffer) do
+    assert {:ok, data} = :ssl.recv(server.socket, 0, 100)
+    decode_next_frames(server, n, frames, buffer <> data)
+  end
+
+  defp decode_next_frames(_server, 0, frames, buffer) do
+    if buffer == "" do
+      Enum.reverse(frames)
+    else
+      flunk("Expected no more data, got: #{inspect(buffer)}")
     end
   end
 
-  def handle_call(:allow_anything, _from, state) do
-    state = update_in(state.frame_handlers, &:queue.in(:allow_anything, &1))
-    {:reply, :ok, state}
-  end
-
-  @impl true
-  def handle_cast(:start_accepting, state) do
-    {:ok, socket} = :ssl.transport_accept(state.listen_socket)
-    :ok = :ssl.ssl_accept(socket)
-    :ok = handshake(socket)
-    :ok = :ssl.setopts(socket, active: true)
-    {:noreply, %{state | socket: socket}}
-  end
-
-  @impl true
-  def handle_info(msg, state)
-
-  def handle_info({:ssl, socket, packet}, %{socket: socket} = state) do
-    state = handle_data(state, state.buffer <> packet)
-    {:noreply, state}
-  end
-
-  def handle_info({:ssl_closed, socket}, %{socket: socket} = state) do
-    {:noreply, state}
-  end
-
-  def handle_info({:ssl_error, socket, _reason}, %{socket: socket} = state) do
-    {:noreply, state}
-  end
-
-  defp handle_data(state, data) do
-    verifying? = not is_nil(state.verifying_from)
-    frame_handlers_left? = :queue.peek(state.frame_handlers) != :empty
-
-    case decode_next(data) do
+  defp decode_next_frames(server, n, frames, data) do
+    case Frame.decode_next(data) do
       {:ok, frame, rest} ->
-        state = handle_frame(state, frame)
-        handle_data(state, rest)
-
-      :more when verifying? and data != "" and not frame_handlers_left? ->
-        flunk("There's data left but no frame was expected. Data: #{inspect(data)}")
-
-      :more when verifying? and data == "" and not frame_handlers_left? ->
-        GenServer.reply(state.verifying_from, :ok)
-        put_in(state.buffer, "")
+        decode_next_frames(server, n - 1, [frame | frames], rest)
 
       :more ->
-        put_in(state.buffer, data)
+        recv_next_frames(server, n, frames, data)
 
-      {:error, reason} ->
-        flunk("Frame decoding error: #{inspect(reason)}")
+      other ->
+        flunk("Error decoding frame: #{inspect(other)}")
     end
   end
 
-  defp handle_frame(state, frame) do
-    case get_and_update_in(state.frame_handlers, &:queue.out/1) do
-      {{:value, :allow_anything}, state} ->
-        _ = Logger.debug("Ignoring frame #{inspect(frame)}")
-        update_in(state.frame_handlers, &:queue.in_r(:allow_anything, &1))
+  def encode_frames(server, frames) do
+    import Mint.HTTP2.Frame, only: [headers: 1]
 
-      {{:value, handler}, state} ->
-        call_handler(state, frame, handler)
+    {data, server} =
+      Enum.map_reduce(frames, server, fn
+        {frame_type, stream_id, headers, flags}, server
+        when frame_type in [:headers, :push_promise] ->
+          {server, hbf} = encode_headers(server, headers)
+          flags = Frame.set_flags(frame_type, flags)
+          frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+          {Frame.encode(frame), server}
 
-      {:empty, _state} ->
-        flunk("Received frame but no frame was expected. Frame: #{inspect(frame)}")
-    end
+        frame, server ->
+          {Frame.encode(frame), server}
+      end)
+
+    {server, IO.iodata_to_binary(data)}
   end
 
-  defp call_handler(state, frame, handler) do
-    assert %__MODULE__{} = state = handler.(state, frame)
-    state
-  rescue
-    FunctionClauseError ->
-      flunk("Next handler failed because it didn't match frame: #{inspect(frame)}")
+  def encode_headers(%__MODULE__{} = server, headers) do
+    headers = for {name, value} <- headers, do: {:store_name, name, value}
+    {hbf, encode_table} = HPACK.encode(headers, server.encode_table)
+    server = put_in(server.encode_table, encode_table)
+    {server, IO.iodata_to_binary(hbf)}
+  end
+
+  def decode_headers(%__MODULE__{} = server, hbf) do
+    assert {:ok, headers, decode_table} = HPACK.decode(hbf, server.decode_table)
+    server = put_in(server.decode_table, decode_table)
+    {server, headers}
+  end
+
+  def close_socket(server) do
+    :ok = :ssl.close(server.socket)
+  end
+
+  defp start_socket_and_accept(parent, ref) do
+    {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
+    {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+    send(parent, {ref, port})
+
+    # Let's accept a new connection.
+    {:ok, socket} = :ssl.transport_accept(listen_socket)
+    :ok = :ssl.ssl_accept(socket)
+
+    :ok = perform_http2_handshake(socket)
+
+    # We transfer ownership of the socket to the parent so that this task can die.
+    :ok = :ssl.controlling_process(socket, parent)
+    {:ok, socket}
   end
 
   connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  defp handshake(socket) do
-    no_flags = 0x00
-    ack_flags = set_flag(:settings, :ack)
+  defp perform_http2_handshake(socket) do
+    import Mint.HTTP2.Frame, only: [settings: 1]
 
-    assert {:ok, unquote(connection_preface) <> rest} =
-             :ssl.recv(socket, 0, @handshake_recv_timeout)
+    no_flags = Frame.set_flags(:settings, [])
+    ack_flags = Frame.set_flags(:settings, [:ack])
 
-    assert {:ok, settings(flags: ^no_flags, params: _), ""} = Frame.decode_next(rest)
+    # First we get the connection preface.
+    {:ok, unquote(connection_preface) <> rest} = :ssl.recv(socket, 0, 100)
 
-    assert :ok = :ssl.send(socket, encode(settings(params: [])))
+    # Then we get a SETTINGS frame.
+    assert {:ok, frame, ""} = Frame.decode_next(rest)
+    assert settings(flags: ^no_flags, params: _params) = frame
 
-    assert {:ok, packet} = :ssl.recv(socket, 0, @handshake_recv_timeout)
+    # We reply with our SETTINGS.
+    :ok = :ssl.send(socket, Frame.encode(settings(params: [])))
 
-    assert {:ok, settings(stream_id: 0, flags: ^ack_flags, params: []), ""} =
-             Frame.decode_next(packet)
+    # We get the SETTINGS ack.
+    {:ok, data} = :ssl.recv(socket, 0, 100)
+    assert {:ok, frame, ""} = Frame.decode_next(data)
+    assert settings(flags: ^ack_flags, params: []) = frame
 
-    assert :ok = :ssl.send(socket, encode(settings(flags: ack_flags, params: [])))
+    # We send the SETTINGS ack back.
+    :ok = :ssl.send(socket, Frame.encode(settings(flags: ack_flags, params: [])))
+
+    :ok
   end
 end
