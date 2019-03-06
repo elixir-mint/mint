@@ -29,9 +29,11 @@ defmodule Mint.HTTP2Test do
        %{server: server, conn: conn} do
     stream_id = 3
 
-    TestServer.expect(server, fn state, headers(stream_id: ^stream_id) ->
+    server
+    |> TestServer.expect(fn state, headers(stream_id: ^stream_id) ->
       TestServer.send_headers(state, _stream_id = 5, [{":status", "200"}], [:end_headers])
     end)
+    |> TestServer.expect(fn state, goaway(error_code: :protocol_error) -> state end)
 
     {conn, _ref} = open_request(conn)
     assert {:error, %HTTP2{} = conn, :protocol_error, []} = stream_until_responses_or_error(conn)
@@ -615,6 +617,7 @@ defmodule Mint.HTTP2Test do
         assert data == <<0>>
         TestServer.send_headers(state, 3, [{":status", "200"}], [:end_headers, :end_stream])
       end)
+      |> TestServer.expect(fn state, rst_stream(error_code: :no_error) -> state end)
 
       body = :binary.copy(<<0>>, max_frame_size + 1)
 
