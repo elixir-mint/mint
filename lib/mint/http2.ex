@@ -255,9 +255,15 @@ defmodule Mint.HTTP2 do
   @spec close(t()) :: {:ok, t()}
   def close(conn)
 
-  def close(%__MODULE__{state: :open, transport: transport, socket: socket} = conn) do
-    :ok = transport.close(socket)
-    {:ok, %__MODULE__{conn | state: :closed}}
+  def close(%__MODULE__{state: :open} = conn) do
+    conn = send_connection_error!(conn, :no_error, "connection peacefully closed by client")
+    {:ok, conn}
+  catch
+    # We could have an error sending the GOAWAY frame, but we want to ignore that since
+    # we're closing the connection anyways.
+    {:mint, conn, _reason} ->
+      conn = put_in(conn.state, :closed)
+      {:ok, conn}
   end
 
   def close(%__MODULE__{state: :closed} = conn) do
