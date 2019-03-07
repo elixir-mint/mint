@@ -81,7 +81,8 @@ defmodule Mint.HTTP2.TestServer do
     end
   end
 
-  def encode_frames(server, frames) do
+  @spec encode_frames(%__MODULE__{}, [frame :: term(), ...]) :: {%__MODULE__{}, binary()}
+  def encode_frames(%__MODULE__{} = server, frames) when is_list(frames) and frames != [] do
     import Mint.HTTP2.Frame, only: [headers: 1]
 
     {data, server} =
@@ -100,21 +101,24 @@ defmodule Mint.HTTP2.TestServer do
     {server, IO.iodata_to_binary(data)}
   end
 
-  def encode_headers(%__MODULE__{} = server, headers) do
+  @spec encode_headers(%__MODULE__{}, Mint.Types.headers()) :: {%__MODULE__{}, hbf :: binary()}
+  def encode_headers(%__MODULE__{} = server, headers) when is_list(headers) do
     headers = for {name, value} <- headers, do: {:store_name, name, value}
     {hbf, encode_table} = HPACK.encode(headers, server.encode_table)
     server = put_in(server.encode_table, encode_table)
     {server, IO.iodata_to_binary(hbf)}
   end
 
-  def decode_headers(%__MODULE__{} = server, hbf) do
+  @spec decode_headers(%__MODULE__{}, binary()) :: {%__MODULE__{}, Mint.Types.headers()}
+  def decode_headers(%__MODULE__{} = server, hbf) when is_binary(hbf) do
     assert {:ok, headers, decode_table} = HPACK.decode(hbf, server.decode_table)
     server = put_in(server.decode_table, decode_table)
     {server, headers}
   end
 
-  def close_socket(server) do
-    :ok = :ssl.close(server.socket)
+  @spec get_socket(%__MODULE__{}) :: :ssl.sslsocket()
+  def get_socket(server) do
+    server.socket
   end
 
   defp start_socket_and_accept(parent, ref) do
