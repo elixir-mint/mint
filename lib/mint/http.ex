@@ -421,7 +421,7 @@ defmodule Mint.HTTP do
   brace at a time.
 
       headers = [{"content-type", "application/json"}, {"content-length", "2"}]
-      {:ok, request_ref, conn} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "}")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, :eof)
@@ -513,7 +513,7 @@ defmodule Mint.HTTP do
 
   Now, we can see an example of a workflow involving `stream/2`.
 
-      {:ok, request_ref, conn} = Mint.HTTP1.request(conn, "GET", "/", _headers = [])
+      {:ok, conn, request_ref} = Mint.HTTP1.request(conn, "GET", "/", _headers = [])
 
       {:ok, conn, responses} = receive_next_and_stream(conn)
       responses
