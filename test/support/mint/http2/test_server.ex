@@ -33,6 +33,8 @@ defmodule Mint.HTTP2.TestServer do
     assert_receive message, 100
     assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
 
+    :ok = :ssl.setopts(server_socket, active: true)
+
     server = %__MODULE__{
       socket: server_socket,
       encode_table: HPACK.new(4096),
@@ -55,8 +57,8 @@ defmodule Mint.HTTP2.TestServer do
     end
   end
 
-  defp recv_next_frames(server, n, frames, buffer) do
-    assert {:ok, data} = :ssl.recv(server.socket, 0, 100)
+  defp recv_next_frames(%{socket: server_socket} = server, n, frames, buffer) do
+    assert_receive {:ssl, ^server_socket, data}, 100
     decode_next_frames(server, n, frames, buffer <> data)
   end
 

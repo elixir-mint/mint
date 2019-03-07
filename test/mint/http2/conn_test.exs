@@ -20,7 +20,7 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "socket error messageyeah i s are treated as errors", %{conn: conn} do
+    test "socket error messages are treated as errors", %{conn: conn} do
       message = {:ssl_error, conn.socket, :etimeout}
       assert {:error, %HTTP2{} = conn, :etimeout, []} = HTTP2.stream(conn, message)
       refute HTTP2.open?(conn)
@@ -170,6 +170,9 @@ defmodule Mint.HTTP2Test do
 
     test "client closes the connection with close/1", %{conn: conn} do
       assert {:ok, conn} = HTTP2.close(conn)
+
+      [goaway(error_code: :no_error)] = recv_next_frames(1)
+
       refute HTTP2.open?(conn)
     end
   end
