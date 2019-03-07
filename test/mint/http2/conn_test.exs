@@ -170,7 +170,6 @@ defmodule Mint.HTTP2Test do
 
     test "client closes the connection with close/1", %{conn: conn} do
       assert {:ok, conn} = HTTP2.close(conn)
-      assert :ssl.getopts(server_get_socket(), []) == {:error, :closed}
       refute HTTP2.open?(conn)
     end
   end
