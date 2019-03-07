@@ -156,6 +156,7 @@ defmodule Mint.HTTP2 do
     server_max_concurrent_streams: 100,
     initial_window_size: @default_window_size,
     max_frame_size: @default_max_frame_size,
+    max_header_list_size: :infinity,
 
     # SETTINGS-related things for client.
     client_max_frame_size: @default_max_frame_size,
@@ -685,6 +686,7 @@ defmodule Mint.HTTP2 do
   defp send_headers(conn, stream_id, headers, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state(conn, stream, [:idle])
+    assert_headers_smaller_than_max_header_list_size(conn, headers)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
@@ -697,6 +699,21 @@ defmodule Mint.HTTP2 do
     conn = put_in(conn.streams[stream_id].state, stream_state)
     conn = update_in(conn.open_stream_count, &(&1 + 1))
     conn
+  end
+
+  defp assert_headers_smaller_than_max_header_list_size(conn, headers) do
+    # The value is based on the uncompressed size of header fields, including the length
+    # of the name and value in octets plus an overhead of 32 octets for each header field.
+    total_size =
+      Enum.reduce(headers, 0, fn {name, value}, acc ->
+        acc + byte_size(name) + byte_size(value) + 32
+      end)
+
+    if conn.max_header_list_size == :infinity or total_size <= conn.max_header_list_size do
+      :ok
+    else
+      throw({:mint, conn, :max_header_list_size_exceeded})
+    end
   end
 
   defp headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags) do
@@ -1130,12 +1147,7 @@ defmodule Mint.HTTP2 do
         put_in(conn.max_frame_size, max_frame_size)
 
       {:max_header_list_size, max_header_list_size}, conn ->
-        _ =
-          Logger.debug(fn ->
-            "Ignoring MAX_HEADERS_LIST_SIZE parameter with value #{max_header_list_size}"
-          end)
-
-        conn
+        put_in(conn.max_header_list_size, max_header_list_size)
     end)
   end
 

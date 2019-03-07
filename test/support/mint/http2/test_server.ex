@@ -17,11 +17,11 @@ defmodule Mint.HTTP2.TestServer do
   ]
 
   @spec connect(keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
-  def connect(options) do
+  def connect(options, server_settings \\ []) do
     ref = make_ref()
     parent = self()
 
-    task = Task.async(fn -> start_socket_and_accept(parent, ref) end)
+    task = Task.async(fn -> start_socket_and_accept(parent, ref, server_settings) end)
     assert_receive {^ref, port}, 100
 
     assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
@@ -123,7 +123,7 @@ defmodule Mint.HTTP2.TestServer do
     server.socket
   end
 
-  defp start_socket_and_accept(parent, ref) do
+  defp start_socket_and_accept(parent, ref, server_settings) do
     {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
     send(parent, {ref, port})
@@ -132,7 +132,7 @@ defmodule Mint.HTTP2.TestServer do
     {:ok, socket} = :ssl.transport_accept(listen_socket)
     :ok = :ssl.ssl_accept(socket)
 
-    :ok = perform_http2_handshake(socket)
+    :ok = perform_http2_handshake(socket, server_settings)
 
     # We transfer ownership of the socket to the parent so that this task can die.
     :ok = :ssl.controlling_process(socket, parent)
@@ -141,7 +141,7 @@ defmodule Mint.HTTP2.TestServer do
 
   connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  defp perform_http2_handshake(socket) do
+  defp perform_http2_handshake(socket, server_settings) do
     import Mint.HTTP2.Frame, only: [settings: 1]
 
     no_flags = Frame.set_flags(:settings, [])
@@ -155,7 +155,7 @@ defmodule Mint.HTTP2.TestServer do
     assert settings(flags: ^no_flags, params: _params) = frame
 
     # We reply with our SETTINGS.
-    :ok = :ssl.send(socket, Frame.encode(settings(params: [])))
+    :ok = :ssl.send(socket, Frame.encode(settings(params: server_settings)))
 
     # We get the SETTINGS ack.
     {:ok, data} = :ssl.recv(socket, 0, 100)
