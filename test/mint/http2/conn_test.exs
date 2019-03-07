@@ -170,7 +170,7 @@ defmodule Mint.HTTP2Test do
 
     test "client closes the connection with close/1", %{conn: conn} do
       assert {:ok, conn} = HTTP2.close(conn)
-      assert :ssl.recv(server_get_socket(), _bytes = 0, _timeout = 0) == {:error, :closed}
+      assert :ssl.getopts(server_get_socket(), []) == {:error, :closed}
       refute HTTP2.open?(conn)
     end
   end
@@ -304,7 +304,7 @@ defmodule Mint.HTTP2Test do
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
       # between 2 and 3 times (so that we can test the behaviour above).
       headers = for i <- 1..400, do: {"a#{i}", String.duplicate("a", 100)}
-      assert {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", headers)
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers)
 
       assert [
                headers(stream_id: stream_id, hbf: hbf1, flags: flags1),
