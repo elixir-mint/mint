@@ -610,7 +610,7 @@ defmodule Mint.HTTP2Test do
         stream_frames(conn, [settings(params: [initial_window_size: 100])])
 
       # TODO: likely not ideal to peek into the connection here.
-      assert conn.initial_window_size == 100
+      assert conn.server_settings.initial_window_size == 100
       # This stream is half_closed_local, so there's not point in updating its window size since
       # we won't send anything on it anymore.
       assert conn.streams[stream_id].window_size == 65535
