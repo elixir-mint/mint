@@ -203,7 +203,7 @@ defmodule Mint.HTTP do
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
       filtered according to the blacklist in
       [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
-      may be overridden by the caller
+      may be overridden by the caller; some examples are given after this list
     * `:depth` - defaults to `4`; may be overridden by the caller
     * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
       Mint will enable its own partial chain handler, which accepts server
@@ -229,6 +229,31 @@ defmodule Mint.HTTP do
     * `:versions` - defaults to `[:"tlsv1.2"]` (TLS v1.2 only); may be
       overridden by the caller
 
+  By default only a small list of modern cipher suites is enabled, in compliance
+  with the HTTP/2 specification. Some servers, in particular HTTP/1 servers, may
+  not support any of these cipher suites, resulting in TLS handshake failures or
+  closed connections.
+
+  To select the default cipher suites of Erlang/OTP (including for example
+  AES-CBC), use the following `:transport_opts`:
+
+      # Erlang/OTP 20.3 or later:
+      transport_opts: [ciphers: :ssl.cipher_suites(:default, :"tlsv1.2")]
+      # Older versions:
+      transport_opts: [ciphers: :ssl.cipher_suites()]
+
+  Recent Erlang/OTP releases do not enable RSA key exchange by default, due to
+  known weaknesses. If necessary a cipher list with RSA key exchange for use in
+  the `:transport_opts` can be built as follows:
+
+      ciphers =
+        :ssl.cipher_suites(:all, :"tlsv1.2")
+        |> :ssl.filter_cipher_suites(
+          key_exchange: &(&1 == :rsa),
+          cipher: &(&1 not in [:rc4_128, :des_cbc, :"3des_ede_cbc"])
+        )
+        |> :ssl.append_cipher_suites(:ssl.cipher_suites(:default, :"tlsv1.2"))
+
   ## Examples
 
       {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
@@ -241,6 +266,11 @@ defmodule Mint.HTTP do
   Forcing the connection to be an HTTP/2 connection:
 
       {:ok, conn} = Mint.HTTP.connect(:https, "http2.golang.org", 443, protocols: [:http2])
+
+  Enable all default cipher suites of Erlang/OTP (release 20.3 or later):
+
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443,
+        transport_opts: [ciphers: :ssl.cipher_suites(:default, :"tlsv1.2")])
 
   """
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
