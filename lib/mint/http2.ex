@@ -25,6 +25,32 @@ defmodule Mint.HTTP2 do
   This is why we identify each request with a unique reference returned by `request/5`.
   See `request/5` for more information.
 
+  ## HTTP/2 settings
+
+  HTTP/2 supports settings negotiation between servers and clients. The server advertises
+  its settings to the client and the client advertises its settings to the server. A peer
+  (server or client) has to acknowledge the settings advertised by the other peer before
+  those settings come into action (that's why it's called a negotiation).
+
+  A first settings negotiation happens right when the connection starts.
+  Servers and clients can renegotiate settings at any time during the life of the
+  connection.
+
+  Mint users don't need to care about settings acknowledgements directly since they're
+  handled transparently by `stream/2`.
+
+  To retrieve the server settings, you can use `get_server_setting/2`. Doing so is often
+  useful to be able to tune your requests based on the server settings.
+
+  To communicate client settings to the server, use `put_settings/2` or pass them when
+  starting up a connection with `connect/4`. Note that the server needs to acknowledge
+  the settings sent through `put_setting/2` before those settings come into effect. The
+  server ack is processed transparently by `stream/2`, but this means that if you change
+  a setting through `put_settings/2` and try to retrieve the value of that setting right
+  after with `get_client_setting/2`, you'll likely get the old value of that setting. Once
+  the server acknowledges the new settings, the updated value will be returned by
+  `get_client_setting/2`.
+
   ## Server push
 
   HTTP/2 supports [server push](https://en.wikipedia.org/wiki/HTTP/2_Server_Push), which
@@ -179,11 +205,51 @@ defmodule Mint.HTTP2 do
   ## Types
 
   @typedoc """
+  HTTP/2 setting with its value.
+
+  This type represents both server settings as well as client settings. To retrieve
+  server settings use `get_server_settings/2` and to retrieve client settings use
+  `get_client_setting/2`. To send client settings to the server, see `put_settings/2`.
+
+  The supported settings are the following:
+
+    * `:header_table_size` - (integer) corresponds to `SETTINGS_HEADER_TABLE_SIZE`.
+
+    * `:enable_push` - (boolean) corresponds to `SETTINGS_ENABLE_PUSH`. Sets whether
+      push promises are supported. If you don't want to support push promises,
+      use `put_settings/2` to tell the server that your client doesn't want push promises.
+
+    * `:max_concurrent_streams` - (integer) corresponds to `SETTINGS_MAX_CONCURRENT_STREAMS`.
+      Tells what is the maximum number of streams that the peer sending this (client or server)
+      supports. As mentioned in the module documentation, HTTP/2 streams are equivalent to
+      requests, so knowing the maximum number of streams that the server supports can be useful
+      to know how many concurrent requests can be open at any time. Use `get_server_setting/2`
+      to find out how many concurrent streams the server supports.
+
+    * `:initial_window_size` - (integer smaller than `#{inspect(@max_window_size)}`)
+      corresponds to `SETTINGS_INITIAL_WINDOW_SIZE`. Tells what is the value of
+      the initial HTTP/2 window size for the peer that sends this setting.
+
+    * `:max_frame_size` - (integer in the range `#{inspect(@valid_max_frame_size_range)}`)
+      corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the maximum size of an HTTP/2
+      frame for the peer that sends this setting.
+
+    * `:max_header_list_size` - (integer) corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
+
+  """
+  @type setting() ::
+          {:enable_push, boolean()}
+          | {:max_concurrent_streams, pos_integer()}
+          | {:initial_window_size, 1..2_147_483_647}
+          | {:max_frame_size, 16_384..16_777_215}
+          | {:max_header_list_size, :infinity | pos_integer()}
+
+  @typedoc """
   HTTP/2 settings.
 
-  See `get_setting/2`.
+  See `t:setting/0`.
   """
-  @type settings() :: keyword()
+  @type settings() :: [setting()]
 
   @opaque t() :: %Mint.HTTP2{}
 
@@ -273,7 +339,8 @@ defmodule Mint.HTTP2 do
   In that case, the error reason `{:max_concurrent_streams_reached, value}` is
   returned where `value` is the maximum number of concurrent streams possible.
   If you want to avoid incurring in this error, you can retrieve the value of
-  the maximum number of concurrent streams through `get_setting/2`.
+  the maximum number of concurrent streams supported by the server through
+  `get_server_setting/2` (passing in the `:max_concurrent_streams` setting name).
   """
   @impl true
   @spec request(
@@ -372,7 +439,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  Sets the given HTTP/2 settings on the server.
+  Communicates the given client settings to the server.
 
   This function is HTTP/2-specific.
 
@@ -387,30 +454,18 @@ defmodule Mint.HTTP2 do
 
   ## Supported settings
 
-  These are the settings that you can send to the server. You can see the meaning
+  See `t:setting/0` for the supported settings. You can see the meaning
   of these settings [in the corresponding section in the HTTP/2
   RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
 
-    * `:header_table_size` - (integer) corresponds to `SETTINGS_HEADER_TABLE_SIZE`.
-
-    * `:enable_push` - (boolean) corresponds to `SETTINGS_ENABLE_PUSH`.
-
-    * `:max_concurrent_streams` - (integer) corresponds to `SETTINGS_MAX_CONCURRENT_STREAMS`.
-
-    * `:initial_window_size` - (integer smaller than `#{inspect(@max_window_size)}`)
-      corresponds to `SETTINGS_INITIAL_WINDOW_SIZE`.
-
-    * `:max_frame_size` - (integer in the range `#{inspect(@valid_max_frame_size_range)}`)
-      corresponds to `SETTINGS_MAX_FRAME_SIZE`.
-
-    * `:max_header_list_size` - (integer) corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
+  See the "HTTP/2 settings" section in the module documentation for more information.
 
   ## Examples
 
       {:ok, conn} = Mint.HTTP2.put_settings(conn, max_frame_size: 100)
 
   """
-  @spec put_settings(t(), keyword()) :: {:ok, t()} | {:error, t(), reason :: term()}
+  @spec put_settings(t(), settings()) :: {:ok, t()} | {:error, t(), reason :: term()}
   def put_settings(%Mint.HTTP2{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
@@ -419,46 +474,65 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  Gets the value of the given HTTP/2 setting.
+  Gets the value of the given HTTP/2 server settings.
 
-  This function returns the value of the given HTTP/2 setting and it's HTTP/2
-  specific. For more information on HTTP/2 settings, see [the related section in
+  This function returns the value of the given HTTP/2 setting that the server
+  advertised to the client. This function is HTTP/2 specific.
+  For more information on HTTP/2 settings, see [the related section in
   the RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
+
+  See the "HTTP/2 settings" section in the module documentation for more information.
 
   ## Supported settings
 
-  The possible settings that can be retrieved are:
-
-    * `:enable_push` - a boolean that tells whether push promises are enabled.
-
-    * `:max_concurrent_streams` - an integer that tells what is the maximum
-      number of streams that the server declared it supports. As mentioned in the
-      module documentation, HTTP/2 streams are equivalent to requests, so knowing
-      the maximum number of streams that the server supports can be usefule to know
-      how many concurrent requests can be open at any time.
-
-    * `:initial_window_size` - an integer that tells what is the value of
-      the initial HTTP/2 window size declared by the server.
-
-    * `:max_frame_size` - an integer that tells what is the maximum
-      size of an HTTP/2 frame declared by the server.
-
+  The possible settings that can be retrieved are described in `t:setting/0`.
   Any other atom passed as `name` will raise an error.
 
   ## Examples
 
-      Mint.HTTP2.get_setting(conn, :max_concurrent_streams)
+      Mint.HTTP2.get_server_setting(conn, :max_concurrent_streams)
       #=> 500
 
   """
-  @spec get_setting(t(), atom()) :: term()
-  def get_setting(%Mint.HTTP2{} = conn, name) when is_atom(name) do
-    case name do
-      :enable_push -> conn.server_settings.enable_push
-      :max_concurrent_streams -> conn.server_settings.max_concurrent_streams
-      :initial_window_size -> conn.server_settings.initial_window_size
-      :max_frame_size -> conn.server_settings.max_frame_size
-      other -> raise ArgumentError, "unknown HTTP/2 setting: #{inspect(other)}"
+  @spec get_server_setting(t(), atom()) :: term()
+  def get_server_setting(%Mint.HTTP2{} = conn, name) when is_atom(name) do
+    get_setting(conn.server_settings, name)
+  end
+
+  @doc """
+  Gets the value of the given HTTP/2 client setting.
+
+  This function returns the value of the given HTTP/2 setting that the client
+  advertised to the server. Client settings can be advertised through `put_settings/2`
+  or when starting up a connection.
+
+  Client settings have to be acknowledged by the server before coming into effect.
+
+  This function is HTTP/2 specific. For more information on HTTP/2 settings, see
+  [the related section in the RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
+
+  See the "HTTP/2 settings" section in the module documentation for more information.
+
+  ## Supported settings
+
+  The possible settings that can be retrieved are described in `t:setting/0`.
+  Any other atom passed as `name` will raise an error.
+
+  ## Examples
+
+      Mint.HTTP2.get_client_setting(conn, :max_concurrent_streams)
+      #=> 500
+
+  """
+  @spec get_client_setting(t(), atom()) :: term()
+  def get_client_setting(%Mint.HTTP2{} = conn, name) when is_atom(name) do
+    get_setting(conn.client_settings, name)
+  end
+
+  defp get_setting(settings, name) do
+    case Map.fetch(settings, name) do
+      {:ok, value} -> value
+      :error -> raise ArgumentError, "unknown HTTP/2 setting: #{inspect(name)}"
     end
   end
 
