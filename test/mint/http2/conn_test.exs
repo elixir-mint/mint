@@ -324,6 +324,18 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    @tag server_settings: [max_header_list_size: 67]
+    test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
+      # To calculate the max_header_list_size, we have to sum up each header name, value, plus
+      # 32 octects per header. Here we have 2 bytes + 32 bytes per header, so 68 bytes in total,
+      # but max size is 67.
+
+      assert {:error, %HTTP2{} = conn, :max_header_list_size_exceeded} =
+               HTTP2.request(conn, "GET", "/", [{"a", "a"}, {"b", "b"}])
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "server pushes" do
@@ -658,7 +670,7 @@ defmodule Mint.HTTP2Test do
   defp start_connection(context) do
     default_options = [transport_opts: [verify: :verify_none]]
     options = Keyword.merge(default_options, context[:connect_options] || [])
-    {conn, server} = TestServer.connect(options)
+    {conn, server} = TestServer.connect(options, context[:server_settings] || [])
 
     Process.put(@pdict_key, server)
 
