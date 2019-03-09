@@ -250,7 +250,7 @@ defmodule Mint.HTTP do
         :ssl.cipher_suites(:all, :"tlsv1.2")
         |> :ssl.filter_cipher_suites(
           key_exchange: &(&1 == :rsa),
-          cipher: &(&1 not in [:rc4_128, :des_cbc, :"3des_ede_cbc"])
+          cipher: &(&1 in [:aes_256_gcm, :aes_128_gcm, :aes_256_cbc, :aes_128_cbc])
         )
         |> :ssl.append_cipher_suites(:ssl.cipher_suites(:default, :"tlsv1.2"))
 
