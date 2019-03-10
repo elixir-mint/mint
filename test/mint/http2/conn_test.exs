@@ -542,7 +542,7 @@ defmodule Mint.HTTP2Test do
 
     test "client splits data automatically based on server's max frame size",
          %{conn: conn} do
-      max_frame_size = HTTP2.get_setting(conn, :max_frame_size)
+      max_frame_size = HTTP2.get_server_setting(conn, :max_frame_size)
 
       body = :binary.copy(<<0>>, max_frame_size + 1)
       {conn, _ref} = open_request(conn, body)
@@ -589,14 +589,14 @@ defmodule Mint.HTTP2Test do
       end
     end
 
-    test "get_setting/2 can be used to read server settings", %{conn: conn} do
-      assert HTTP2.get_setting(conn, :max_concurrent_streams) == 100
-      assert HTTP2.get_setting(conn, :enable_push) == true
+    test "get_server_setting/2 can be used to read server settings", %{conn: conn} do
+      assert HTTP2.get_server_setting(conn, :max_concurrent_streams) == 100
+      assert HTTP2.get_server_setting(conn, :enable_push) == true
     end
 
-    test "get_setting/2 fails with unknown settings", %{conn: conn} do
+    test "get_server_setting/2 fails with unknown settings", %{conn: conn} do
       assert_raise ArgumentError, "unknown HTTP/2 setting: :unknown", fn ->
-        HTTP2.get_setting(conn, :unknown)
+        HTTP2.get_server_setting(conn, :unknown)
       end
     end
 
@@ -610,7 +610,7 @@ defmodule Mint.HTTP2Test do
         stream_frames(conn, [settings(params: [initial_window_size: 100])])
 
       # TODO: likely not ideal to peek into the connection here.
-      assert conn.initial_window_size == 100
+      assert conn.server_settings.initial_window_size == 100
       # This stream is half_closed_local, so there's not point in updating its window size since
       # we won't send anything on it anymore.
       assert conn.streams[stream_id].window_size == 65535
