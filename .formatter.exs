@@ -5,6 +5,7 @@
     # TODO: remove this once we depend on newer stream_data, which provide this if you
     # import their configuration.
     all: :*,
-    assert_round_trip: 1
+    assert_round_trip: 1,
+    assert_recv_frames: 1
   ]
 ]
