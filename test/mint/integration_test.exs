@@ -3,7 +3,7 @@ defmodule Mint.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.HTTP
+  alias Mint.{Error, HTTP}
 
   describe "httpbin.org" do
     @describetag :integration
@@ -30,7 +30,7 @@ defmodule Mint.IntegrationTest do
 
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
-      assert {:error, :protocol_not_negotiated} =
+      assert {:error, %Error{reason: :protocol_not_negotiated}} =
                HTTP.connect(:https, "httpbin.org", 443,
                  protocols: [:http2],
                  transport_opts: [reuse_sessions: false]
@@ -76,7 +76,7 @@ defmodule Mint.IntegrationTest do
     @describetag :integration
 
     test "bad certificate - badssl.com" do
-      assert {:error, {:tls_alert, 'unknown ca'}} =
+      assert {:error, %Error{reason: {:tls_alert, 'unknown ca'}}} =
                HTTP.connect(
                  :https,
                  "untrusted-root.badssl.com",
@@ -94,7 +94,7 @@ defmodule Mint.IntegrationTest do
     end
 
     test "bad hostname - badssl.com" do
-      assert {:error, {:tls_alert, 'handshake failure'}} =
+      assert {:error, %Error{reason: {:tls_alert, 'handshake failure'}}} =
                HTTP.connect(
                  :https,
                  "wrong.host.badssl.com",

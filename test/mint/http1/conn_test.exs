@@ -1,7 +1,7 @@
 defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
-  alias Mint.{HTTP1, HTTP1.TestServer}
+  alias Mint.{Error, HTTP1, HTTP1.TestServer}
 
   setup do
     {:ok, port} = TestServer.start()
@@ -110,7 +110,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    assert {:error, conn, {:unexpected_data, "X"}, []} =
+    assert {:error, conn, %Error{reason: {:unexpected_data, "X"}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
     refute HTTP1.open?(conn)
@@ -160,8 +160,8 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
 
-    assert {:error, conn, :more_than_one_content_length_header, [{:status, _ref, 200}]} =
-             HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert {:error, conn, %Error{reason: :more_than_one_content_length_header},
+            [{:status, _ref, 200}]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     refute HTTP1.open?(conn)
   end

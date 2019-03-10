@@ -3,7 +3,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.HTTP1
+  alias Mint.{Error, HTTP1}
 
   @moduletag :integration
 
@@ -21,10 +21,10 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "timeout - httpbin.org" do
-    assert {:error, :timeout} =
+    assert {:error, %Error{reason: :timeout}} =
              HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 1])
 
-    assert {:error, :timeout} =
+    assert {:error, %Error{reason: :timeout}} =
              HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 1])
   end
 
@@ -42,7 +42,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl with missing CA cacertfile - httpbin.org" do
-    assert {:error, {:tls_alert, 'unknown ca'}} =
+    assert {:error, %Error{reason: {:tls_alert, 'unknown ca'}}} =
              HTTP1.connect(
                :https,
                "httpbin.org",
@@ -56,7 +56,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl with missing CA cacerts - httpbin.org" do
-    assert {:error, {:tls_alert, 'unknown ca'}} =
+    assert {:error, %Error{reason: {:tls_alert, 'unknown ca'}}} =
              HTTP1.connect(
                :https,
                "httpbin.org",
@@ -170,7 +170,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl, bad certificate - badssl.com" do
-    assert {:error, {:tls_alert, 'unknown ca'}} =
+    assert {:error, %Error{reason: {:tls_alert, 'unknown ca'}}} =
              HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
                transport_opts: [log_alert: false, reuse_sessions: false]
              )
@@ -182,7 +182,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl, bad hostname - badssl.com" do
-    assert {:error, {:tls_alert, 'handshake failure'}} =
+    assert {:error, %Error{reason: {:tls_alert, 'handshake failure'}}} =
              HTTP1.connect(:https, "wrong.host.badssl.com", 443,
                transport_opts: [log_alert: false, reuse_sessions: false]
              )

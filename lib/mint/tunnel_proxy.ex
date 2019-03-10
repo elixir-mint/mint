@@ -1,7 +1,7 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  alias Mint.{HTTP1, Negotiate}
+  alias Mint.{Error, HTTP1, Negotiate}
 
   @tunnel_timeout 30_000
 
@@ -23,11 +23,11 @@ defmodule Mint.TunnelProxy do
       {:ok, conn}
     else
       {:error, reason} ->
-        {:error, {:proxy, reason}}
+        {:error, %Error{reason: {:proxy, reason}}}
 
       {:error, conn, reason} ->
         {:ok, _conn} = HTTP1.close(conn)
-        {:error, {:proxy, reason}}
+        {:error, %Error{reason: {:proxy, reason}}}
     end
   end
 
@@ -53,7 +53,7 @@ defmodule Mint.TunnelProxy do
         stream(conn, ref, timeout_deadline, msg)
     after
       timeout ->
-        {:error, conn, :tunnel_timeout}
+        {:error, conn, %Error{reason: :tunnel_timeout}}
     end
   end
 
@@ -77,13 +77,13 @@ defmodule Mint.TunnelProxy do
         handle_responses(conn, ref, timeout_deadline, responses)
 
       {:status, ^ref, status} ->
-        {:error, conn, {:unexpected_status, status}}
+        {:error, conn, %Error{reason: {:unexpected_status, status}}}
 
       {:headers, ^ref, _headers} ->
         if responses == [] do
           :done
         else
-          {:error, conn, {:unexpected_trailing_responses, responses}}
+          {:error, conn, %Error{reason: {:unexpected_trailing_responses, responses}}}
         end
 
       {:error, ^ref, reason} ->

@@ -4,6 +4,7 @@ defmodule Mint.Negotiate do
   import Mint.Core.Util
 
   alias Mint.{
+    Error,
     HTTP1,
     HTTP2
   }
@@ -63,7 +64,7 @@ defmodule Mint.Negotiate do
 
     case transport.connect(hostname, port, transport_opts) do
       {:ok, transport_state} -> alpn_negotiate(scheme, transport_state, hostname, port, opts)
-      {:error, reason} -> {:error, reason}
+      {:error, reason} -> {:error, %Error{reason: reason}}
     end
   end
 
@@ -103,7 +104,7 @@ defmodule Mint.Negotiate do
         alpn_negotiate(new_scheme, transport_state, hostname, port, opts)
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, %Error{reason: reason}}
     end
   end
 
@@ -122,7 +123,7 @@ defmodule Mint.Negotiate do
         HTTP1.initiate(scheme, socket, hostname, port, opts)
 
       {:ok, protocol} ->
-        {:error, {:bad_alpn_protocol, protocol}}
+        {:error, %Error{reason: {:bad_alpn_protocol, protocol}}}
     end
   end
 end
