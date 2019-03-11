@@ -93,6 +93,14 @@ end
 
 If you wish to contribute check out the [issue list](https://github.com/ericmj/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
 
+Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:integration`. Proxy tests are tagged with `:proxy` and require that you run `docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
+
+  * `$ mix test` to run the test suite without caring about Docker and `docker-compose up`.
+
+  * `$ mix test --exclude integration` to only run local tests (for example, you don't have an internet connection available).
+
+  * `$ mix test --include proxy` to run all tests, including proxy tests.
+
 ## License
 
 Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi

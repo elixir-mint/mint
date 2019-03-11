@@ -184,50 +184,91 @@ defmodule Mint.HTTP do
 
   Common options for `:http` and `:https`:
 
-    * `:active` - managed by Mint; should not normally be modified by the
-      application at any time
-    * `:mode` - set to `:binary`; cannot be overriden
-    * `:packet` - set to `:raw`; cannot be overridden
-    * `:timeout` - connect timeout in milliseconds; defaults to `30_000` (30
-      seconds), and may be overridden by the caller; set to `:infinity` to
-      disable the connect timeout
+    * `:active` - managed by Mint. Should not normally be modified by the
+      application at any time.
+
+    * `:mode` - set to `:binary`. Cannot be overriden.
+
+    * `:packet` - set to `:raw`. Cannot be overridden.
+
+    * `:timeout` - connect timeout in milliseconds. Defaults to `30_000` (30
+      seconds), and may be overridden by the caller. Set to `:infinity` to
+      disable the connect timeout.
 
   Options for `:https` only:
 
-    * `:alpn_advertised_protocols` - managed by Mint; cannot be overridden
+    * `:alpn_advertised_protocols` - managed by Mint. Cannot be overridden.
+
     * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
-      [CAStore](https://github.com/ericmj/castore) package, or raise an
-      exception if this package is not available
+      [CAStore](https://github.com/ericmj/castore) package or raise an
+      exception if this package is not available.
+
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
-      filtered according to the blacklist in
+      filtered according to the blocklist in
       [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
-      may be overridden by the caller
-    * `:depth` - defaults to `4`; may be overridden by the caller
+      May be overridden by the caller. See the "Supporting older cipher suites"
+      section below for some examples.
+
+    * `:depth` - defaults to `4`. May be overridden by the caller.
+
     * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
       Mint will enable its own partial chain handler, which accepts server
       certificate chains containing a certificate that was issued by a
       CA certificate in the CA trust store, even if that certificate is not
-      last in the chain; this improves interoperability with some servers
-      (for example, with a cross-signed intermediate CA, or some misconfigured servers),
-      but it should be noted that this is a less strict interpretation of the
-      TLS specification than the Erlang/OTP default behaviour
-    * `:reuse_sessions` - defaults to `true`; may be overridden by the caller
-    * `:secure_renegotiate` - defaults to `true`; may be overridden by the
-      caller
-    * `:server_name_indication` - defaults to specified destination hostname;
-      may be overridden by the caller
-    * `:verify` - defaults to `:verify_peer`; may be overridden by the caller
+      last in the chain. This improves interoperability with some servers
+      (for example, with a cross-signed intermediate CA or some misconfigured servers),
+      but is a less strict interpretation of the TLS specification than the
+      Erlang/OTP default behaviour.
+
+    * `:reuse_sessions` - defaults to `true`. May be overridden by the caller.
+
+    * `:secure_renegotiate` - defaults to `true`. May be overridden by the
+      caller.
+
+    * `:server_name_indication` - defaults to specified destination hostname.
+      May be overridden by the caller.
+
+    * `:verify` - defaults to `:verify_peer`. May be overridden by the caller.
+
     * `:verify_fun` - unless a custom `:verify_fun` is specified, or `:verify`
       is set to `:verify_none`, Mint will enable hostname verification with
       support for wildcards in the server's 'SubjectAltName' extension, similar
       to the behaviour implemented in
       `:public_key.pkix_verify_hostname_match_fun(:https)` in recent Erlang/OTP
-      releases; this improves compatibility with recently issued wildcard
-      certificates, also on older Erlang/OTP releases
-    * `:versions` - defaults to `[:"tlsv1.2"]` (TLS v1.2 only); may be
-      overridden by the caller
+      releases. This improves compatibility with recently issued wildcard
+      certificates also on older Erlang/OTP releases.
+
+    * `:versions` - defaults to `[:"tlsv1.2"]` (TLS v1.2 only). May be
+      overridden by the caller.
+
+  ### Supporting older cipher suites
+
+  By default only a small list of modern cipher suites is enabled, in compliance
+  with the HTTP/2 specification. Some servers, in particular HTTP/1 servers, may
+  not support any of these cipher suites, resulting in TLS handshake failures or
+  closed connections.
+
+  To select the default cipher suites of Erlang/OTP (including for example
+  AES-CBC), use the following `:transport_opts`:
+
+      # Erlang/OTP 20.3 or later:
+      transport_opts: [ciphers: :ssl.cipher_suites(:default, :"tlsv1.2")]
+      # Older versions:
+      transport_opts: [ciphers: :ssl.cipher_suites()]
+
+  Recent Erlang/OTP releases do not enable RSA key exchange by default, due to
+  known weaknesses. If necessary, you can build a cipher list with RSA exchange
+  and use it in `:transport_opts`:
+
+      ciphers =
+        :ssl.cipher_suites(:all, :"tlsv1.2")
+        |> :ssl.filter_cipher_suites(
+          key_exchange: &(&1 == :rsa),
+          cipher: &(&1 in [:aes_256_gcm, :aes_128_gcm, :aes_256_cbc, :aes_128_cbc])
+        )
+        |> :ssl.append_cipher_suites(:ssl.cipher_suites(:default, :"tlsv1.2"))
 
   ## Examples
 
@@ -241,6 +282,11 @@ defmodule Mint.HTTP do
   Forcing the connection to be an HTTP/2 connection:
 
       {:ok, conn} = Mint.HTTP.connect(:https, "http2.golang.org", 443, protocols: [:http2])
+
+  Enable all default cipher suites of Erlang/OTP (release 20.3 or later):
+
+      opts = [transport_opts: [ciphers: :ssl.cipher_suites(:default, :"tlsv1.2")]]
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, opts)
 
   """
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
@@ -421,7 +467,7 @@ defmodule Mint.HTTP do
   brace at a time.
 
       headers = [{"content-type", "application/json"}, {"content-length", "2"}]
-      {:ok, request_ref, conn} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "}")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, :eof)
@@ -513,7 +559,7 @@ defmodule Mint.HTTP do
 
   Now, we can see an example of a workflow involving `stream/2`.
 
-      {:ok, request_ref, conn} = Mint.HTTP1.request(conn, "GET", "/", _headers = [])
+      {:ok, conn, request_ref} = Mint.HTTP1.request(conn, "GET", "/", _headers = [])
 
       {:ok, conn, responses} = receive_next_and_stream(conn)
       responses
