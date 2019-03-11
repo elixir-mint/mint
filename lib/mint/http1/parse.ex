@@ -48,7 +48,7 @@ defmodule Mint.HTTP1.Parse do
   def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
 
   def content_length_header(string) do
-    case Integer.parse(string) do
+    case Integer.parse(String.trim(string)) do
       {length, ""} when length >= 0 ->
         length
 
