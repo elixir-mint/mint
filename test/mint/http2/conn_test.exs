@@ -337,7 +337,7 @@ defmodule Mint.HTTP2Test do
       # 32 octects per header. Here we have 2 bytes + 32 bytes per header, so 68 bytes in total,
       # but max size is 67.
 
-      assert {:error, %HTTP2{} = conn, %Error{reason: :max_header_list_size_exceeded}} =
+      assert {:error, %HTTP2{} = conn, %Error{reason: {:max_header_list_size_exceeded, 68, 67}}} =
                HTTP2.request(conn, "GET", "/", [{"a", "a"}, {"b", "b"}])
 
       assert HTTP2.open?(conn)

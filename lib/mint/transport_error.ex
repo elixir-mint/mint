@@ -1,8 +1,4 @@
-defmodule Mint.Error do
-  @moduledoc """
-  TODO: write docs.
-  """
-
+defmodule Mint.TransportError do
   @type t() :: %__MODULE__{reason: term()}
 
   defexception [:reason]
@@ -10,8 +6,6 @@ defmodule Mint.Error do
   def message(%__MODULE__{reason: reason}) do
     format_reason(reason)
   end
-
-  # TODO: handle all of our possible reasons.
 
   # :inet.format_error/1 doesn't format closed messages.
   defp format_reason(:tcp_closed), do: "TCP connection closed"

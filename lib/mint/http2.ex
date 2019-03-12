@@ -793,10 +793,12 @@ defmodule Mint.HTTP2 do
         acc + byte_size(name) + byte_size(value) + 32
       end)
 
-    if total_size <= conn.server_settings.max_header_list_size do
+    max_header_list_size = conn.server_settings.max_header_list_size
+
+    if total_size <= max_header_list_size do
       :ok
     else
-      error!(conn, :max_header_list_size_exceeded)
+      error!(conn, {:max_header_list_size_exceeded, total_size, max_header_list_size})
     end
   end
 
