@@ -543,7 +543,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp store_header(_request, "content-length", _value) do
-    {:error, :invalid_response}
+    {:error, :more_than_one_content_length_header}
   end
 
   defp store_header(request, _name, _value) do
