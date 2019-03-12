@@ -8,7 +8,7 @@ defmodule Mint.HTTP1.Request do
   @user_agent "mint/" <> Mix.Project.config()[:version]
 
   def encode(method, target, host, headers, body) do
-    headers = add_default_headers(headers, host, body)
+    headers = add_default_headers(lower_header_keys(headers), host, body)
 
     [
       encode_request_line(method, target),
@@ -21,6 +21,12 @@ defmodule Mint.HTTP1.Request do
   defp encode_request_line(method, target) do
     validate_target!(target)
     [method, ?\s, target, " HTTP/1.1\r\n"]
+  end
+
+  defp lower_header_keys(headers) do
+    Enum.map(headers, fn {name, value} ->
+      {lower(name), value}
+    end)
   end
 
   defp add_default_headers(headers, host, body) do

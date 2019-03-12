@@ -51,6 +51,38 @@ defmodule Mint.HTTP1.RequestTest do
                """)
     end
 
+    test "with overridden user-agent" do
+      request =
+        Request.encode("GET", "/", "example.com", [{"user-agent", "myapp/1.0"}], "BODY")
+        |> IO.iodata_to_binary()
+
+      assert request ==
+               request_string("""
+               GET / HTTP/1.1
+               host: example.com
+               content-length: 4
+               user-agent: myapp/1.0
+
+               BODY\
+               """)
+    end
+
+    test "override with non-lowercase key" do
+      request =
+        Request.encode("GET", "/", "example.com", [{"User-Agent", "myapp/1.0"}], "BODY")
+        |> IO.iodata_to_binary()
+
+      assert request ==
+               request_string("""
+               GET / HTTP/1.1
+               host: example.com
+               content-length: 4
+               user-agent: myapp/1.0
+
+               BODY\
+               """)
+    end
+
     test "invalid request target" do
       assert catch_throw(Request.encode("GET", "/ /", "example.com", [], nil)) ==
                {:mint, :invalid_request_target}
