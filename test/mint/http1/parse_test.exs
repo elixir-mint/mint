@@ -14,10 +14,21 @@ defmodule Mint.HTTP1.ParseTest do
 
   test "connection_header/1" do
     assert connection_header("close") == ["close"]
+    assert connection_header("close  ") == ["close"]
     assert connection_header("Keep-Alive") == ["keep-alive"]
     assert connection_header("keep-alive, Upgrade") == ["keep-alive", "upgrade"]
+    assert connection_header("keep-alive,  Upgrade  ") == ["keep-alive", "upgrade"]
 
     assert catch_throw(connection_header("\n")) == {:mint, :invalid_token_list}
+  end
+
+  test "transfer_encoding_header/1" do
+    assert transfer_encoding_header("deflate") == ["deflate"]
+    assert transfer_encoding_header("deflate  ") == ["deflate"]
+    assert transfer_encoding_header("gzip, Chunked") == ["gzip", "chunked"]
+    assert transfer_encoding_header("gzip,   Chunked  ") == ["gzip", "chunked"]
+
+    assert catch_throw(transfer_encoding_header("\n")) == {:mint, :invalid_token_list}
   end
 
   test "token_list/1" do
