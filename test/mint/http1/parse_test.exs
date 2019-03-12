@@ -6,7 +6,7 @@ defmodule Mint.HTTP1.ParseTest do
   test "content_length_header/1" do
     assert content_length_header("0") == 0
     assert content_length_header("100") == 100
-    assert content_length_header("  200  ") == 200
+    assert content_length_header("200  ") == 200
 
     assert catch_throw(content_length_header("foo")) == {:mint, :invalid_content_length_header}
     assert catch_throw(content_length_header("-10")) == {:mint, :invalid_content_length_header}
