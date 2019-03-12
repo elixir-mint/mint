@@ -37,10 +37,8 @@ defmodule Mint.HTTPError do
     "invalid trailer header"
   end
 
-  # For when content-length is provided more than once.
-  # TODO: can we improve this error?
-  defp format_reason(:invalid_response) do
-    "invalid response"
+  defp format_reason(:more_than_one_content_length_header) do
+    "the response contains two or more Content-Length headers"
   end
 
   defp format_reason(:transfer_encoding_and_content_length) do
