@@ -306,13 +306,14 @@ defmodule Mint.HTTP2 do
   def close(conn)
 
   def close(%__MODULE__{state: :open} = conn) do
-    # TODO: this errors out since we throw at the end.
-    conn = send_connection_error!(conn, :no_error, "connection peacefully closed by client")
-    {:ok, conn}
+    send_connection_error!(conn, :no_error, "connection peacefully closed by client")
   catch
+    {:mint, conn, %HTTPError{reason: {:no_error, _}}} ->
+      {:ok, conn}
+
     # We could have an error sending the GOAWAY frame, but we want to ignore that since
     # we're closing the connection anyways.
-    {:mint, conn, _reason} ->
+    {:mint, conn, %TransportError{}} ->
       conn = put_in(conn.state, :closed)
       {:ok, conn}
   end
