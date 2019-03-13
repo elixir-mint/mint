@@ -1340,20 +1340,18 @@ defmodule Mint.HTTP2 do
   end
 
   defp handle_ping_ack(conn, opaque_data, responses) do
-    case :queue.out(conn.ping_queue) do
-      {{:value, {ref, ^opaque_data}}, ping_queue} ->
-        conn = put_in(conn.ping_queue, ping_queue)
+    case :queue.peek(conn.ping_queue) do
+      {:value, {ref, ^opaque_data}} ->
+        conn = update_in(conn.ping_queue, &:queue.drop/1)
         {conn, [{:pong, ref} | responses]}
 
-      {{:value, _}, _} ->
-        # TODO: should this be a connection error?
-        _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
-        throw_error!(conn, :protocol_error, responses)
+      {:value, _} ->
+        _ = Logger.warn("Received PING ack that doesn't match next PING request in the queue")
+        {conn, responses}
 
-      {:empty, _ping_queue} ->
-        # TODO: should this be a connection error?
-        _ = Logger.error("Received PING ack but no PING requests had been sent")
-        throw_error!(conn, :protocol_error, responses)
+      :empty ->
+        _ = Logger.warn("Received PING ack but no PING requests are pending")
+        {conn, responses}
     end
   end
 

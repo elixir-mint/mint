@@ -681,6 +681,55 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "ping" do
+    test "if we send a PING we then get a :pong reply", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.ping(conn)
+
+      assert_recv_frames [ping(opaque_data: opaque_data)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 ping(flags: set_flags(:ping, [:ack]), opaque_data: opaque_data)
+               ])
+
+      assert responses == [{:pong, ref}]
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "if the server sends a PING we reply automatically", %{conn: conn} do
+      opaque_data = :binary.copy(<<0>>, 8)
+      assert {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [ping(opaque_data: opaque_data)])
+      assert_recv_frames [ping(opaque_data: ^opaque_data)]
+    end
+
+    test "if the server sends a PING ack but no PING requests are pending we emit a warning",
+         %{conn: conn} do
+      opaque_data = :binary.copy(<<0>>, 8)
+
+      assert capture_log(fn ->
+               assert {:ok, %HTTP2{} = conn, []} =
+                        stream_frames(conn, [
+                          ping(opaque_data: opaque_data, flags: set_flags(:ping, [:ack]))
+                        ])
+             end) =~ "Received PING ack but no PING requests are pending"
+    end
+
+    @tag :focus
+    test "if the server sends a PING ack but no PING requests match we emit a warning",
+         %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.ping(conn, <<1, 2, 3, 4, 5, 6, 7, 8>>)
+      opaque_data = <<1, 2, 3, 4, 5, 6, 7, 0>>
+
+      assert capture_log(fn ->
+               assert {:ok, %HTTP2{} = conn, []} =
+                        stream_frames(conn, [
+                          ping(opaque_data: opaque_data, flags: set_flags(:ping, [:ack]))
+                        ])
+             end) =~ "Received PING ack that doesn't match next PING request in the queue"
+    end
+  end
+
   describe "stream priority" do
     test "PRIORITY frames are ignored", %{conn: conn} do
       {conn, _ref} = open_request(conn)
