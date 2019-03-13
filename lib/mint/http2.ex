@@ -391,17 +391,20 @@ defmodule Mint.HTTP2 do
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
-    # TODO: we should error gracefully if no such request ref is found.
-    stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
+    case Map.fetch(conn.ref_to_stream_id, request_ref) do
+      {:ok, stream_id} ->
+        conn =
+          if chunk == :eof do
+            send_data(conn, stream_id, "", [:end_stream])
+          else
+            send_data(conn, stream_id, chunk, [])
+          end
 
-    conn =
-      if chunk == :eof do
-        send_data(conn, stream_id, "", [:end_stream])
-      else
-        send_data(conn, stream_id, chunk, [])
-      end
+        {:ok, conn}
 
-    {:ok, conn}
+      :error ->
+        {:error, conn, wrap_error(:unknown_request_to_stream)}
+    end
   catch
     :throw, {:mint, conn, error} -> {:error, conn, error}
   end
@@ -1536,6 +1539,10 @@ defmodule Mint.HTTP2 do
 
   def format_error({:stream_not_found, stream_id}) do
     "request not found (with stream_id #{inspect(stream_id)})"
+  end
+
+  def format_error(:unknown_request_to_stream) do
+    "can't stream chunk of data because the request is unknown"
   end
 
   def format_error(:payload_too_big) do
