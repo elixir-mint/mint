@@ -120,7 +120,7 @@ defmodule Mint.HTTP2 do
   import Mint.Core.Util
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
 
-  alias Mint.Error
+  alias Mint.{HTTPError, TransportError}
   alias Mint.Types
   alias Mint.Core.Util
 
@@ -298,7 +298,7 @@ defmodule Mint.HTTP2 do
         initiate(new_scheme, socket, hostname, port, opts)
 
       {:error, reason} ->
-        {:error, %Error{reason: reason}}
+        {:error, %HTTPError{reason: reason}}
     end
   end
 
@@ -382,7 +382,7 @@ defmodule Mint.HTTP2 do
 
     {:ok, conn, ref}
   catch
-    :throw, {:mint, conn, reason} -> {:error, conn, error}
+    :throw, {:mint, conn, reason} -> {:error, conn, reason}
   end
 
   @doc """
@@ -698,17 +698,17 @@ defmodule Mint.HTTP2 do
       if protocol == "h2" do
         {:ok, socket}
       else
-        {:error, %Error{reason: {:bad_alpn_protocol, protocol}}}
+        {:error, %TransportError{reason: {:bad_alpn_protocol, protocol}}}
       end
     else
-      {:error, reason} -> {:error, %Error{reason: reason}}
+      {:error, reason} -> {:error, %TransportError{reason: reason}}
     end
   end
 
   defp receive_server_settings(transport, socket) do
     case recv_next_frame(transport, socket, _buffer = "") do
       {:ok, settings(), _buffer, _socket} = result -> result
-      {:ok, _frame, _buffer, _socket} -> {:error, %Error{reason: :protocol_error}}
+      {:ok, _frame, _buffer, _socket} -> {:error, %HTTPError{reason: :protocol_error}}
       {:error, _reason} = error -> error
     end
   end
@@ -786,7 +786,8 @@ defmodule Mint.HTTP2 do
     if total_size <= max_header_list_size do
       :ok
     else
-      throw_error!(conn, {:max_header_list_size_exceeded, total_size, max_header_list_size})
+      reason = {:max_header_list_size_exceeded, total_size, max_header_list_size}
+      throw_error!(conn, :http, reason)
     end
   end
 
@@ -832,10 +833,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        throw_error!(conn, {:exceeds_stream_window_size, stream.window_size})
+        throw_error!(conn, :http, {:exceeds_stream_window_size, stream.window_size})
 
       data_size >= conn.window_size ->
-        throw_error!(conn, {:exceeds_connection_window_size, conn.window_size})
+        throw_error!(conn, :http, {:exceeds_connection_window_size, conn.window_size})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =

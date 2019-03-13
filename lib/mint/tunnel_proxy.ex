@@ -1,9 +1,11 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  alias Mint.{Error, HTTP1, Negotiate}
+  alias Mint.{HTTP1, HTTPError, Negotiate}
 
   @tunnel_timeout 30_000
+
+  # TODO: should we have ProxyError?
 
   def connect(proxy, host) do
     with {:ok, conn} <- establish_proxy(proxy, host) do
@@ -23,11 +25,11 @@ defmodule Mint.TunnelProxy do
       {:ok, conn}
     else
       {:error, reason} ->
-        {:error, %Error{reason: {:proxy, reason}}}
+        {:error, %HTTPError{reason: {:proxy, reason}}}
 
       {:error, conn, reason} ->
         {:ok, _conn} = HTTP1.close(conn)
-        {:error, %Error{reason: {:proxy, reason}}}
+        {:error, %HTTPError{reason: {:proxy, reason}}}
     end
   end
 
@@ -53,7 +55,7 @@ defmodule Mint.TunnelProxy do
         stream(conn, ref, timeout_deadline, msg)
     after
       timeout ->
-        {:error, conn, %Error{reason: :tunnel_timeout}}
+        {:error, conn, %HTTPError{reason: :tunnel_timeout}}
     end
   end
 
@@ -77,13 +79,13 @@ defmodule Mint.TunnelProxy do
         handle_responses(conn, ref, timeout_deadline, responses)
 
       {:status, ^ref, status} ->
-        {:error, conn, %Error{reason: {:unexpected_status, status}}}
+        {:error, conn, %HTTPError{reason: {:unexpected_status, status}}}
 
       {:headers, ^ref, _headers} ->
         if responses == [] do
           :done
         else
-          {:error, conn, %Error{reason: {:unexpected_trailing_responses, responses}}}
+          {:error, conn, %HTTPError{reason: {:unexpected_trailing_responses, responses}}}
         end
 
       {:error, ^ref, reason} ->
