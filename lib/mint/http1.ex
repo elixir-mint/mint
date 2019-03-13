@@ -24,8 +24,6 @@ defmodule Mint.HTTP1 do
 
   @opaque t() :: %__MODULE__{}
 
-  # TODO: Currently we keep the Host on the conn but we could also supply
-  # it on each request so you can use multiple Hosts on a single conn
   defstruct [
     :host,
     :request,
