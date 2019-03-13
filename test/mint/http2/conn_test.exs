@@ -4,7 +4,12 @@ defmodule Mint.HTTP2Test do
   import Mint.HTTP2.Frame
   import ExUnit.CaptureLog
 
-  alias Mint.{HTTPError, HTTP2, HTTP2.TestServer}
+  alias Mint.{
+    HTTPError,
+    HTTP2,
+    HTTP2.TestServer,
+    TransportError
+  }
 
   setup :start_connection
 
@@ -27,7 +32,7 @@ defmodule Mint.HTTP2Test do
     end
 
     test "closed-socket messages are treated as errors", %{conn: conn} do
-      assert {:error, %HTTP2{} = conn, :closed, []} =
+      assert {:error, %HTTP2{} = conn, %TransportError{reason: :closed}, []} =
                HTTP2.stream(conn, {:ssl_closed, conn.socket})
 
       refute HTTP2.open?(conn)
@@ -35,7 +40,10 @@ defmodule Mint.HTTP2Test do
 
     test "socket error messages are treated as errors", %{conn: conn} do
       message = {:ssl_error, conn.socket, :etimeout}
-      assert {:error, %HTTP2{} = conn, :etimeout, []} = HTTP2.stream(conn, message)
+
+      assert {:error, %HTTP2{} = conn, %TransportError{reason: :etimeout}, []} =
+               HTTP2.stream(conn, message)
+
       refute HTTP2.open?(conn)
     end
   end
@@ -177,7 +185,10 @@ defmodule Mint.HTTP2Test do
       :ssl.close(server_get_socket())
 
       assert_receive message
-      assert {:error, %HTTP2{} = conn, :closed, []} = HTTP2.stream(conn, message)
+
+      assert {:error, %HTTP2{} = conn, %TransportError{reason: :closed}, []} =
+               HTTP2.stream(conn, message)
+
       refute HTTP2.open?(conn)
     end
 

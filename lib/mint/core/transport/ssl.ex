@@ -365,7 +365,7 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def wrap_error(reason) do
-    wrap_err({:error, reason})
+    %Mint.TransportError{reason: reason, formatter_module: :ssl}
   end
 
   defp ssl_opts(hostname, opts) do
@@ -544,11 +544,6 @@ defmodule Mint.Core.Transport.SSL do
               "specify the trust store using the `:cacertfile`/`:cacerts` option"
   end
 
-  defp wrap_err({:error, reason}) do
-    {:error, %Mint.TransportError{reason: reason, formatter_module: :ssl}}
-  end
-
-  defp wrap_err(other) do
-    other
-  end
+  defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
+  defp wrap_err(other), do: other
 end
