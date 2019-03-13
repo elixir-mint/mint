@@ -306,6 +306,7 @@ defmodule Mint.HTTP2 do
   def close(conn)
 
   def close(%__MODULE__{state: :open} = conn) do
+    # TODO: this errors out since we throw at the end.
     conn = send_connection_error!(conn, :no_error, "connection peacefully closed by client")
     {:ok, conn}
   catch
@@ -389,6 +390,7 @@ defmodule Mint.HTTP2 do
           {:ok, t()} | {:error, t(), term()}
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
+    # TODO: we should error gracefully if no such request ref is found.
     stream_id = Map.fetch!(conn.ref_to_stream_id, request_ref)
 
     conn =
@@ -594,6 +596,7 @@ defmodule Mint.HTTP2 do
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+    # TODO: handle errors
     _ = transport.setopts(socket, active: :once)
     {:ok, conn, Enum.reverse(responses)}
   catch
