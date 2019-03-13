@@ -15,8 +15,8 @@ defmodule Mint.HTTP1 do
 
   import Mint.Core.Util
 
-  alias Mint.Types
   alias Mint.HTTP1.{Parse, Request, Response}
+  alias Mint.{TransportError, Types}
 
   require Logger
 
@@ -48,12 +48,8 @@ defmodule Mint.HTTP1 do
     transport = scheme_to_transport(scheme)
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    case transport.connect(hostname, port, transport_opts) do
-      {:ok, socket} ->
-        initiate(transport, socket, hostname, port, opts)
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
+      initiate(transport, socket, hostname, port, opts)
     end
   end
 
@@ -72,12 +68,8 @@ defmodule Mint.HTTP1 do
     transport = scheme_to_transport(new_scheme)
     transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
-      {:ok, socket} ->
-        initiate(new_scheme, socket, hostname, port, opts)
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+      initiate(new_scheme, socket, hostname, port, opts)
     end
   end
 
@@ -104,9 +96,9 @@ defmodule Mint.HTTP1 do
 
       {:ok, conn}
     else
-      error ->
-        transport.close(socket)
-        error
+      {:error, reason} ->
+        :ok = transport.close(socket)
+        {:error, reason}
     end
   end
 
@@ -159,7 +151,7 @@ defmodule Mint.HTTP1 do
         _headers,
         _body
       ) do
-    {:error, conn, :request_body_is_streaming}
+    {:error, conn, wrap_error(:request_body_is_streaming)}
   end
 
   def request(%__MODULE__{} = conn, method, path, headers, body) do
@@ -181,15 +173,14 @@ defmodule Mint.HTTP1 do
           {:ok, conn, request_ref}
         end
 
-      {:error, :closed} ->
-        {:error, %{conn | state: :closed}, :closed}
+      {:error, %TransportError{reason: :closed} = error} ->
+        {:error, %{conn | state: :closed}, error}
 
-      {:error, reason} ->
-        {:error, conn, reason}
+      {:error, error} ->
+        {:error, conn, error}
     end
   catch
-    :throw, {:mint, reason} ->
-      {:error, conn, reason}
+    :throw, {:mint, reason} -> {:error, conn, wrap_error(reason)}
   end
 
   @doc """
@@ -212,9 +203,14 @@ defmodule Mint.HTTP1 do
         body
       ) do
     case conn.transport.send(conn.socket, body) do
-      :ok -> {:ok, conn}
-      {:error, :closed} -> {:error, %{conn | state: :closed}, :closed}
-      {:error, reason} -> {:error, conn, reason}
+      :ok ->
+        {:ok, conn}
+
+      {:error, %TransportError{reason: :closed} = error} ->
+        {:error, %{conn | state: :closed}, error}
+
+      {:error, error} ->
+        {:error, conn, error}
     end
   end
 
@@ -231,6 +227,7 @@ defmodule Mint.HTTP1 do
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
+    # TODO: handle errors here.
     _ = transport.setopts(socket, active: :once)
     result
   end
@@ -242,7 +239,9 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    handle_error(conn, reason)
+    conn = put_in(conn.state, :closed)
+    error = conn.transport.wrap_error(reason)
+    {:error, conn, error, []}
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -251,7 +250,7 @@ defmodule Mint.HTTP1 do
 
   defp handle_data(%__MODULE__{request: nil} = conn, data) do
     conn = internal_close(conn)
-    {:error, conn, {:unexpected_data, data}, []}
+    {:error, conn, wrap_error({:unexpected_data, data}), []}
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
@@ -275,13 +274,8 @@ defmodule Mint.HTTP1 do
       conn = put_in(conn.state, :closed)
       {:ok, conn, [{:done, request.ref}]}
     else
-      {:error, conn, :closed, []}
+      {:error, conn, conn.transport.wrap_error(:closed), []}
     end
-  end
-
-  defp handle_error(conn, reason) do
-    conn = put_in(conn.state, :closed)
-    {:error, conn, reason, []}
   end
 
   @doc """
@@ -335,7 +329,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_status_line, responses}
+        {:error, conn, wrap_error(:invalid_status_line), responses}
     end
   end
 
@@ -350,7 +344,7 @@ defmodule Mint.HTTP1 do
         decode_body(body, conn, data, conn.request.ref, responses)
 
       {:error, reason} ->
-        {:error, conn, reason, responses}
+        {:error, conn, wrap_error(reason), responses}
     end
   end
 
@@ -361,7 +355,7 @@ defmodule Mint.HTTP1 do
 
         case store_header(request, name, value) do
           {:ok, request} -> decode_headers(conn, request, rest, responses, headers)
-          {:error, reason} -> {:error, conn, reason, responses}
+          {:error, reason} -> {:error, conn, wrap_error(reason), responses}
         end
 
       {:ok, :eof, rest} ->
@@ -376,7 +370,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_header, responses}
+        {:error, conn, wrap_error(:invalid_header), responses}
     end
   end
 
@@ -427,7 +421,7 @@ defmodule Mint.HTTP1 do
         decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
       _other ->
-        {:error, conn, :invalid_chunk_size, responses}
+        {:error, conn, wrap_error(:invalid_chunk_size), responses}
     end
   end
 
@@ -458,7 +452,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       _other ->
-        {:error, conn, :missing_crlf_after_chunk, responses}
+        {:error, conn, wrap_error(:missing_crlf_after_chunk), responses}
     end
   end
 
@@ -499,7 +493,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        {:error, conn, :invalid_trailer_header, responses}
+        {:error, conn, wrap_error(:invalid_trailer_header), responses}
     end
   end
 
@@ -627,4 +621,72 @@ defmodule Mint.HTTP1 do
       body: nil
     }
   end
+
+  defp wrap_error(reason) do
+    %Mint.HTTPError{reason: reason, module: __MODULE__}
+  end
+
+  @doc false
+  def format_error(reason)
+
+  def format_error(:closed) do
+    "the connection was closed"
+  end
+
+  def format_error(:request_body_is_streaming) do
+    "a request body is currently streaming, so no new requests can be issued"
+  end
+
+  def format_error({:unexpected_data, data}) do
+    "received unexpected data: " <> inspect(data)
+  end
+
+  def format_error(:invalid_status_line) do
+    "invalid status line"
+  end
+
+  def format_error(:invalid_header) do
+    "invalid header"
+  end
+
+  # TODO: maybe add the target here.
+  def format_error(:invalid_request_target) do
+    "invalid request target"
+  end
+
+  def format_error({:invalid_header_name, name}) do
+    "invalid header name: #{inspect(name)}"
+  end
+
+  def format_error({:invalid_header_value, name, value}) do
+    "invalid value for header #{inspect(name)}: #{inspect(value)}"
+  end
+
+  def format_error(:invalid_chunk_size) do
+    "invalid chunk size"
+  end
+
+  def format_error(:missing_crlf_after_chunk) do
+    "missing CRLF after chunk"
+  end
+
+  def format_error(:invalid_trailer_header) do
+    "invalid trailer header"
+  end
+
+  def format_error(:more_than_one_content_length_header) do
+    "the response contains two or more Content-Length headers"
+  end
+
+  def format_error(:transfer_encoding_and_content_length) do
+    "the response contained both a Transfer-Encoding header as well as a Content-Length header"
+  end
+
+  # TODO: maybe include the header value here.
+  def format_error(:invalid_content_length_header) do
+    "invalid Content-Length header"
+  end
+
+  # TODO: :invalid_token_list
+  # TODO: :empty_token_list
 end

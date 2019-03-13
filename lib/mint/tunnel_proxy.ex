@@ -1,9 +1,11 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  alias Mint.{HTTP1, Negotiate}
+  alias Mint.{HTTP1, HTTPError, Negotiate}
 
   @tunnel_timeout 30_000
+
+  # TODO: should we have ProxyError?
 
   def connect(proxy, host) do
     with {:ok, conn} <- establish_proxy(proxy, host) do
@@ -23,11 +25,11 @@ defmodule Mint.TunnelProxy do
       {:ok, conn}
     else
       {:error, reason} ->
-        {:error, {:proxy, reason}}
+        {:error, %HTTPError{reason: {:proxy, reason}}}
 
       {:error, conn, reason} ->
         {:ok, _conn} = HTTP1.close(conn)
-        {:error, {:proxy, reason}}
+        {:error, %HTTPError{reason: {:proxy, reason}}}
     end
   end
 
@@ -53,7 +55,7 @@ defmodule Mint.TunnelProxy do
         stream(conn, ref, timeout_deadline, msg)
     after
       timeout ->
-        {:error, conn, :tunnel_timeout}
+        {:error, conn, %HTTPError{reason: :tunnel_timeout}}
     end
   end
 
@@ -77,13 +79,13 @@ defmodule Mint.TunnelProxy do
         handle_responses(conn, ref, timeout_deadline, responses)
 
       {:status, ^ref, status} ->
-        {:error, conn, {:unexpected_status, status}}
+        {:error, conn, wrap_error({:unexpected_status, status})}
 
       {:headers, ^ref, _headers} ->
         if responses == [] do
           :done
         else
-          {:error, conn, {:unexpected_trailing_responses, responses}}
+          {:error, conn, wrap_error({:unexpected_trailing_responses, responses})}
         end
 
       {:error, ^ref, reason} ->
@@ -99,4 +101,25 @@ defmodule Mint.TunnelProxy do
     timeout = Keyword.get(opts, :tunnel_timeout, @tunnel_timeout)
     System.monotonic_time(:millisecond) + timeout
   end
+
+  defp wrap_error(reason) do
+    %HTTPError{module: __MODULE__, reason: reason}
+  end
+
+  @doc false
+  def format_error(reason)
+
+  def format_error(:tunnel_timeout) do
+    "tunnel timeout"
+  end
+
+  def format_error({:unexpected_status, status}) do
+    "unexpected status: #{inspect(status)}"
+  end
+
+  def format_error({:unexpected_trailing_responses, responses}) do
+    "unexpected trailing responses: #{inspect(responses)}"
+  end
+
+  # TODO: {:proxy, _} errors.
 end

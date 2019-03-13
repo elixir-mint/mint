@@ -315,7 +315,7 @@ defmodule Mint.Core.Transport.SSL do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
-    :ssl.connect(hostname, port, ssl_opts(hostname, opts), timeout)
+    wrap_err(:ssl.connect(hostname, port, ssl_opts(hostname, opts), timeout))
   end
 
   @impl true
@@ -326,10 +326,7 @@ defmodule Mint.Core.Transport.SSL do
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
-    case :ssl.connect(socket, ssl_opts(hostname, opts), timeout) do
-      {:ok, socket} -> {:ok, socket}
-      {:error, reason} -> {:error, reason}
-    end
+    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
   end
 
   def upgrade(_socket, :https, _hostname, _port, _opts) do
@@ -337,22 +334,39 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @impl true
-  defdelegate negotiated_protocol(socket), to: :ssl
+  def negotiated_protocol(socket) do
+    wrap_err(:ssl.negotiated_protocol(socket))
+  end
 
   @impl true
-  defdelegate send(socket, payload), to: :ssl
+  def send(socket, payload) do
+    wrap_err(:ssl.send(socket, payload))
+  end
 
   @impl true
-  defdelegate close(socket), to: :ssl
+  def close(socket) do
+    wrap_err(:ssl.close(socket))
+  end
 
   @impl true
-  defdelegate recv(socket, bytes), to: :ssl
+  def recv(socket, bytes) do
+    wrap_err(:ssl.recv(socket, bytes))
+  end
 
   @impl true
-  defdelegate setopts(socket, opts), to: :ssl
+  def setopts(socket, opts) do
+    wrap_err(:ssl.setopts(socket, opts))
+  end
 
   @impl true
-  defdelegate getopts(socket, opts), to: :ssl
+  def getopts(socket, opts) do
+    wrap_err(:ssl.getopts(socket, opts))
+  end
+
+  @impl true
+  def wrap_error(reason) do
+    wrap_err({:error, reason})
+  end
 
   defp ssl_opts(hostname, opts) do
     default_ssl_opts(hostname)
@@ -528,5 +542,13 @@ defmodule Mint.Core.Transport.SSL do
       raise "default CA trust store not available; " <>
               "please add `:castore` to your project's dependencies or " <>
               "specify the trust store using the `:cacertfile`/`:cacerts` option"
+  end
+
+  defp wrap_err({:error, reason}) do
+    {:error, %Mint.TransportError{reason: reason, formatter_module: :ssl}}
+  end
+
+  defp wrap_err(other) do
+    other
   end
 end

@@ -120,6 +120,7 @@ defmodule Mint.HTTP2 do
   import Mint.Core.Util
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
 
+  alias Mint.{HTTPError, TransportError}
   alias Mint.Types
   alias Mint.Core.Util
 
@@ -292,12 +293,8 @@ defmodule Mint.HTTP2 do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
-      {:ok, socket} ->
-        initiate(new_scheme, socket, hostname, port, opts)
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+      initiate(new_scheme, socket, hostname, port, opts)
     end
   end
 
@@ -381,7 +378,7 @@ defmodule Mint.HTTP2 do
 
     {:ok, conn, ref}
   catch
-    :throw, {:mint, conn, error} -> {:error, conn, error}
+    :throw, {:mint, conn, reason} -> {:error, conn, reason}
   end
 
   @doc """
@@ -697,7 +694,7 @@ defmodule Mint.HTTP2 do
       if protocol == "h2" do
         {:ok, socket}
       else
-        {:error, {:bad_alpn_protocol, protocol}}
+        {:error, %HTTPError{reason: {:bad_alpn_protocol, protocol}}}
       end
     end
   end
@@ -705,7 +702,7 @@ defmodule Mint.HTTP2 do
   defp receive_server_settings(transport, socket) do
     case recv_next_frame(transport, socket, _buffer = "") do
       {:ok, settings(), _buffer, _socket} = result -> result
-      {:ok, _frame, _buffer, _socket} -> {:error, :protocol_error}
+      {:ok, _frame, _buffer, _socket} -> {:error, %HTTPError{reason: :protocol_error}}
       {:error, _reason} = error -> error
     end
   end
@@ -729,7 +726,7 @@ defmodule Mint.HTTP2 do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_stream_count >= max_concurrent_streams do
-      throw({:mint, conn, {:max_concurrent_streams_reached, max_concurrent_streams}})
+      throw_error!(conn, {:max_concurrent_streams_reached, max_concurrent_streams})
     end
 
     stream = %{
@@ -778,10 +775,13 @@ defmodule Mint.HTTP2 do
         acc + byte_size(name) + byte_size(value) + 32
       end)
 
-    if total_size <= conn.server_settings.max_header_list_size do
+    max_header_list_size = conn.server_settings.max_header_list_size
+
+    if total_size <= max_header_list_size do
       :ok
     else
-      throw({:mint, conn, :max_header_list_size_exceeded})
+      reason = {:max_header_list_size_exceeded, total_size, max_header_list_size}
+      throw_error!(conn, reason)
     end
   end
 
@@ -827,10 +827,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        throw({:mint, conn, {:exceeds_stream_window_size, stream.window_size}})
+        throw_error!(conn, {:exceeds_stream_window_size, stream.window_size})
 
       data_size >= conn.window_size ->
-        throw({:mint, conn, {:exceeds_connection_window_size, conn.window_size}})
+        throw_error!(conn, {:exceeds_connection_window_size, conn.window_size})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
@@ -970,7 +970,7 @@ defmodule Mint.HTTP2 do
     end
   catch
     :throw, {:mint, conn, error} -> throw({:mint, conn, error, responses})
-    :throw, {:mint, conn, error, responses} -> throw({:mint, conn, error, responses})
+    :throw, {:mint, _conn, _error, _responses} = thrown -> throw(thrown)
   end
 
   defp assert_valid_frame(conn, frame) do
@@ -1341,12 +1341,14 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {{:value, _}, _} ->
+        # TODO: should this be a connection error?
         _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
-        throw({:mint, conn, :protocol_error, responses})
+        throw_error!(conn, :protocol_error, responses)
 
       {:empty, _ping_queue} ->
+        # TODO: should this be a connection error?
         _ = Logger.error("Received PING ack but no PING requests had been sent")
-        throw({:mint, conn, :protocol_error, responses})
+        throw_error!(conn, :protocol_error, responses)
     end
   end
 
@@ -1439,7 +1441,7 @@ defmodule Mint.HTTP2 do
     conn = send!(conn, Frame.encode(frame))
     :ok = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    throw({:mint, conn, error_code})
+    throw_error!(conn, error_code)
   end
 
   defp close_stream!(conn, stream_id, error_code) do
@@ -1463,21 +1465,103 @@ defmodule Mint.HTTP2 do
   defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw({:mint, conn, {:stream_not_found, stream_id}})
+      :error -> throw_error!(conn, {:stream_not_found, stream_id})
     end
   end
 
   defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
-      throw({:mint, conn, {:stream_not_in_expected_state, expected_states, state}})
+      throw_error!(conn, {:stream_not_in_expected_state, expected_states, state})
     end
   end
 
   defp send!(%Mint.HTTP2{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
-      :ok -> conn
-      {:error, :closed} -> throw({:mint, %{conn | state: :closed}, :closed})
-      {:error, reason} -> throw({:mint, conn, reason})
+      :ok ->
+        conn
+
+      {:error, %TransportError{reason: :closed} = error} ->
+        throw_error!(%{conn | state: :closed}, error)
+
+      {:error, reason} ->
+        throw_error!(conn, reason)
     end
+  end
+
+  defp throw_error!(conn, reason) do
+    error = %HTTPError{reason: reason, module: __MODULE__}
+    throw({:mint, conn, error})
+  end
+
+  defp throw_error!(conn, reason, responses) do
+    error = %HTTPError{reason: reason, module: __MODULE__}
+    throw({:mint, conn, error, responses})
+  end
+
+  @doc false
+  def format_error(reason)
+
+  def format_error({:max_concurrent_streams_reached, max_concurrent_streams}) do
+    "the number of max concurrent HTTP/2 requests supported by the server (which is " <>
+      "#{max_concurrent_streams}) has been reached"
+  end
+
+  def format_error({:max_header_list_size_exceeded, size, max_size}) do
+    "the given header list (of size #{size}) goes over the max header list size of " <>
+      "#{max_size} supported by the server. In HTTP/2, the header list size is calculated " <>
+      "by summing up the size in bytes of each header name, value, plus 32 for each header."
+  end
+
+  def format_error({:exceeds_stream_window_size, window_size}) do
+    "the given data exceeds the request window size, which is #{window_size}. " <>
+      "The server will refill the window size of this request when ready."
+  end
+
+  def format_error({:exceeds_connection_window_size, window_size}) do
+    "the given data exceeds the window size of the connection, which is #{window_size}. " <>
+      "The server will refill the window size of the connection when ready."
+  end
+
+  def format_error(:payload_too_big) do
+    "frame payload was too big. This is a server encoding error."
+  end
+
+  def format_error({:frame_size_error, frame}) do
+    humanized_frame = frame |> Atom.to_string() |> String.upcase()
+    "frame size error for #{humanized_frame} frame"
+  end
+
+  def format_error({:protocol_error, reason}) do
+    message =
+      case reason do
+        :bad_window_size_increment ->
+          "bad WINDOW_SIZE increment"
+
+        :pad_length_bigger_than_payload_length ->
+          "the padding length is bigger than the payload length"
+
+        :invalid_huffman_encoding ->
+          "invalid Huffman encoding"
+      end
+
+    message <> ". This is a server encoding error."
+  end
+
+  def format_error({:bad_alpn_protocol, protocol}) do
+    "bad ALPN protocol: #{inspect(protocol)}. Supported protocols are \"http/1.1\" and \"h2\"."
+  end
+
+  ## HPACK
+
+  def format_error({:index_not_found, index}) do
+    "HPACK index not found: #{inspect(index)}"
+  end
+
+  def format_error(:bad_integer_encoding) do
+    "bad HPACK integer encoding"
+  end
+
+  def format_error(:bad_binary_encoding) do
+    "bad HPACK binary encoding"
   end
 end

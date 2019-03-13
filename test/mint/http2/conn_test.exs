@@ -4,7 +4,7 @@ defmodule Mint.HTTP2Test do
   import Mint.HTTP2.Frame
   import ExUnit.CaptureLog
 
-  alias Mint.{HTTP2, HTTP2.TestServer}
+  alias Mint.{HTTPError, HTTP2, HTTP2.TestServer}
 
   setup :start_connection
 
@@ -216,7 +216,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, :compression_error, []} =
+      assert {:error, %HTTP2{} = conn, reason, []} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id,
@@ -224,6 +224,8 @@ defmodule Mint.HTTP2Test do
                    flags: set_flags(:headers, [:end_headers])
                  )
                ])
+
+      assert %HTTPError{reason: :compression_error} = reason
 
       assert_recv_frames [goaway(error_code: :compression_error)]
 
@@ -236,7 +238,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, :protocol_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
                stream_frames(conn, [continuation(stream_id: stream_id, hbf: "hbf")])
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
@@ -250,7 +252,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, :protocol_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
                stream_frames(conn, [
                  headers(stream_id: stream_id, hbf: "hbf", flags: set_flags(:headers, [])),
                  data(stream_id: stream_id, data: "hello")
@@ -329,14 +331,14 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    @tag server_settings: [max_header_list_size: 67]
+    @tag server_settings: [max_header_list_size: 20]
     test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
-      # To calculate the max_header_list_size, we have to sum up each header name, value, plus
-      # 32 octects per header. Here we have 2 bytes + 32 bytes per header, so 68 bytes in total,
-      # but max size is 67.
+      # With such a low max_header_list_size, even the default :special headers (such as
+      # :method or :path) exceed the size.
 
-      assert {:error, %HTTP2{} = conn, :max_header_list_size_exceeded} =
-               HTTP2.request(conn, "GET", "/", [{"a", "a"}, {"b", "b"}])
+      assert {:error, %HTTP2{} = conn,
+              %HTTPError{reason: {:max_header_list_size_exceeded, _, 20}}} =
+               HTTP2.request(conn, "GET", "/", [])
 
       assert HTTP2.open?(conn)
     end
@@ -422,7 +424,7 @@ defmodule Mint.HTTP2Test do
 
       hbf = server_encode_headers([{":method", "GET"}])
 
-      assert {:error, %HTTP2{} = conn, :protocol_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
@@ -445,7 +447,7 @@ defmodule Mint.HTTP2Test do
 
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
 
-      assert {:error, %HTTP2{} = conn, :protocol_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
                HTTP2.stream(conn, {:ssl, conn.socket, data})
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
@@ -461,7 +463,7 @@ defmodule Mint.HTTP2Test do
       # Payload should be 8 bytes long, but is empty here.
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<>>))
 
-      assert {:error, %HTTP2{} = conn, :frame_size_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :frame_size_error}, []} =
                HTTP2.stream(conn, {:ssl, conn.socket, data})
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
@@ -476,7 +478,7 @@ defmodule Mint.HTTP2Test do
 
       bad_stream_id = stream_id + 10
 
-      assert {:error, %HTTP2{} = conn, :protocol_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
                stream_frames(conn, [
                  {:headers, bad_stream_id, [{":status", "200"}], [:end_headers]}
                ])
@@ -515,7 +517,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: _stream_id)]
 
-      assert {:error, %HTTP2{} = conn, :flow_control_error, []} =
+      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :flow_control_error}, []} =
                stream_frames(conn, [
                  window_update(
                    stream_id: 0,
@@ -533,10 +535,12 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, :frame_size_error, []} =
+      assert {:error, %HTTP2{} = conn, reason, []} =
                stream_frames(conn, [
                  data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
                ])
+
+      assert %HTTPError{reason: :frame_size_error} = reason
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
 

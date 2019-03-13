@@ -5,7 +5,8 @@ defmodule Mint.Negotiate do
 
   alias Mint.{
     HTTP1,
-    HTTP2
+    HTTP2,
+    TransportError
   }
 
   @default_protocols [:http1, :http2]
@@ -61,9 +62,8 @@ defmodule Mint.Negotiate do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case transport.connect(hostname, port, transport_opts) do
-      {:ok, transport_state} -> alpn_negotiate(scheme, transport_state, hostname, port, opts)
-      {:error, reason} -> {:error, reason}
+    with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts) do
+      alpn_negotiate(scheme, transport_state, hostname, port, opts)
     end
   end
 
@@ -103,7 +103,7 @@ defmodule Mint.Negotiate do
         alpn_negotiate(new_scheme, transport_state, hostname, port, opts)
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, %TransportError{reason: reason}}
     end
   end
 
@@ -117,12 +117,12 @@ defmodule Mint.Negotiate do
       {:ok, "h2"} ->
         HTTP2.initiate(scheme, socket, hostname, port, opts)
 
-      {:error, :protocol_not_negotiated} ->
+      {:error, %TransportError{reason: :protocol_not_negotiated}} ->
         # Assume HTTP1 if ALPN is not supported
         HTTP1.initiate(scheme, socket, hostname, port, opts)
 
       {:ok, protocol} ->
-        {:error, {:bad_alpn_protocol, protocol}}
+        {:error, %TransportError{reason: {:bad_alpn_protocol, protocol}}}
     end
   end
 end
