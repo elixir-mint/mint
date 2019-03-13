@@ -1535,6 +1535,24 @@ defmodule Mint.HTTP2 do
     "frame payload was too big. This is a server encoding error."
   end
 
+  # Stream-level errors.
+
+  def format_error({:rst_stream, :protocol_error}) do
+    "protocol error on a request"
+  end
+
+  def format_error({:rst_stream, :cancel}) do
+    "request canceled"
+  end
+
+  def format_error(:flow_control_error) do
+    "flow control error"
+  end
+
+  def format_error({:goaway, error, debug_data}) do
+    "GOAWAY error #{inspect(error)}: " <> debug_data
+  end
+
   def format_error({:frame_size_error, frame}) do
     humanized_frame = frame |> Atom.to_string() |> String.upcase()
     "frame size error for #{humanized_frame} frame"

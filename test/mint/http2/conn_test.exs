@@ -22,7 +22,10 @@ defmodule Mint.HTTP2Test do
       error = unquote(error)
 
       assert %HTTPError{reason: unquote(expected_reason)} = error
-      assert Exception.message(error) != inspect(error.reason)
+
+      message = Exception.message(error)
+      refute message =~ "got FunctionClauseError"
+      assert message != inspect(error.reason)
     end
   end
 
