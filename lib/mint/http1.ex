@@ -624,6 +624,71 @@ defmodule Mint.HTTP1 do
     }
   end
 
-  defp wrap_error(:transport, reason), do: %Mint.TransportError{reason: reason}
-  defp wrap_error(:http, reason), do: %Mint.HTTPError{reason: reason}
+  defp wrap_error(:transport, reason) do
+    %Mint.TransportError{reason: reason}
+  end
+
+  defp wrap_error(:http, reason) do
+    %Mint.HTTPError{reason: reason, module: __MODULE__}
+  end
+
+  @doc false
+  def format_error(reason)
+
+  def format_error(:request_body_is_streaming) do
+    "a request body is currently streaming, so no new requests can be issued"
+  end
+
+  def format_error({:unexpected_data, data}) do
+    "received unexpected data: " <> inspect(data)
+  end
+
+  def format_error(:invalid_status_line) do
+    "invalid status line"
+  end
+
+  def format_error(:invalid_header) do
+    "invalid header"
+  end
+
+  # TODO: maybe add the target here.
+  def format_error(:invalid_request_target) do
+    "invalid request target"
+  end
+
+  def format_error({:invalid_header_name, name}) do
+    "invalid header name: #{inspect(name)}"
+  end
+
+  def format_error({:invalid_header_value, name, value}) do
+    "invalid value for header #{inspect(name)}: #{inspect(value)}"
+  end
+
+  def format_error(:invalid_chunk_size) do
+    "invalid chunk size"
+  end
+
+  def format_error(:missing_crlf_after_chunk) do
+    "missing CRLF after chunk"
+  end
+
+  def format_error(:invalid_trailer_header) do
+    "invalid trailer header"
+  end
+
+  def format_error(:more_than_one_content_length_header) do
+    "the response contains two or more Content-Length headers"
+  end
+
+  def format_error(:transfer_encoding_and_content_length) do
+    "the response contained both a Transfer-Encoding header as well as a Content-Length header"
+  end
+
+  # TODO: maybe include the header value here.
+  def format_error(:invalid_content_length_header) do
+    "invalid Content-Length header"
+  end
+
+  # TODO: :invalid_token_list
+  # TODO: :empty_token_list
 end

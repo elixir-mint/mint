@@ -22,6 +22,8 @@ defmodule Mint.TransportError do
   defp format_reason(:ssl_closed), do: "SSL connection closed"
   defp format_reason(:closed), do: "socket closed"
 
+  # TODO: timeout
+
   ## gen_tcp/ssl reasons.
 
   defp format_reason(reason) do

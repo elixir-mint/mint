@@ -298,7 +298,7 @@ defmodule Mint.HTTP2 do
         initiate(new_scheme, socket, hostname, port, opts)
 
       {:error, reason} ->
-        {:error, %HTTPError{reason: reason}}
+        {:error, %TransportError{reason: reason}}
     end
   end
 
@@ -1347,10 +1347,12 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {{:value, _}, _} ->
+        # TODO: should this be a connection error?a
         _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
         throw_error!(conn, :http, :protocol_error, responses)
 
       {:empty, _ping_queue} ->
+        # TODO: should this be a connection error?
         _ = Logger.error("Received PING ack but no PING requests had been sent")
         throw_error!(conn, :http, :protocol_error, responses)
     end
@@ -1493,22 +1495,87 @@ defmodule Mint.HTTP2 do
   end
 
   defp throw_error!(conn, kind, reason) do
-    struct =
-      case kind do
-        :transport -> TransportError
-        :http -> HTTPError
-      end
+    case kind do
+      :transport ->
+        throw({:mint, conn, %TransportError{reason: reason}})
 
-    throw({:mint, conn, struct(struct, reason: reason)})
+      :http ->
+        error = %HTTPError{reason: reason, module: __MODULE__}
+        throw({:mint, conn, error})
+    end
   end
 
   defp throw_error!(conn, kind, reason, responses) do
-    struct =
-      case kind do
-        :transport -> TransportError
-        :http -> HTTPError
+    case kind do
+      :transport ->
+        throw({:mint, conn, %TransportError{reason: reason}, responses})
+
+      :http ->
+        error = %HTTPError{reason: reason, module: __MODULE__}
+        throw({:mint, conn, error, responses})
+    end
+  end
+
+  @doc false
+  def format_error(reason)
+
+  def format_error({:max_concurrent_streams_reached, max_concurrent_streams}) do
+    "the number of max concurrent HTTP/2 requests supported by the server (which is " <>
+      "#{max_concurrent_streams}) has been reached"
+  end
+
+  def format_error({:max_header_list_size_exceeded, size, max_size}) do
+    "the given header list (of size #{size}) goes over the max header list size of " <>
+      "#{max_size} supported by the server. In HTTP/2, the header list size is calculated " <>
+      "by summing up the size in bytes of each header name, value, plus 32 for each header."
+  end
+
+  def format_error({:exceeds_stream_window_size, window_size}) do
+    "the given data exceeds the request window size, which is #{window_size}. " <>
+      "The server will refill the window size of this request when ready."
+  end
+
+  def format_error({:exceeds_connection_window_size, window_size}) do
+    "the given data exceeds the window size of the connection, which is #{window_size}. " <>
+      "The server will refill the window size of the connection when ready."
+  end
+
+  def format_error(:payload_too_big) do
+    "frame payload was too big. This is a server encoding error."
+  end
+
+  def format_error({:frame_size_error, frame}) do
+    humanized_frame = frame |> Atom.to_string() |> String.upcase()
+    "frame size error for #{humanized_frame} frame"
+  end
+
+  def format_error({:protocol_error, reason}) do
+    message =
+      case reason do
+        :bad_window_size_increment ->
+          "bad WINDOW_SIZE increment"
+
+        :pad_length_bigger_than_payload_length ->
+          "the padding length is bigger than the payload length"
+
+        :invalid_huffman_encoding ->
+          "invalid Huffman encoding"
       end
 
-    throw({:mint, conn, struct(struct, reason: reason), responses})
+    message <> ". This is a server encoding error."
+  end
+
+  ## HPACK
+
+  def format_error({:index_not_found, index}) do
+    "HPACK index not found: #{inspect(index)}"
+  end
+
+  def format_error(:bad_integer_encoding) do
+    "bad HPACK integer encoding"
+  end
+
+  def format_error(:bad_binary_encoding) do
+    "bad HPACK binary encoding"
   end
 end
