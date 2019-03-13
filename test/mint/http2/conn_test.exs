@@ -9,7 +9,16 @@ defmodule Mint.HTTP2Test do
   setup :start_connection
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
-    quote(do: unquote(frames) = recv_next_frames(unquote(length(frames))))
+    quote do: unquote(frames) = recv_next_frames(unquote(length(frames)))
+  end
+
+  defmacrop assert_http2_error(error, expected_reason) do
+    quote do
+      error = unquote(error)
+
+      assert %HTTPError{reason: unquote(expected_reason)} = error
+      assert Exception.message(error) != inspect(error.reason)
+    end
   end
 
   describe "stream/2 with unknown messages or error messages" do
@@ -216,7 +225,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, reason, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id,
@@ -225,7 +234,7 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert %HTTPError{reason: :compression_error} = reason
+      assert_http2_error error, :compression_error
 
       assert_recv_frames [goaway(error_code: :compression_error)]
 
@@ -238,8 +247,10 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [continuation(stream_id: stream_id, hbf: "hbf")])
+
+      assert_http2_error error, :protocol_error
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -252,11 +263,13 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  headers(stream_id: stream_id, hbf: "hbf", flags: set_flags(:headers, [])),
                  data(stream_id: stream_id, data: "hello")
                ])
+
+      assert_http2_error error, :protocol_error
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -336,9 +349,9 @@ defmodule Mint.HTTP2Test do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
 
-      assert {:error, %HTTP2{} = conn,
-              %HTTPError{reason: {:max_header_list_size_exceeded, _, 20}}} =
-               HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
 
       assert HTTP2.open?(conn)
     end
@@ -424,7 +437,7 @@ defmodule Mint.HTTP2Test do
 
       hbf = server_encode_headers([{":method", "GET"}])
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
@@ -433,6 +446,8 @@ defmodule Mint.HTTP2Test do
                    flags: set_flags(:push_promise, [:end_headers])
                  )
                ])
+
+      assert_http2_error error, :protocol_error
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
       refute HTTP2.open?(conn)
@@ -446,9 +461,9 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers()]
 
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
-               HTTP2.stream(conn, {:ssl, conn.socket, data})
+      assert_http2_error error, :protocol_error
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -463,8 +478,9 @@ defmodule Mint.HTTP2Test do
       # Payload should be 8 bytes long, but is empty here.
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<>>))
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :frame_size_error}, []} =
-               HTTP2.stream(conn, {:ssl, conn.socket, data})
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
+
+      assert_http2_error error, :frame_size_error
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
       refute HTTP2.open?(conn)
@@ -478,10 +494,12 @@ defmodule Mint.HTTP2Test do
 
       bad_stream_id = stream_id + 10
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :protocol_error}, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  {:headers, bad_stream_id, [{":status", "200"}], [:end_headers]}
                ])
+
+      assert_http2_error error, :protocol_error
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -517,13 +535,15 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: _stream_id)]
 
-      assert {:error, %HTTP2{} = conn, %HTTPError{reason: :flow_control_error}, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  window_update(
                    stream_id: 0,
                    window_size_increment: _max_window_size = 2_147_483_647
                  )
                ])
+
+      assert_http2_error error, :flow_control_error
 
       assert_recv_frames [goaway(error_code: :flow_control_error)]
 
@@ -535,12 +555,12 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, reason, []} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
                ])
 
-      assert %HTTPError{reason: :frame_size_error} = reason
+      assert_http2_error error, :frame_size_error
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
 

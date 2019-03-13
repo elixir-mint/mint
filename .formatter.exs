@@ -6,6 +6,7 @@
     # import their configuration.
     all: :*,
     assert_round_trip: 1,
-    assert_recv_frames: 1
+    assert_recv_frames: 1,
+    assert_http2_error: 2
   ]
 ]
