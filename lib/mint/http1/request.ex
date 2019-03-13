@@ -62,7 +62,7 @@ defmodule Mint.HTTP1.Request do
     _ =
       for <<char <- target>> do
         unless URI.char_unescaped?(char) do
-          throw({:mint, :invalid_request_target})
+          throw({:mint, {:invalid_request_target, target}})
         end
       end
 
