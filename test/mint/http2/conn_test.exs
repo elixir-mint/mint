@@ -59,11 +59,13 @@ defmodule Mint.HTTP2Test do
                  rst_stream(stream_id: stream_id, error_code: :protocol_error)
                ])
 
-      assert [{:error, ^ref, {:rst_stream, :protocol_error}}] = responses
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:rst_stream, :protocol_error}
+
       assert HTTP2.open?(conn)
     end
 
-    test "when server sends frames after sending RST_STREAM, it is ignored",
+    test "when server sends frames after sending RST_STREAM, they are ignored",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -75,7 +77,8 @@ defmodule Mint.HTTP2Test do
                  {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
                ])
 
-      assert responses == [{:error, ref, {:rst_stream, :cancel}}]
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:rst_stream, :cancel}
 
       assert HTTP2.open?(conn)
     end
@@ -178,9 +181,12 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [
-               {:error, ^ref2, {:goaway, :protocol_error, "debug data"}},
-               {:error, ^ref3, {:goaway, :protocol_error, "debug data"}}
+               {:error, ^ref2, error2},
+               {:error, ^ref3, error3}
              ] = responses
+
+      assert_http2_error error2, {:goaway, :protocol_error, "debug data"}
+      assert_http2_error error3, {:goaway, :protocol_error, "debug data"}
 
       :ssl.close(server_get_socket())
 
@@ -245,7 +251,8 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert_http2_error error, :compression_error
+      assert_http2_error error, {:compression_error, debug_data}
+      assert debug_data =~ "unable to decode headers: :bad_binary_encoding"
 
       assert_recv_frames [goaway(error_code: :compression_error)]
 
@@ -261,7 +268,8 @@ defmodule Mint.HTTP2Test do
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [continuation(stream_id: stream_id, hbf: "hbf")])
 
-      assert_http2_error error, :protocol_error
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "CONTINUATION received outside of headers streaming"
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -280,7 +288,8 @@ defmodule Mint.HTTP2Test do
                  data(stream_id: stream_id, data: "hello")
                ])
 
-      assert_http2_error error, :protocol_error
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "headers are streaming but got a :data frame"
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -325,7 +334,8 @@ defmodule Mint.HTTP2Test do
                   [:end_headers, :end_stream]}
                ])
 
-      assert [{:error, ^ref, {:protocol_error, :missing_status_header}}] = responses
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, :missing_status_header}
 
       assert_recv_frames [rst_stream(error_code: :protocol_error)]
 
@@ -458,7 +468,8 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert_http2_error error, :protocol_error
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "received PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH was false"
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
       refute HTTP2.open?(conn)
@@ -474,7 +485,8 @@ defmodule Mint.HTTP2Test do
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
       assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
 
-      assert_http2_error error, :protocol_error
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "frame :ping only allowed at the connection level"
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -491,7 +503,8 @@ defmodule Mint.HTTP2Test do
 
       assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
 
-      assert_http2_error error, :frame_size_error
+      assert_http2_error error, {:frame_size_error, debug_data}
+      assert debug_data =~ "error with size of frame: :ping"
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
       refute HTTP2.open?(conn)
@@ -510,7 +523,8 @@ defmodule Mint.HTTP2Test do
                  {:headers, bad_stream_id, [{":status", "200"}], [:end_headers]}
                ])
 
-      assert_http2_error error, :protocol_error
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "frame with stream ID #{bad_stream_id} has not been opened yet"
 
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
@@ -533,7 +547,8 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert [{:error, ^ref, :flow_control_error}] = responses
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, :flow_control_error
 
       assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :flow_control_error)]
 
@@ -554,7 +569,8 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert_http2_error error, :flow_control_error
+      assert_http2_error error, {:flow_control_error, debug_data}
+      assert debug_data =~ "window size too big"
 
       assert_recv_frames [goaway(error_code: :flow_control_error)]
 
@@ -571,7 +587,8 @@ defmodule Mint.HTTP2Test do
                  data(stream_id: stream_id, data: :binary.copy(<<0>>, 100_000))
                ])
 
-      assert_http2_error error, :frame_size_error
+      assert_http2_error error, {:frame_size_error, debug_data}
+      assert debug_data =~ "frame payload exceeds connection's max frame size"
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
 

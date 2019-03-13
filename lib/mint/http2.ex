@@ -699,7 +699,7 @@ defmodule Mint.HTTP2 do
       if protocol == "h2" do
         {:ok, socket}
       else
-        {:error, %HTTPError{reason: {:bad_alpn_protocol, protocol}}}
+        {:error, wrap_error({:bad_alpn_protocol, protocol})}
       end
     end
   end
@@ -707,7 +707,7 @@ defmodule Mint.HTTP2 do
   defp receive_server_settings(transport, socket) do
     case recv_next_frame(transport, socket, _buffer = "") do
       {:ok, settings(), _buffer, _socket} = result -> result
-      {:ok, _frame, _buffer, _socket} -> {:error, %HTTPError{reason: :protocol_error}}
+      {:ok, _frame, _buffer, _socket} -> {:error, wrap_error(:protocol_error)}
       {:error, _reason} = error -> error
     end
   end
@@ -722,8 +722,8 @@ defmodule Mint.HTTP2 do
           recv_next_frame(transport, socket, buffer <> data)
         end
 
-      {:error, {kind, _info}} when kind in [:frame_size_error, :protocol_error] ->
-        {:error, kind}
+      {:error, {kind, _info} = reason} when kind in [:frame_size_error, :protocol_error] ->
+        {:error, wrap_error(reason)}
     end
   end
 
@@ -731,7 +731,8 @@ defmodule Mint.HTTP2 do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_stream_count >= max_concurrent_streams do
-      throw_error!(conn, {:max_concurrent_streams_reached, max_concurrent_streams})
+      error = wrap_error({:max_concurrent_streams_reached, max_concurrent_streams})
+      throw({:mint, conn, error})
     end
 
     stream = %{
@@ -785,8 +786,8 @@ defmodule Mint.HTTP2 do
     if total_size <= max_header_list_size do
       :ok
     else
-      reason = {:max_header_list_size_exceeded, total_size, max_header_list_size}
-      throw_error!(conn, reason)
+      error = wrap_error({:max_header_list_size_exceeded, total_size, max_header_list_size})
+      throw({:mint, conn, error})
     end
   end
 
@@ -832,10 +833,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        throw_error!(conn, {:exceeds_stream_window_size, stream.window_size})
+        throw({:mint, conn, wrap_error({:exceeds_stream_window_size, stream.window_size})})
 
       data_size >= conn.window_size ->
-        throw_error!(conn, {:exceeds_connection_window_size, conn.window_size})
+        throw({:mint, conn, wrap_error({:exceeds_connection_window_size, conn.window_size})})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
@@ -1000,7 +1001,10 @@ defmodule Mint.HTTP2 do
         :ok
 
       _other ->
-        debug_data = "headers are streaming but got a frame that is not related to that"
+        debug_data =
+          "headers are streaming but got a #{inspect(elem(frame, 0))} frame instead " <>
+            "of a CONTINUATION frame"
+
         send_connection_error!(conn, :protocol_error, debug_data)
     end
   end
@@ -1010,13 +1014,13 @@ defmodule Mint.HTTP2 do
 
   defp assert_frame_on_right_level(conn, frame, _stream_id = 0)
        when frame in unquote(stream_level_frames) do
-    debug_data = "frame #{frame} not allowed at the connection level (stream_id = 0)"
+    debug_data = "frame #{inspect(frame)} not allowed at the connection level (stream_id = 0)"
     send_connection_error!(conn, :protocol_error, debug_data)
   end
 
   defp assert_frame_on_right_level(conn, frame, stream_id)
        when frame in unquote(connection_level_frames) and stream_id != 0 do
-    debug_data = "frame #{frame} only allowed at the connection level"
+    debug_data = "frame #{inspect(frame)} only allowed at the connection level"
     send_connection_error!(conn, :protocol_error, debug_data)
   end
 
@@ -1125,7 +1129,8 @@ defmodule Mint.HTTP2 do
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
       {conn, _headers} when not is_nil(stream) ->
         conn = close_stream!(conn, stream.id, :protocol_error)
-        responses = [{:error, stream.ref, {:protocol_error, :missing_status_header}} | responses]
+        error = wrap_error({:protocol_error, :missing_status_header})
+        responses = [{:error, stream.ref, error} | responses]
         {conn, responses}
 
       {conn, _headers} when is_nil(stream) ->
@@ -1168,8 +1173,8 @@ defmodule Mint.HTTP2 do
         conn = delete_stream(conn, stream)
 
         # TODO: is this an error?
-        response = {:error, stream.ref, {:rst_stream, error_code}}
-        {conn, [response | responses]}
+        error = wrap_error({:rst_stream, error_code})
+        {conn, [{:error, stream.ref, error} | responses]}
 
       :error ->
         {conn, responses}
@@ -1206,7 +1211,7 @@ defmodule Mint.HTTP2 do
 
       {:initial_window_size, initial_window_size}, conn ->
         if initial_window_size > @max_window_size do
-          debug_data = "INITIAL_WINDOW_SIZE setting parameter is too big"
+          debug_data = "INITIAL_WINDOW_SIZE setting of #{initial_window_size} is too big"
           send_connection_error!(conn, :flow_control_error, debug_data)
         end
 
@@ -1249,7 +1254,9 @@ defmodule Mint.HTTP2 do
           window_size = stream.window_size + diff
 
           if window_size > @max_window_size do
-            debug_data = "INITIAL_WINDOW_SIZE setting parameter makes some window sizes too big"
+            debug_data =
+              "INITIAL_WINDOW_SIZE parameter of #{window_size} makes some window sizes too big"
+
             send_connection_error!(conn, :flow_control_error, debug_data)
           end
 
@@ -1357,6 +1364,7 @@ defmodule Mint.HTTP2 do
 
   # GOAWAY
 
+  # TODO: improve GOAWAY handling by closing the connection.
   defp handle_goaway(conn, frame, responses) do
     goaway(
       last_stream_id: last_stream_id,
@@ -1372,8 +1380,8 @@ defmodule Mint.HTTP2 do
         conn = update_in(conn.open_stream_count, &(&1 - 1))
         conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
         conn = put_in(conn.state, :went_away)
-        response = {:error, stream.ref, {:goaway, error_code, debug_data}}
-        {conn, [response | responses]}
+        error = wrap_error({:goaway, error_code, debug_data})
+        {conn, [{:error, stream.ref, error} | responses]}
       end)
 
     {conn, responses}
@@ -1406,7 +1414,7 @@ defmodule Mint.HTTP2 do
 
     if new_window_size > @max_window_size do
       conn = close_stream!(conn, stream_id, :flow_control_error)
-      {conn, [{:error, stream.ref, :flow_control_error} | responses]}
+      {conn, [{:error, stream.ref, wrap_error(:flow_control_error)} | responses]}
     else
       conn = put_in(conn.streams[stream_id].window_size, new_window_size)
       {conn, responses}
@@ -1444,7 +1452,7 @@ defmodule Mint.HTTP2 do
     conn = send!(conn, Frame.encode(frame))
     :ok = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    throw_error!(conn, error_code)
+    throw({:mint, conn, wrap_error({error_code, debug_data})})
   end
 
   defp close_stream!(conn, stream_id, error_code) do
@@ -1468,13 +1476,13 @@ defmodule Mint.HTTP2 do
   defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw_error!(conn, {:stream_not_found, stream_id})
+      :error -> throw({:mint, conn, wrap_error({:stream_not_found, stream_id})})
     end
   end
 
   defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
-      throw_error!(conn, {:stream_not_in_expected_state, expected_states, state})
+      throw({:mint, conn, wrap_error({:stream_not_in_expected_state, expected_states, state})})
     end
   end
 
@@ -1484,21 +1492,15 @@ defmodule Mint.HTTP2 do
         conn
 
       {:error, %TransportError{reason: :closed} = error} ->
-        throw_error!(%{conn | state: :closed}, error)
+        throw({:mint, %{conn | state: :closed}, error})
 
       {:error, reason} ->
-        throw_error!(conn, reason)
+        throw({:mint, conn, reason})
     end
   end
 
-  defp throw_error!(conn, reason) do
-    error = %HTTPError{reason: reason, module: __MODULE__}
-    throw({:mint, conn, error})
-  end
-
-  defp throw_error!(conn, reason, responses) do
-    error = %HTTPError{reason: reason, module: __MODULE__}
-    throw({:mint, conn, error, responses})
+  defp wrap_error(reason) do
+    %HTTPError{reason: reason, module: __MODULE__}
   end
 
   @doc false
@@ -1525,6 +1527,10 @@ defmodule Mint.HTTP2 do
       "The server will refill the window size of the connection when ready."
   end
 
+  def format_error({:stream_not_found, stream_id}) do
+    "request not found (with stream_id #{inspect(stream_id)})"
+  end
+
   def format_error(:payload_too_big) do
     "frame payload was too big. This is a server encoding error."
   end
@@ -1545,9 +1551,23 @@ defmodule Mint.HTTP2 do
 
         :invalid_huffman_encoding ->
           "invalid Huffman encoding"
+
+        :missing_status_header ->
+          "missing :status header"
+
+        debug_data when is_binary(debug_data) ->
+          debug_data
       end
 
-    message <> ". This is a server encoding error."
+    "protocol error: " <> message
+  end
+
+  def format_error({:compression_error, debug_data}) do
+    "compression error: " <> debug_data
+  end
+
+  def format_error({:flow_control_error, debug_data}) do
+    "flow control error error: " <> debug_data
   end
 
   def format_error({:bad_alpn_protocol, protocol}) do
