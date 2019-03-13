@@ -43,25 +43,19 @@ defmodule Mint.HTTP2.Frame do
     continuation: [end_headers: 0x04]
   }
 
-  for {frame, flags} <- @flags do
-    flags =
-      flags
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.reduce(fn name, acc -> quote(do: unquote(name) | unquote(acc)) end)
-
-    @spec set_flag(byte(), unquote(frame), unquote(flags)) :: byte()
-    @spec set_flag(unquote(frame), unquote(flags)) :: byte()
-    @spec flag_set?(byte(), unquote(frame), unquote(flags)) :: boolean()
+  @spec set_flags(byte(), atom(), [flag_name :: atom()]) :: byte()
+  def set_flags(initial_flags \\ 0x00, frame_name, flags_to_set)
+      when is_integer(initial_flags) and is_list(flags_to_set) do
+    Enum.reduce(flags_to_set, initial_flags, &set_flag(&2, frame_name, &1))
   end
 
-  def set_flag(flags, frame_name, flag_name)
-  def set_flag(frame_name, flag_name)
-  def flag_set?(flags, frame_name, flag_name)
+  @spec flag_set?(byte(), atom(), atom()) :: boolean()
+  def flag_set?(flags, frame, flag_name)
 
   for {frame, flags} <- @flags,
       {flag_name, flag_value} <- flags do
-    def set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
-    def set_flag(unquote(frame), unquote(flag_name)), do: unquote(flag_value)
+    defp set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
+    defp set_flag(unquote(frame), unquote(flag_name)), do: unquote(flag_value)
 
     def flag_set?(flags, unquote(frame), unquote(flag_name)),
       do: band(flags, unquote(flag_value)) == unquote(flag_value)
@@ -71,15 +65,6 @@ defmodule Mint.HTTP2.Frame do
     quote do
       band(unquote(flags), unquote(flag)) == unquote(flag)
     end
-  end
-
-  def set_flags(initial_flags, frame_name, flags_to_set)
-      when is_integer(initial_flags) and is_list(flags_to_set) do
-    Enum.reduce(flags_to_set, initial_flags, &set_flag(&2, frame_name, &1))
-  end
-
-  def set_flags(frame_name, flags_to_set) do
-    set_flags(0x00, frame_name, flags_to_set)
   end
 
   ## Parsing
@@ -96,12 +81,12 @@ defmodule Mint.HTTP2.Frame do
                | :payload_too_big
   def decode_next(bin, max_frame_size \\ 16_384) when is_binary(bin) do
     case decode_next_raw(bin) do
+      {:ok, {_type, _flags, _stream_id, payload}, _rest}
+      when byte_size(payload) > max_frame_size ->
+        {:error, :payload_too_big}
+
       {:ok, {type, flags, stream_id, payload}, rest} ->
-        if byte_size(payload) > max_frame_size do
-          {:error, :payload_too_big}
-        else
-          {:ok, decode_contents(type, flags, stream_id, payload), rest}
-        end
+        {:ok, decode_contents(type, flags, stream_id, payload), rest}
 
       :more ->
         :more
@@ -317,7 +302,7 @@ defmodule Mint.HTTP2.Frame do
   end
 
   def encode(data(stream_id: stream_id, flags: flags, data: data, padding: padding)) do
-    flags = set_flag(flags, :data, :padded)
+    flags = set_flags(flags, :data, [:padded])
     payload = [byte_size(padding), data, padding]
     encode_raw(@types[:data], flags, stream_id, payload)
   end
@@ -339,7 +324,7 @@ defmodule Mint.HTTP2.Frame do
       if stream_dependency && weight && is_boolean(exclusive?) do
         {
           [<<if(exclusive?, do: 1, else: 0)::1, stream_dependency::31>>, weight - 1, payload],
-          set_flag(flags, :headers, :priority)
+          set_flags(flags, :headers, [:priority])
         }
       else
         {payload, flags}
@@ -347,7 +332,7 @@ defmodule Mint.HTTP2.Frame do
 
     {payload, flags} =
       if padding do
-        {[byte_size(padding), payload, padding], set_flag(flags, :headers, :padded)}
+        {[byte_size(padding), payload, padding], set_flags(flags, :headers, [:padded])}
       else
         {payload, flags}
       end
@@ -406,7 +391,7 @@ defmodule Mint.HTTP2.Frame do
       if padding do
         {
           [byte_size(padding), payload, padding],
-          set_flag(flags, :push_promise, :padded)
+          set_flags(flags, :push_promise, [:padded])
         }
       else
         {payload, flags}

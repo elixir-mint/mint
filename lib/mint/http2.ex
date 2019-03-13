@@ -664,7 +664,7 @@ defmodule Mint.HTTP2 do
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
          server_settings_ack =
-           settings(stream_id: 0, params: [], flags: set_flag(:settings, :ack)),
+           settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
@@ -809,9 +809,9 @@ defmodule Mint.HTTP2 do
 
     flags =
       if :end_headers in enabled_flags do
-        set_flag(:continuation, :end_headers)
+        set_flags(:continuation, [:end_headers])
       else
-        0x00
+        set_flags(:continuation, [])
       end
 
     last_frame = Frame.encode(continuation(stream_id: stream_id, hbf: last_chunk, flags: flags))
@@ -1182,7 +1182,7 @@ defmodule Mint.HTTP2 do
       {conn, responses}
     else
       conn = apply_server_settings(conn, params)
-      frame = settings(flags: set_flag(:settings, :ack), params: [])
+      frame = settings(flags: set_flags(:settings, [:ack]), params: [])
       conn = send!(conn, Frame.encode(frame))
       {conn, responses}
     end
@@ -1328,7 +1328,7 @@ defmodule Mint.HTTP2 do
     if flag_set?(flags, :ping, :ack) do
       handle_ping_ack(conn, opaque_data, responses)
     else
-      ack = Frame.ping(stream_id: 0, flags: set_flag(:ping, :ack), opaque_data: opaque_data)
+      ack = Frame.ping(stream_id: 0, flags: set_flags(:ping, [:ack]), opaque_data: opaque_data)
       conn = send!(conn, Frame.encode(ack))
       {conn, responses}
     end

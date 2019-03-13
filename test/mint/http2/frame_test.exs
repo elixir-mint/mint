@@ -11,15 +11,15 @@ defmodule Mint.HTTP2.FrameTest do
     HPACK
   }
 
-  test "set_flag/2" do
-    assert set_flag(:ping, :ack) == 0x01
-    assert set_flag(:data, :end_stream) == 0x01
-    assert_raise FunctionClauseError, fn -> set_flag(:data, :ack) end
+  test "set_flags/2" do
+    assert set_flags(:ping, [:ack]) == 0x01
+    assert set_flags(:data, [:end_stream]) == 0x01
+    assert_raise FunctionClauseError, fn -> set_flags(:data, [:ack]) end
   end
 
-  test "set_flag/3" do
-    assert set_flag(0x01, :data, :padded) == bor(0x01, 0x08)
-    assert_raise FunctionClauseError, fn -> set_flag(0x00, :data, :ack) end
+  test "set_flags/3" do
+    assert set_flags(0x01, :data, [:padded]) == bor(0x01, 0x08)
+    assert_raise FunctionClauseError, fn -> set_flags(0x00, :data, [:ack]) end
   end
 
   test "flag_set?/3" do
