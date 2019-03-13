@@ -699,6 +699,16 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    test "streaming a request on a request that wasn't opened with :stream errors out",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "foo")
+      assert_http2_error error, :request_is_not_streaming
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "ping" do

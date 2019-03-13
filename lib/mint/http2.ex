@@ -749,8 +749,6 @@ defmodule Mint.HTTP2 do
   end
 
   defp send_headers(conn, stream_id, headers, enabled_flags) do
-    stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:idle])
     assert_headers_smaller_than_max_header_list_size(conn, headers)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
@@ -827,7 +825,11 @@ defmodule Mint.HTTP2 do
 
   defp send_data(conn, stream_id, data, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:open])
+
+    if stream.state != :open do
+      error = wrap_error(:request_is_not_streaming)
+      throw({:mint, conn, error})
+    end
 
     data_size = IO.iodata_length(data)
 
@@ -1482,7 +1484,11 @@ defmodule Mint.HTTP2 do
 
   defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
-      throw({:mint, conn, wrap_error({:stream_not_in_expected_state, expected_states, state})})
+      debug_data =
+        "stream was in state #{inspect(state)} and not in one of the expected states: " <>
+          Enum.map_join(expected_states, ", ", &inspect/1)
+
+      send_connection_error!(conn, :protocol_error, debug_data)
     end
   end
 
@@ -1533,6 +1539,10 @@ defmodule Mint.HTTP2 do
 
   def format_error(:payload_too_big) do
     "frame payload was too big. This is a server encoding error."
+  end
+
+  def format_error(:request_is_not_streaming) do
+    "can't send more data on this request since it's not streaming"
   end
 
   # Stream-level errors.
