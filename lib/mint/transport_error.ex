@@ -9,10 +9,6 @@ defmodule Mint.TransportError do
 
   ## Our reasons.
 
-  defp format_reason({:bad_alpn_protocol, protocol}) do
-    "bad ALPN protocol: #{inspect(protocol)}. Supported protocols are \"http/1.1\" and \"h2\"."
-  end
-
   defp format_reason(:protocol_not_negotiated) do
     "ALPN protocol not negotiated"
   end

@@ -293,12 +293,8 @@ defmodule Mint.HTTP2 do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
-      {:ok, socket} ->
-        initiate(new_scheme, socket, hostname, port, opts)
-
-      {:error, reason} ->
-        {:error, %TransportError{reason: reason}}
+    with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+      initiate(new_scheme, socket, hostname, port, opts)
     end
   end
 
@@ -698,10 +694,8 @@ defmodule Mint.HTTP2 do
       if protocol == "h2" do
         {:ok, socket}
       else
-        {:error, %TransportError{reason: {:bad_alpn_protocol, protocol}}}
+        {:error, %HTTPError{reason: {:bad_alpn_protocol, protocol}}}
       end
-    else
-      {:error, reason} -> {:error, %TransportError{reason: reason}}
     end
   end
 
@@ -732,7 +726,7 @@ defmodule Mint.HTTP2 do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_stream_count >= max_concurrent_streams do
-      throw_error!(conn, :http, {:max_concurrent_streams_reached, max_concurrent_streams})
+      throw_error!(conn, {:max_concurrent_streams_reached, max_concurrent_streams})
     end
 
     stream = %{
@@ -787,7 +781,7 @@ defmodule Mint.HTTP2 do
       :ok
     else
       reason = {:max_header_list_size_exceeded, total_size, max_header_list_size}
-      throw_error!(conn, :http, reason)
+      throw_error!(conn, reason)
     end
   end
 
@@ -833,10 +827,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        throw_error!(conn, :http, {:exceeds_stream_window_size, stream.window_size})
+        throw_error!(conn, {:exceeds_stream_window_size, stream.window_size})
 
       data_size >= conn.window_size ->
-        throw_error!(conn, :http, {:exceeds_connection_window_size, conn.window_size})
+        throw_error!(conn, {:exceeds_connection_window_size, conn.window_size})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
@@ -1349,12 +1343,12 @@ defmodule Mint.HTTP2 do
       {{:value, _}, _} ->
         # TODO: should this be a connection error?a
         _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
-        throw_error!(conn, :http, :protocol_error, responses)
+        throw_error!(conn, :protocol_error, responses)
 
       {:empty, _ping_queue} ->
         # TODO: should this be a connection error?
         _ = Logger.error("Received PING ack but no PING requests had been sent")
-        throw_error!(conn, :http, :protocol_error, responses)
+        throw_error!(conn, :protocol_error, responses)
     end
   end
 
@@ -1447,7 +1441,7 @@ defmodule Mint.HTTP2 do
     conn = send!(conn, Frame.encode(frame))
     :ok = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    throw_error!(conn, :http, error_code)
+    throw_error!(conn, error_code)
   end
 
   defp close_stream!(conn, stream_id, error_code) do
@@ -1471,13 +1465,13 @@ defmodule Mint.HTTP2 do
   defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw_error!(conn, :http, {:stream_not_found, stream_id})
+      :error -> throw_error!(conn, {:stream_not_found, stream_id})
     end
   end
 
   defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
-      throw_error!(conn, :http, {:stream_not_in_expected_state, expected_states, state})
+      throw_error!(conn, {:stream_not_in_expected_state, expected_states, state})
     end
   end
 
@@ -1486,34 +1480,22 @@ defmodule Mint.HTTP2 do
       :ok ->
         conn
 
-      {:error, :closed} ->
-        throw_error!(%{conn | state: :closed}, :transport, :closed)
+      {:error, %TransportError{reason: :closed} = error} ->
+        throw_error!(%{conn | state: :closed}, error)
 
       {:error, reason} ->
-        throw_error!(conn, :transport, reason)
+        throw_error!(conn, reason)
     end
   end
 
-  defp throw_error!(conn, kind, reason) do
-    case kind do
-      :transport ->
-        throw({:mint, conn, %TransportError{reason: reason}})
-
-      :http ->
-        error = %HTTPError{reason: reason, module: __MODULE__}
-        throw({:mint, conn, error})
-    end
+  defp throw_error!(conn, reason) do
+    error = %HTTPError{reason: reason, module: __MODULE__}
+    throw({:mint, conn, error})
   end
 
-  defp throw_error!(conn, kind, reason, responses) do
-    case kind do
-      :transport ->
-        throw({:mint, conn, %TransportError{reason: reason}, responses})
-
-      :http ->
-        error = %HTTPError{reason: reason, module: __MODULE__}
-        throw({:mint, conn, error, responses})
-    end
+  defp throw_error!(conn, reason, responses) do
+    error = %HTTPError{reason: reason, module: __MODULE__}
+    throw({:mint, conn, error, responses})
   end
 
   @doc false
@@ -1563,6 +1545,10 @@ defmodule Mint.HTTP2 do
       end
 
     message <> ". This is a server encoding error."
+  end
+
+  def format_error({:bad_alpn_protocol, protocol}) do
+    "bad ALPN protocol: #{inspect(protocol)}. Supported protocols are \"http/1.1\" and \"h2\"."
   end
 
   ## HPACK

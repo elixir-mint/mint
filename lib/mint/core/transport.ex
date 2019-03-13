@@ -1,7 +1,7 @@
 defmodule Mint.Core.Transport do
   @moduledoc false
 
-  @type error() :: {:error, reason :: term()}
+  @type error() :: {:error, %Mint.TransportError{}}
 
   alias Mint.Types
 
@@ -28,4 +28,6 @@ defmodule Mint.Core.Transport do
   @callback setopts(Types.socket(), opts :: keyword()) :: :ok | error()
 
   @callback getopts(Types.socket(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
+
+  @callback wrap_error(reason :: term()) :: %Mint.TransportError{}
 end

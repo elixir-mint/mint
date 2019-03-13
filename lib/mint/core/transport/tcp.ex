@@ -21,7 +21,7 @@ defmodule Mint.Core.Transport.TCP do
       |> Keyword.merge(@transport_opts)
       |> Keyword.drop([:alpn_advertised_protocols, :timeout])
 
-    :gen_tcp.connect(hostname, port, opts, timeout)
+    wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
   end
 
   @impl true
@@ -30,20 +30,36 @@ defmodule Mint.Core.Transport.TCP do
   end
 
   @impl true
-  def negotiated_protocol(_socket), do: {:error, :protocol_not_negotiated}
+  def negotiated_protocol(_socket), do: wrap_err({:error, :protocol_not_negotiated})
 
   @impl true
-  defdelegate send(socket, payload), to: :gen_tcp
+  def send(socket, payload) do
+    wrap_err(:gen_tcp.send(socket, payload))
+  end
 
   @impl true
   defdelegate close(socket), to: :gen_tcp
 
   @impl true
-  defdelegate recv(socket, bytes), to: :gen_tcp
+  def recv(socket, bytes) do
+    wrap_err(:gen_tcp.recv(socket, bytes))
+  end
 
   @impl true
-  defdelegate setopts(socket, opts), to: :inet
+  def setopts(socket, opts) do
+    wrap_err(:inet.setopts(socket, opts))
+  end
 
   @impl true
-  defdelegate getopts(socket, opts), to: :inet
+  def getopts(socket, opts) do
+    wrap_err(:inet.getopts(socket, opts))
+  end
+
+  @impl true
+  def wrap_error(reason) do
+    wrap_err({:error, reason})
+  end
+
+  defp wrap_err({:error, reason}), do: {:error, %Mint.TransportError{reason: reason}}
+  defp wrap_err(other), do: other
 end

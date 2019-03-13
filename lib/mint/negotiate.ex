@@ -62,9 +62,8 @@ defmodule Mint.Negotiate do
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
 
-    case transport.connect(hostname, port, transport_opts) do
-      {:ok, transport_state} -> alpn_negotiate(scheme, transport_state, hostname, port, opts)
-      {:error, reason} -> {:error, %TransportError{reason: reason}}
+    with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts) do
+      alpn_negotiate(scheme, transport_state, hostname, port, opts)
     end
   end
 
@@ -118,7 +117,7 @@ defmodule Mint.Negotiate do
       {:ok, "h2"} ->
         HTTP2.initiate(scheme, socket, hostname, port, opts)
 
-      {:error, :protocol_not_negotiated} ->
+      {:error, %TransportError{reason: :protocol_not_negotiated}} ->
         # Assume HTTP1 if ALPN is not supported
         HTTP1.initiate(scheme, socket, hostname, port, opts)
 
