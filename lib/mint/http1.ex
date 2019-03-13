@@ -37,18 +37,6 @@ defmodule Mint.HTTP1 do
     private: %{}
   ]
 
-  defmacrop error(reason) do
-    quote do: {:error, %Mint.Error{reason: unquote(reason)}}
-  end
-
-  defmacrop error(conn, reason) do
-    quote do: {:error, unquote(conn), %Mint.Error{reason: unquote(reason)}}
-  end
-
-  defmacrop error(conn, reason, responses) do
-    quote do: {:error, unquote(conn), %Mint.Error{reason: unquote(reason)}, unquote(responses)}
-  end
-
   @doc """
   Same as `Mint.HTTP.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
 
@@ -64,7 +52,7 @@ defmodule Mint.HTTP1 do
 
     case transport.connect(hostname, port, transport_opts) do
       {:ok, socket} -> initiate(transport, socket, hostname, port, opts)
-      {:error, reason} -> error(reason)
+      {:error, reason} -> {:error, wrap_error(:transport, reason)}
     end
   end
 
@@ -85,7 +73,7 @@ defmodule Mint.HTTP1 do
 
     case transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
       {:ok, socket} -> initiate(new_scheme, socket, hostname, port, opts)
-      {:error, reason} -> error(reason)
+      {:error, reason} -> {:error, wrap_error(:transport, reason)}
     end
   end
 
@@ -114,7 +102,7 @@ defmodule Mint.HTTP1 do
     else
       {:error, reason} ->
         transport.close(socket)
-        error(reason)
+        {:error, wrap_error(:transport, reason)}
     end
   end
 
@@ -167,7 +155,7 @@ defmodule Mint.HTTP1 do
         _headers,
         _body
       ) do
-    error(conn, :request_body_is_streaming)
+    {:error, conn, wrap_error(:http, :request_body_is_streaming)}
   end
 
   def request(%__MODULE__{} = conn, method, path, headers, body) do
@@ -190,14 +178,13 @@ defmodule Mint.HTTP1 do
         end
 
       {:error, :closed} ->
-        error(%{conn | state: :closed}, :closed)
+        {:error, %{conn | state: :closed}, wrap_error(:transport, :closed)}
 
       {:error, reason} ->
-        error(conn, reason)
+        {:error, conn, wrap_error(:transport, reason)}
     end
   catch
-    :throw, {:mint, reason} ->
-      error(conn, reason)
+    :throw, {:mint, reason} -> {:error, conn, wrap_error(:http, reason)}
   end
 
   @doc """
@@ -221,8 +208,8 @@ defmodule Mint.HTTP1 do
       ) do
     case conn.transport.send(conn.socket, body) do
       :ok -> {:ok, conn}
-      {:error, :closed} -> error(%{conn | state: :closed}, :closed)
-      {:error, reason} -> error(conn, reason)
+      {:error, :closed} -> {:error, %{conn | state: :closed}, wrap_error(:transport, :closed)}
+      {:error, reason} -> {:error, conn, wrap_error(:transport, reason)}
     end
   end
 
@@ -239,6 +226,7 @@ defmodule Mint.HTTP1 do
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
+    # TODO: handle errors here.
     _ = transport.setopts(socket, active: :once)
     result
   end
@@ -259,7 +247,7 @@ defmodule Mint.HTTP1 do
 
   defp handle_data(%__MODULE__{request: nil} = conn, data) do
     conn = internal_close(conn)
-    error(conn, {:unexpected_data, data}, [])
+    {:error, conn, wrap_error(:http, {:unexpected_data, data}), []}
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
@@ -283,13 +271,13 @@ defmodule Mint.HTTP1 do
       conn = put_in(conn.state, :closed)
       {:ok, conn, [{:done, request.ref}]}
     else
-      error(conn, :closed, [])
+      {:error, conn, wrap_error(:transport, :closed), _responses = []}
     end
   end
 
   defp handle_error(conn, reason) do
     conn = put_in(conn.state, :closed)
-    error(conn, reason, [])
+    {:error, conn, wrap_error(:transport, reason), _responses = []}
   end
 
   @doc """
@@ -343,7 +331,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        error(conn, :invalid_status_line, responses)
+        {:error, conn, wrap_error(:http, :invalid_status_line), responses}
     end
   end
 
@@ -358,7 +346,7 @@ defmodule Mint.HTTP1 do
         decode_body(body, conn, data, conn.request.ref, responses)
 
       {:error, reason} ->
-        {:error, conn, reason, responses}
+        {:error, conn, wrap_error(:http, reason), responses}
     end
   end
 
@@ -369,7 +357,7 @@ defmodule Mint.HTTP1 do
 
         case store_header(request, name, value) do
           {:ok, request} -> decode_headers(conn, request, rest, responses, headers)
-          {:error, reason} -> {:error, conn, reason, responses}
+          {:error, reason} -> {:error, conn, wrap_error(:http, reason), responses}
         end
 
       {:ok, :eof, rest} ->
@@ -384,7 +372,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        error(conn, :invalid_header, responses)
+        {:error, conn, wrap_error(:http, :invalid_header), responses}
     end
   end
 
@@ -435,7 +423,7 @@ defmodule Mint.HTTP1 do
         decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
       _other ->
-        error(conn, :invalid_chunk_size, responses)
+        {:error, conn, wrap_error(:http, :invalid_chunk_size), responses}
     end
   end
 
@@ -466,7 +454,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       _other ->
-        error(conn, :missing_crlf_after_chunk, responses)
+        {:error, conn, wrap_error(:http, :missing_crlf_after_chunk), responses}
     end
   end
 
@@ -507,7 +495,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       :error ->
-        error(conn, :invalid_trailer_header, responses)
+        {:error, conn, wrap_error(:http, :invalid_trailer_header), responses}
     end
   end
 
@@ -549,7 +537,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp store_header(_request, "content-length", _value) do
-    error(:more_than_one_content_length_header)
+    {:error, :more_than_one_content_length_header}
   end
 
   defp store_header(request, _name, _value) do
@@ -604,7 +592,7 @@ defmodule Mint.HTTP1 do
       # method == "CONNECT" and status in 200..299 -> nil
 
       request.transfer_encoding != [] && request.content_length ->
-        error(:transfer_encoding_and_content_length)
+        {:error, :transfer_encoding_and_content_length}
 
       "chunked" == List.first(request.transfer_encoding) ->
         {:ok, {:chunked, nil}}
@@ -635,4 +623,7 @@ defmodule Mint.HTTP1 do
       body: nil
     }
   end
+
+  defp wrap_error(:transport, reason), do: %Mint.TransportError{reason: reason}
+  defp wrap_error(:http, reason), do: %Mint.HTTPError{reason: reason}
 end

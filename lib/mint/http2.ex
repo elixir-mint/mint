@@ -203,18 +203,6 @@ defmodule Mint.HTTP2 do
     private: %{}
   ]
 
-  defmacrop error!(conn, reason) do
-    quote do
-      throw({:mint, unquote(conn), %Mint.Error{reason: unquote(reason)}})
-    end
-  end
-
-  defmacrop error!(conn, reason, responses) do
-    quote do
-      throw({:mint, unquote(conn), %Mint.Error{reason: unquote(reason)}, unquote(responses)})
-    end
-  end
-
   ## Types
 
   @typedoc """
@@ -394,7 +382,7 @@ defmodule Mint.HTTP2 do
 
     {:ok, conn, ref}
   catch
-    :throw, {:mint, conn, error} -> {:error, conn, error}
+    :throw, {:mint, conn, reason} -> {:error, conn, error}
   end
 
   @doc """
@@ -744,7 +732,7 @@ defmodule Mint.HTTP2 do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_stream_count >= max_concurrent_streams do
-      error!(conn, {:max_concurrent_streams_reached, max_concurrent_streams})
+      throw({:mint, conn, {:max_concurrent_streams_reached, max_concurrent_streams}})
     end
 
     stream = %{
@@ -798,7 +786,7 @@ defmodule Mint.HTTP2 do
     if total_size <= max_header_list_size do
       :ok
     else
-      error!(conn, {:max_header_list_size_exceeded, total_size, max_header_list_size})
+      throw({:mint, conn, {:max_header_list_size_exceeded, total_size, max_header_list_size}})
     end
   end
 
@@ -844,10 +832,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        error!(conn, {:exceeds_stream_window_size, stream.window_size})
+        throw({:mint, conn, {:exceeds_stream_window_size, stream.window_size}})
 
       data_size >= conn.window_size ->
-        error!(conn, {:exceeds_connection_window_size, conn.window_size})
+        throw({:mint, conn, {:exceeds_connection_window_size, conn.window_size}})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
@@ -1359,11 +1347,11 @@ defmodule Mint.HTTP2 do
 
       {{:value, _}, _} ->
         _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
-        error!(conn, :protocol_error, responses)
+        throw({:mint, conn, :protocol_error, responses})
 
       {:empty, _ping_queue} ->
         _ = Logger.error("Received PING ack but no PING requests had been sent")
-        error!(conn, :protocol_error, responses)
+        throw({:mint, conn, :protocol_error, responses})
     end
   end
 
@@ -1456,7 +1444,7 @@ defmodule Mint.HTTP2 do
     conn = send!(conn, Frame.encode(frame))
     :ok = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
-    error!(conn, error_code)
+    throw({:mint, conn, error_code})
   end
 
   defp close_stream!(conn, stream_id, error_code) do
@@ -1480,21 +1468,36 @@ defmodule Mint.HTTP2 do
   defp fetch_stream!(conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> error!(conn, {:stream_not_found, stream_id})
+      :error -> throw_error!(conn, :http, {:stream_not_found, stream_id})
     end
   end
 
   defp assert_stream_in_state(conn, %{state: state}, expected_states) do
     if state not in expected_states do
-      error!(conn, {:stream_not_in_expected_state, expected_states, state})
+      throw_error!(conn, :http, {:stream_not_in_expected_state, expected_states, state})
     end
   end
 
   defp send!(%Mint.HTTP2{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
-      :ok -> conn
-      {:error, :closed} -> error!(%{conn | state: :closed}, :closed)
-      {:error, reason} -> error!(conn, reason)
+      :ok ->
+        conn
+
+      {:error, :closed} ->
+        throw_error!(%{conn | state: :closed}, :transport, :closed)
+
+      {:error, reason} ->
+        throw_error!(conn, :transport, reason)
     end
+  end
+
+  defp throw_error!(conn, kind, reason) do
+    struct =
+      case kind do
+        :transport -> TransportError
+        :http -> HTTPError
+      end
+
+    throw({:mint, conn, struct(struct, reason: reason)})
   end
 end

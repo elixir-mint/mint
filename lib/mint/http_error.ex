@@ -25,6 +25,19 @@ defmodule Mint.HTTPError do
     "invalid header"
   end
 
+  # TODO: maybe add the target here.
+  defp format_reason(:invalid_request_target) do
+    "invalid request target"
+  end
+
+  defp format_reason({:invalid_header_name, name}) do
+    "invalid header name: #{inspect(name)}"
+  end
+
+  defp format_reason({:invalid_header_value, name, value}) do
+    "invalid value for header #{inspect(name)}: #{inspect(value)}"
+  end
+
   defp format_reason(:invalid_chunk_size) do
     "invalid chunk size"
   end
@@ -44,6 +57,14 @@ defmodule Mint.HTTPError do
   defp format_reason(:transfer_encoding_and_content_length) do
     "the response contained both a Transfer-Encoding header as well as a Content-Length header"
   end
+
+  # TODO: maybe include the header value here.
+  defp format_reason(:invalid_content_length_header) do
+    "invalid Content-Length header"
+  end
+
+  # TODO: :invalid_token_list
+  # TODO: :empty_token_list
 
   ## HTTP/2 errors
 
@@ -67,4 +88,59 @@ defmodule Mint.HTTPError do
     "the given data exceeds the window size of the connection, which is #{window_size}. " <>
       "The server will refill the window size of the connection when ready."
   end
+
+  defp format_reason(:payload_too_big) do
+    "frame payload was too big. This is a server encoding error."
+  end
+
+  defp format_reason({:frame_size_error, frame}) do
+    humanized_frame = frame |> Atom.to_string() |> String.upcase()
+    "frame size error for #{humanized_frame} frame"
+  end
+
+  defp format_reason({:protocol_error, reason}) do
+    message =
+      case reason do
+        :bad_window_size_increment ->
+          "bad WINDOW_SIZE increment"
+
+        :pad_length_bigger_than_payload_length ->
+          "the padding length is bigger than the payload length"
+
+        :invalid_huffman_encoding ->
+          "invalid Huffman encoding"
+      end
+
+    message <> ". This is a server encoding error."
+  end
+
+  ## HPACK
+
+  defp format_reason({:index_not_found, index}) do
+    "HPACK index not found: #{inspect(index)}"
+  end
+
+  defp format_reason(:bad_integer_encoding) do
+    "bad HPACK integer encoding"
+  end
+
+  defp format_reason(:bad_binary_encoding) do
+    "bad HPACK binary encoding"
+  end
+
+  ## Proxy
+
+  defp format_reason(:tunnel_timeout) do
+    "tunnel timeout"
+  end
+
+  defp format_reason({:unexpected_status, status}) do
+    "unexpected status: #{inspect(status)}"
+  end
+
+  defp format_reason({:unexpected_trailing_responses, responses}) do
+    "unexpected trailing responses: #{inspect(responses)}"
+  end
+
+  # TODO: {:proxy, _} errors.
 end
