@@ -544,6 +544,11 @@ defmodule Mint.Core.Transport.SSL do
               "specify the trust store using the `:cacertfile`/`:cacerts` option"
   end
 
-  defp wrap_err({:error, reason}), do: {:error, %Mint.TransportError{reason: reason}}
-  defp wrap_err(other), do: other
+  defp wrap_err({:error, reason}) do
+    {:error, %Mint.TransportError{reason: reason, formatter_module: :ssl}}
+  end
+
+  defp wrap_err(other) do
+    other
+  end
 end

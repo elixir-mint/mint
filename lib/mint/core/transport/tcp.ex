@@ -60,6 +60,11 @@ defmodule Mint.Core.Transport.TCP do
     wrap_err({:error, reason})
   end
 
-  defp wrap_err({:error, reason}), do: {:error, %Mint.TransportError{reason: reason}}
-  defp wrap_err(other), do: other
+  defp wrap_err({:error, reason}) do
+    {:error, %Mint.TransportError{reason: reason, formatter_module: :inet}}
+  end
+
+  defp wrap_err(other) do
+    other
+  end
 end
