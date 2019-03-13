@@ -1461,13 +1461,9 @@ defmodule Mint.HTTP2 do
   end
 
   defp fetch_stream!(conn, stream_id) do
-    fetch_stream!(conn, stream_id, {:stream_not_found, stream_id})
-  end
-
-  defp fetch_stream!(conn, stream_id, error) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} -> stream
-      :error -> throw({:mint, conn, error})
+      :error -> throw({:mint, conn, {:stream_not_found, stream_id}})
     end
   end
 
