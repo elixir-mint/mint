@@ -1341,7 +1341,7 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {{:value, _}, _} ->
-        # TODO: should this be a connection error?a
+        # TODO: should this be a connection error?
         _ = Logger.error("Received PING ack that doesn't match next PING request in the queue")
         throw_error!(conn, :protocol_error, responses)
 
