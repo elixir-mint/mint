@@ -53,7 +53,7 @@ defmodule Mint.HTTP1.Parse do
         length
 
       _other ->
-        throw({:mint, :invalid_content_length_header})
+        throw({:mint, {:invalid_content_length_header, string}})
     end
   end
 

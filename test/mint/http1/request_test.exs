@@ -85,7 +85,7 @@ defmodule Mint.HTTP1.RequestTest do
 
     test "invalid request target" do
       assert catch_throw(Request.encode("GET", "/ /", "example.com", [], nil)) ==
-               {:mint, :invalid_request_target}
+               {:mint, {:invalid_request_target, "/ /"}}
     end
 
     test "invalid header name" do

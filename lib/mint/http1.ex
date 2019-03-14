@@ -649,9 +649,8 @@ defmodule Mint.HTTP1 do
     "invalid header"
   end
 
-  # TODO: maybe add the target here.
-  def format_error(:invalid_request_target) do
-    "invalid request target"
+  def format_error({:invalid_request_target, target}) do
+    "invalid request target: #{inspect(target)}"
   end
 
   def format_error({:invalid_header_name, name}) do
@@ -682,9 +681,8 @@ defmodule Mint.HTTP1 do
     "the response contained both a Transfer-Encoding header as well as a Content-Length header"
   end
 
-  # TODO: maybe include the header value here.
-  def format_error(:invalid_content_length_header) do
-    "invalid Content-Length header"
+  def format_error({:invalid_content_length_header, value}) do
+    "invalid Content-Length header: #{inspect(value)}"
   end
 
   # TODO: :invalid_token_list
