@@ -477,6 +477,109 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [goaway(error_code: :protocol_error)]
       refute HTTP2.open?(conn)
     end
+
+    test "if the server tries to reserve an already existing stream the connection errors",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+      normal_headers_hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: promised_headers_hbf,
+                   promised_stream_id: 4,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: promised_headers_hbf,
+                   promised_stream_id: 4,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: normal_headers_hbf,
+                   flags: set_flags(:headers, [:end_stream, :end_headers])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "stream with ID 4 already exists and can't be reserved by the server"
+
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_concurrent_streams: 1]]
+    test "if the server reaches the max number of client streams, the client sends an error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+      normal_headers_hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: promised_headers_hbf,
+                   promised_stream_id: 4,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: promised_headers_hbf,
+                   promised_stream_id: 6,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: normal_headers_hbf,
+                   flags: set_flags(:headers, [:end_stream, :end_headers])
+                 )
+               ])
+
+      assert [
+               {:push_promise, ^ref, promised_ref1, _},
+               {:push_promise, ^ref, promised_ref2, _},
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:done, ^ref}
+             ] = responses
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+
+      # Here we send headers for the two promised streams. Note that neither of the
+      # header frames have the END_STREAM flag set otherwise we close the streams and
+      # they don't count towards the open stream count.
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: 4,
+                   hbf: normal_headers_hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: 6,
+                   hbf: normal_headers_hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert [{:status, ^promised_ref1, 200}, {:headers, ^promised_ref1, []}] = responses
+
+      assert_recv_frames [
+        rst_stream(stream_id: 6, error_code: :refused_stream)
+      ]
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "misbehaving server" do
