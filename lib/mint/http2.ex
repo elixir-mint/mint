@@ -177,6 +177,7 @@ defmodule Mint.HTTP2 do
     next_stream_id: 3,
     streams: %{},
     open_stream_count: 0,
+    open_server_stream_count: 0,
     ref_to_stream_id: %{},
 
     # Settings that the server communicates to the client.
@@ -1117,16 +1118,28 @@ defmodule Mint.HTTP2 do
         new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
         cond do
+          # :reserved_remote means that this was a promised stream. As soon as headers come,
+          # the stream goes in the :half_closed_local state (unless it's not allowed because
+          # of the client's max concurrent streams limit).
+          stream.state == :reserved_remote ->
+            cond do
+              conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
+                conn = close_stream!(conn, stream.id, :refused_stream)
+                {conn, responses}
+
+              end_stream? ->
+                conn = close_stream!(conn, stream.id, :no_error)
+                {conn, [{:done, ref} | new_responses]}
+
+              true ->
+                conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+                conn = put_in(conn.streams[stream.id].state, :half_closed_local)
+                {conn, new_responses}
+            end
+
           end_stream? ->
             conn = close_stream!(conn, stream.id, :no_error)
             {conn, [{:done, ref} | new_responses]}
-
-          # If this was a promised stream, it goes in the :half_closed_local state as
-          # soon as it receives headers. We cannot send any frames other than
-          # WINDOW_UPDATE, PRIORITY, or RST_STREAM in the :half_closed_local state.
-          stream.state == :reserved_remote ->
-            conn = put_in(conn.streams[stream.id].state, :half_closed_local)
-            {conn, new_responses}
 
           true ->
             {conn, new_responses}
@@ -1292,12 +1305,7 @@ defmodule Mint.HTTP2 do
       hbf: hbf
     ) = frame
 
-    # TODO: improve this by checking that the promised_stream_id is not in use or has been used
-    # before.
-    unless promised_stream_id > 0 and Integer.is_even(promised_stream_id) do
-      debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
-      send_connection_error!(conn, :protocol_error, debug_data)
-    end
+    assert_valid_promised_stream_id(conn, promised_stream_id)
 
     stream = fetch_stream!(conn, stream_id)
     assert_stream_in_state(conn, stream, [:open, :half_closed_local])
@@ -1336,6 +1344,24 @@ defmodule Mint.HTTP2 do
     conn = put_in(conn.streams[promised_stream.id], promised_stream)
     new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
     {conn, [new_response | responses]}
+  end
+
+  defp assert_valid_promised_stream_id(conn, promised_stream_id) do
+    cond do
+      not is_integer(promised_stream_id) or Integer.is_odd(promised_stream_id) ->
+        debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
+      Map.has_key?(conn.streams, promised_stream_id) ->
+        debug_data =
+          "stream with ID #{inspect(promised_stream_id)} already exists and can't be " <>
+            "reserved by the server"
+
+        send_connection_error!(conn, :protocol_error, debug_data)
+
+      true ->
+        :ok
+    end
   end
 
   # PING
@@ -1473,9 +1499,23 @@ defmodule Mint.HTTP2 do
   end
 
   defp delete_stream(conn, stream) do
-    conn = update_in(conn.open_stream_count, &(&1 - 1))
     conn = update_in(conn.streams, &Map.delete(&1, stream.id))
     conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
+
+    conn =
+      cond do
+        stream.state in [:open, :half_closed_remote] and Integer.is_odd(stream.id) ->
+          # Stream initiated by the client.
+          update_in(conn.open_stream_count, &(&1 - 1))
+
+        stream.state in [:open, :half_closed_local] and Integer.is_even(stream.id) ->
+          # Stream initiated by the server.
+          update_in(conn.open_server_stream_count, &(&1 - 1))
+
+        true ->
+          conn
+      end
+
     conn
   end
 
