@@ -176,7 +176,7 @@ defmodule Mint.HTTP2 do
     # Stream-set-related things.
     next_stream_id: 3,
     streams: %{},
-    open_stream_count: 0,
+    open_client_stream_count: 0,
     open_server_stream_count: 0,
     ref_to_stream_id: %{},
 
@@ -735,7 +735,7 @@ defmodule Mint.HTTP2 do
   defp open_stream(conn) do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
-    if conn.open_stream_count >= max_concurrent_streams do
+    if conn.open_client_stream_count >= max_concurrent_streams do
       error = wrap_error({:max_concurrent_streams_reached, max_concurrent_streams})
       throw({:mint, conn, error})
     end
@@ -765,7 +765,7 @@ defmodule Mint.HTTP2 do
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
     conn = put_in(conn.streams[stream_id].state, stream_state)
-    conn = update_in(conn.open_stream_count, &(&1 + 1))
+    conn = update_in(conn.open_client_stream_count, &(&1 + 1))
     conn
   end
 
@@ -1409,7 +1409,7 @@ defmodule Mint.HTTP2 do
     {conn, responses} =
       Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
         conn = update_in(conn.streams, &Map.delete(&1, id))
-        conn = update_in(conn.open_stream_count, &(&1 - 1))
+        conn = update_in(conn.open_client_stream_count, &(&1 - 1))
         conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
         conn = put_in(conn.state, :went_away)
         error = wrap_error({:goaway, error_code, debug_data})
@@ -1506,7 +1506,7 @@ defmodule Mint.HTTP2 do
       cond do
         stream.state in [:open, :half_closed_remote] and Integer.is_odd(stream.id) ->
           # Stream initiated by the client.
-          update_in(conn.open_stream_count, &(&1 - 1))
+          update_in(conn.open_client_stream_count, &(&1 - 1))
 
         stream.state in [:open, :half_closed_local] and Integer.is_even(stream.id) ->
           # Stream initiated by the server.
