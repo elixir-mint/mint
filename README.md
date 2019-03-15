@@ -39,8 +39,7 @@ The connection socket runs in [*active mode*](http://erlang.org/doc/man/inet.htm
 
 ```elixir
 iex> flush()
-{:tcp, #Port<0.8>,
- "HTTP/1.1 200 OK\r\n" <> _}
+{:tcp, _socket, "HTTP/1.1 200 OK\r\n" <> _}
 ```
 
 To handle such messages, Mint provides a `stream/2` function that turns messages into HTTP responses. Responses are streamed back to the user in parts through response parts `:status`, `:headers`, `:data`, and finally `:done`.
@@ -52,13 +51,13 @@ iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
 iex> receive do
 ...>   message ->
 ...>     {:ok, conn, responses} = Mint.HTTP.stream(conn, message)
-...>     IO.inspect responses
+...>     responses
 ...> end
 [
-  {:status, #Reference<...>, 200},
-  {:headers, #Reference<...>, [{"connection", "keep-alive"}, ...},
-  {:data, #Reference<...>, "<!DOCTYPE html>..."},
-  {:done, #Reference<...>}
+  {:status, ^request_ref, 200},
+  {:headers, ^request_ref, [{"connection", "keep-alive"}, ...},
+  {:data, ^request_ref, "<!DOCTYPE html>..."},
+  {:done, ^request_ref}
 ]
 ```
 
