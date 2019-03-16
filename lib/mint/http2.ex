@@ -1502,14 +1502,16 @@ defmodule Mint.HTTP2 do
     conn = update_in(conn.streams, &Map.delete(&1, stream.id))
     conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
 
+    stream_open? = stream.state in [:open, :half_closed_local, :half_closed_remote]
+
     conn =
       cond do
-        stream.state in [:open, :half_closed_remote] and Integer.is_odd(stream.id) ->
-          # Stream initiated by the client.
+        # Stream initiated by the client.
+        stream_open? and Integer.is_odd(stream.id) ->
           update_in(conn.open_client_stream_count, &(&1 - 1))
 
-        stream.state in [:open, :half_closed_local] and Integer.is_even(stream.id) ->
-          # Stream initiated by the server.
+        # Stream initiated by the server.
+        stream_open? and Integer.is_even(stream.id) ->
           update_in(conn.open_server_stream_count, &(&1 - 1))
 
         true ->
