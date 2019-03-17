@@ -3,7 +3,7 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  alias Mint.Core.Util
+  alias Mint.{Core.Util, Types}
 
   @user_agent "mint/" <> Mix.Project.config()[:version]
 
@@ -13,12 +13,16 @@ defmodule Mint.HTTP1.Request do
       |> lower_header_keys()
       |> add_default_headers(host, body)
 
-    [
+    body = [
       encode_request_line(method, target),
       encode_headers(headers),
       "\r\n",
       encode_body(body)
     ]
+
+    {:ok, body}
+  catch
+    {:mint, reason} -> {:error, reason}
   end
 
   defp encode_request_line(method, target) do

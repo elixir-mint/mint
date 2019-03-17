@@ -5,11 +5,7 @@ defmodule Mint.HTTP1.RequestTest do
 
   describe "encode/5" do
     test "with header" do
-      request =
-        Request.encode("GET", "/", "example.com", [{"foo", "bar"}], nil)
-        |> IO.iodata_to_binary()
-
-      assert request ==
+      assert encode_request("GET", "/", "example.com", [{"foo", "bar"}], nil) ==
                request_string("""
                GET / HTTP/1.1
                host: example.com
@@ -20,11 +16,7 @@ defmodule Mint.HTTP1.RequestTest do
     end
 
     test "with body" do
-      request =
-        Request.encode("GET", "/", "example.com", [], "BODY")
-        |> IO.iodata_to_binary()
-
-      assert request ==
+      assert encode_request("GET", "/", "example.com", [], "BODY") ==
                request_string("""
                GET / HTTP/1.1
                host: example.com
@@ -36,11 +28,7 @@ defmodule Mint.HTTP1.RequestTest do
     end
 
     test "with overridden content-length" do
-      request =
-        Request.encode("GET", "/", "example.com", [{"content-length", "10"}], "BODY")
-        |> IO.iodata_to_binary()
-
-      assert request ==
+      assert encode_request("GET", "/", "example.com", [{"content-length", "10"}], "BODY") ==
                request_string("""
                GET / HTTP/1.1
                host: example.com
@@ -52,11 +40,7 @@ defmodule Mint.HTTP1.RequestTest do
     end
 
     test "with overridden user-agent" do
-      request =
-        Request.encode("GET", "/", "example.com", [{"user-agent", "myapp/1.0"}], "BODY")
-        |> IO.iodata_to_binary()
-
-      assert request ==
+      assert encode_request("GET", "/", "example.com", [{"user-agent", "myapp/1.0"}], "BODY") ==
                request_string("""
                GET / HTTP/1.1
                host: example.com
@@ -68,11 +52,7 @@ defmodule Mint.HTTP1.RequestTest do
     end
 
     test "override with non-lowercase key" do
-      request =
-        Request.encode("GET", "/", "example.com", [{"User-Agent", "myapp/1.0"}], "BODY")
-        |> IO.iodata_to_binary()
-
-      assert request ==
+      assert encode_request("GET", "/", "example.com", [{"User-Agent", "myapp/1.0"}], "BODY") ==
                request_string("""
                GET / HTTP/1.1
                host: example.com
@@ -85,25 +65,28 @@ defmodule Mint.HTTP1.RequestTest do
 
     test "validates request target" do
       for invalid_target <- ["/ /", "/%foo", "/foo%x"] do
-        assert catch_throw(Request.encode("GET", invalid_target, "example.com", [], nil)) ==
-                 {:mint, {:invalid_request_target, invalid_target}}
+        assert Request.encode("GET", invalid_target, "example.com", [], nil) ==
+                 {:error, {:invalid_request_target, invalid_target}}
       end
 
-      request =
-        Request.encode("GET", "/foo%20bar", "example.com", [], nil) |> IO.iodata_to_binary()
-
+      request = encode_request("GET", "/foo%20bar", "example.com", [], nil)
       assert String.starts_with?(request, request_string("GET /foo%20bar HTTP/1.1"))
     end
 
     test "invalid header name" do
-      assert catch_throw(Request.encode("GET", "/", "example.com", [{"f oo", "bar"}], nil)) ==
-               {:mint, {:invalid_header_name, "f oo"}}
+      assert Request.encode("GET", "/", "example.com", [{"f oo", "bar"}], nil) ==
+               {:error, {:invalid_header_name, "f oo"}}
     end
 
     test "invalid header value" do
-      assert catch_throw(Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil)) ==
-               {:mint, {:invalid_header_value, "foo", "bar\r\n"}}
+      assert Request.encode("GET", "/", "example.com", [{"foo", "bar\r\n"}], nil) ==
+               {:error, {:invalid_header_value, "foo", "bar\r\n"}}
     end
+  end
+
+  defp encode_request(method, target, host, headers, body) do
+    assert {:ok, iodata} = Request.encode(method, target, host, headers, body)
+    IO.iodata_to_binary(iodata)
   end
 
   defp request_string(string) do
