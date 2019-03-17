@@ -83,9 +83,16 @@ defmodule Mint.HTTP1.RequestTest do
                """)
     end
 
-    test "invalid request target" do
-      assert catch_throw(Request.encode("GET", "/ /", "example.com", [], nil)) ==
-               {:mint, {:invalid_request_target, "/ /"}}
+    test "validates request target" do
+      for invalid_target <- ["/ /", "/%foo", "/foo%x"] do
+        assert catch_throw(Request.encode("GET", invalid_target, "example.com", [], nil)) ==
+                 {:mint, {:invalid_request_target, invalid_target}}
+      end
+
+      request =
+        Request.encode("GET", "/foo%20bar", "example.com", [], nil) |> IO.iodata_to_binary()
+
+      assert String.starts_with?(request, request_string("GET /foo%20bar HTTP/1.1"))
     end
 
     test "invalid header name" do
