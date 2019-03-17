@@ -58,14 +58,25 @@ defmodule Mint.HTTP1.Request do
   defp encode_body(:stream), do: ""
   defp encode_body(body), do: body
 
-  defp validate_target!(target) do
-    _ =
-      for <<char <- target>> do
-        unless URI.char_unescaped?(char) do
-          throw({:mint, {:invalid_request_target, target}})
-        end
-      end
+  # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
+  @hex_characters '0123456789abcdefABCDEF'
 
+  defp validate_target!(target), do: validate_target!(target, target)
+
+  defp validate_target!(<<?%, char1, char2, rest::binary>>, original_target)
+       when char1 in @hex_characters and char2 in @hex_characters do
+    validate_target!(rest, original_target)
+  end
+
+  defp validate_target!(<<char, rest::binary>>, original_target) do
+    if URI.char_unescaped?(char) do
+      validate_target!(rest, original_target)
+    else
+      throw({:mint, {:invalid_request_target, original_target}})
+    end
+  end
+
+  defp validate_target!(<<>>, _original_target) do
     :ok
   end
 
