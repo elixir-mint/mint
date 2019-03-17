@@ -722,6 +722,32 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    test "window size of the connection and single requests can be read with get_window_size/2",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      initial_conn_window_size = HTTP2.get_window_size(conn, :connection)
+      initial_request_window_size = HTTP2.get_window_size(conn, {:request, ref})
+
+      assert is_integer(initial_conn_window_size) and initial_conn_window_size > 0
+      assert is_integer(initial_request_window_size) and initial_request_window_size > 0
+
+      body_chunk = "hello"
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, body_chunk)
+
+      new_conn_window_size = HTTP2.get_window_size(conn, :connection)
+      new_request_window_size = HTTP2.get_window_size(conn, {:request, ref})
+
+      assert new_conn_window_size == initial_conn_window_size - byte_size(body_chunk)
+      assert new_request_window_size == initial_request_window_size - byte_size(body_chunk)
+    end
+
+    test "get_window_size/2 raises if the request is not found", %{conn: conn} do
+      assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
+        HTTP2.get_window_size(conn, {:request, make_ref()})
+      end
+    end
   end
 
   describe "settings" do
