@@ -579,7 +579,7 @@ defmodule Mint.HTTP2 do
   @doc """
   Returns the window size of the connection or of a single request.
 
-  This function is HTTP/2 specific. This function returns the window size of
+  This function is HTTP/2 specific. It returns the window size of
   either the connection if `connection_or_request` is `:connection` or of a single
   request if `connection_or_request` is `{:request, request_ref}`.
 
