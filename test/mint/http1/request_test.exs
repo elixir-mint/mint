@@ -84,9 +84,7 @@ defmodule Mint.HTTP1.RequestTest do
     end
 
     test "validates request target" do
-      invalid_targets = ["/ /", "/%foo", "/foo%x"]
-
-      for invalid_target <- invalid_targets do
+      for invalid_target <- ["/ /", "/%foo", "/foo%x"] do
         assert catch_throw(Request.encode("GET", invalid_target, "example.com", [], nil)) ==
                  {:mint, {:invalid_request_target, invalid_target}}
       end
