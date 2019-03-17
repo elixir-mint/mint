@@ -577,6 +577,75 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
+  Returns the window size of the connection or of a single request.
+
+  This function is HTTP/2 specific. It returns the window size of
+  either the connection if `connection_or_request` is `:connection` or of a single
+  request if `connection_or_request` is `{:request, request_ref}`.
+
+  Use this function to check the window size of the connection before sending a
+  full request. Also use this function to check the window size of both the
+  connection and of a request if you want to stream body chunks on that request.
+
+  For more information on flow control and window sizes in HTTP/2, see the section
+  below.
+
+  ## HTTP/2 flow control
+
+  In HTTP/2, flow control is implemented through a
+  window size. When the client sends data to the server, the window size is decreased
+  and the server needs to "refill" it on the client side. You don't need to take care of
+  the refilling of the client window as it happens behind the scenes in `stream/2`.
+
+  A window size is kept for the entire connection and all requests affect this window
+  size. A window size is also kept per request.
+
+  The only thing that affects the window size is the body of a request, regardless of
+  if it's a full request sent with `request/5` or body chunks sent through
+  `stream_request_body/3`. That means that if we make a request with a body that is
+  five bytes long, like `"hello"`, the window size of the connection and the window size
+  of that particular request will decrease by five bytes.
+
+  If we use all the window size before the server refills it, functions like
+  `request/5` will return an error.
+
+  ## Examples
+
+  On the connection:
+
+      HTTP.get_window_size(conn, :connection)
+      #=> 65_536
+
+  On a single streamed request:
+
+      {:ok, conn, request_ref} = HTTP2.request(conn, "GET", "/", [], :stream)
+      HTTP.get_window_size(conn, {:request_ref, request_ref})
+      #=> 65_536
+
+      {:ok, conn} = HTTP2.stream_request_body(conn, request_ref, "hello")
+      HTTP.get_window_size(conn, {:request_ref, request_ref})
+      #=> 65_531
+
+  """
+  @spec get_window_size(t(), :connection | {:request, Types.request_ref()}) :: non_neg_integer()
+  def get_window_size(conn, connection_or_request)
+
+  def get_window_size(%Mint.HTTP2{} = conn, :connection) do
+    conn.window_size
+  end
+
+  def get_window_size(%Mint.HTTP2{} = conn, {:request, request_ref}) do
+    case Map.fetch(conn.ref_to_stream_id, request_ref) do
+      {:ok, stream_id} ->
+        conn.streams[stream_id].window_size
+
+      :error ->
+        raise ArgumentError,
+              "request with request reference #{inspect(request_ref)} was not found"
+    end
+  end
+
+  @doc """
   See `Mint.HTTP.stream/2`.
   """
   @impl true
