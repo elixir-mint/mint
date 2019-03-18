@@ -279,6 +279,21 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
+  See `Mint.HTTP.open_request_count/1`.
+
+  In HTTP/1, the number of open requests is the number of pipelined requests.
+  """
+  @impl true
+  @spec open_request_count(t()) :: non_neg_integer()
+  def open_request_count(%__MODULE__{} = conn) do
+    if is_nil(conn.request) do
+      0
+    else
+      1 + :queue.len(conn.requests)
+    end
+  end
+
+  @doc """
   See `Mint.HTTP.put_private/3`.
   """
   @impl true

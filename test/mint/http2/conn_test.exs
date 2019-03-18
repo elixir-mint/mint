@@ -846,6 +846,31 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "open_request_count/1" do
+    test "returns the number of client-initiated open streams", %{conn: conn} do
+      assert HTTP2.open_request_count(conn) == 0
+
+      {conn, _ref} = open_request(conn)
+      assert HTTP2.open_request_count(conn) == 1
+
+      {conn, _ref} = open_request(conn)
+      assert HTTP2.open_request_count(conn) == 2
+
+      assert_recv_frames [headers(stream_id: stream_id1), headers()]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id1,
+                   hbf: server_encode_headers([{":status", "200"}]),
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert HTTP2.open_request_count(conn) == 1
+    end
+  end
+
   describe "ping" do
     test "if we send a PING we then get a :pong reply", %{conn: conn} do
       assert {:ok, conn, ref} = HTTP2.ping(conn)

@@ -109,6 +109,12 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
+  @spec open_request_count(t()) :: non_neg_integer()
+  def open_request_count(%UnsafeProxy{module: module, state: state} = _conn) do
+    module.open_request_count(state)
+  end
+
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(%UnsafeProxy{module: module, state: state} = conn, key, value) do
     state = module.put_private(state, key, value)
