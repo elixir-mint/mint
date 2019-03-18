@@ -16,7 +16,7 @@ defmodule Mint.HTTP1 do
   import Mint.Core.Util
 
   alias Mint.HTTP1.{Parse, Request, Response}
-  alias Mint.{TransportError, Types}
+  alias Mint.{HTTPError, TransportError, Types}
 
   require Logger
 
@@ -156,31 +156,31 @@ defmodule Mint.HTTP1 do
 
   def request(%__MODULE__{} = conn, method, path, headers, body) do
     %__MODULE__{host: host, transport: transport, socket: socket} = conn
-    iodata = Request.encode(method, path, host, headers, body || "")
 
-    case transport.send(socket, iodata) do
-      :ok ->
-        request_ref = make_ref()
-        state = if body == :stream, do: :stream_request, else: :status
-        request = new_request(request_ref, state, method)
+    with {:ok, iodata} <- Request.encode(method, path, host, headers, body),
+         :ok <- transport.send(socket, iodata) do
+      request_ref = make_ref()
+      state = if body == :stream, do: :stream_request, else: :status
+      request = new_request(request_ref, state, method)
 
-        if conn.request == nil do
-          conn = %__MODULE__{conn | request: request}
-          {:ok, conn, request_ref}
-        else
-          requests = :queue.in(request, conn.requests)
-          conn = %__MODULE__{conn | requests: requests}
-          {:ok, conn, request_ref}
-        end
-
+      if conn.request == nil do
+        conn = %__MODULE__{conn | request: request}
+        {:ok, conn, request_ref}
+      else
+        requests = :queue.in(request, conn.requests)
+        conn = %__MODULE__{conn | requests: requests}
+        {:ok, conn, request_ref}
+      end
+    else
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
 
-      {:error, error} ->
+      {:error, %HTTPError{} = error} ->
         {:error, conn, error}
+
+      {:error, reason} ->
+        {:error, conn, wrap_error(reason)}
     end
-  catch
-    :throw, {:mint, reason} -> {:error, conn, wrap_error(reason)}
   end
 
   @doc """
@@ -623,7 +623,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp wrap_error(reason) do
-    %Mint.HTTPError{reason: reason, module: __MODULE__}
+    %HTTPError{reason: reason, module: __MODULE__}
   end
 
   @doc false
