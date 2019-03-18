@@ -23,7 +23,7 @@ defmodule Mint.HTTP1.ParseTest do
     assert connection_header("keep-alive, Upgrade") == {:ok, ["keep-alive", "upgrade"]}
     assert connection_header("keep-alive,  Upgrade  ") == {:ok, ["keep-alive", "upgrade"]}
 
-    assert connection_header("\n") == {:error, :invalid_token_list}
+    assert connection_header("\n") == {:error, {:invalid_token_list, "\n"}}
     assert connection_header("") == {:error, :empty_token_list}
   end
 
@@ -33,14 +33,14 @@ defmodule Mint.HTTP1.ParseTest do
     assert transfer_encoding_header("gzip, Chunked") == {:ok, ["gzip", "chunked"]}
     assert transfer_encoding_header("gzip,   Chunked  ") == {:ok, ["gzip", "chunked"]}
 
-    assert transfer_encoding_header("\n") == {:error, :invalid_token_list}
+    assert transfer_encoding_header("\n") == {:error, {:invalid_token_list, "\n"}}
     assert transfer_encoding_header("") == {:error, :empty_token_list}
   end
 
   describe "token_list_downcase/1" do
     property "returns an empty list if there's no token" do
       check all string <- string([?\s, ?\t, ?,]) do
-        assert token_list_downcase(string) == []
+        assert token_list_downcase(string) == {:ok, []}
       end
     end
 
@@ -48,19 +48,19 @@ defmodule Mint.HTTP1.ParseTest do
       check all tokens <- list_of(string(:alphanumeric, min_length: 1)),
                 whitespace <- string([?\s, ?\t]),
                 string = Enum.join(tokens, whitespace <> "," <> whitespace) do
-        assert token_list_downcase(string) == Enum.map(tokens, &String.downcase/1)
+        assert token_list_downcase(string) == {:ok, Enum.map(tokens, &String.downcase/1)}
       end
     end
 
     test "parses practical examples" do
-      assert token_list_downcase("foo") == ["foo"]
-      assert token_list_downcase("foo, bar") == ["foo", "bar"]
-      assert token_list_downcase("FOO,bAr") == ["foo", "bar"]
-      assert token_list_downcase("   ,  ,,,  foo  , ,  ") == ["foo"]
+      assert token_list_downcase("foo") == {:ok, ["foo"]}
+      assert token_list_downcase("foo, bar") == {:ok, ["foo", "bar"]}
+      assert token_list_downcase("FOO,bAr") == {:ok, ["foo", "bar"]}
+      assert token_list_downcase("   ,  ,,,  foo  , ,  ") == {:ok, ["foo"]}
     end
 
     test "throws {:mint, :invalid_token_list} for invalid tokens" do
-      assert catch_throw(token_list_downcase("\n")) == {:mint, :invalid_token_list}
+      assert token_list_downcase("\n") == :error
     end
   end
 end

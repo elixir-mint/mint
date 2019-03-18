@@ -575,8 +575,7 @@ defmodule Mint.HTTP1 do
     %{conn | state: :closed}
   end
 
-  # TODO: We should probably error if both transfer-encoding and content-length
-  # is set. RFC7230 3.3.3:
+  # RFC7230 3.3.3:
   # > If a message is received with both a Transfer-Encoding and a
   # > Content-Length header field, the Transfer-Encoding overrides the
   # > Content-Length.  Such a message might indicate an attempt to
@@ -687,6 +686,11 @@ defmodule Mint.HTTP1 do
     "invalid Content-Length header: #{inspect(value)}"
   end
 
-  # TODO: :invalid_token_list
-  # TODO: :empty_token_list
+  def format_error(:empty_token_list) do
+    "header should contain a list of values, but it doesn't"
+  end
+
+  def format_error({:invalid_token_list, string}) do
+    "header contains invalid tokens: #{inspect(string)}"
+  end
 end
