@@ -3,7 +3,7 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  alias Mint.{Core.Util, Types}
+  alias Mint.Core.Util
 
   @user_agent "mint/" <> Mix.Project.config()[:version]
 
