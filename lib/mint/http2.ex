@@ -682,6 +682,24 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
+  See `Mint.HTTP.open_request_count/1`.
+
+  In HTTP/2, the number of open requests is the number of requests **opened by the client**
+  that have not yet received a `:done` response. It's important to note that only
+  requests opened by the client (with `request/5`) count towards the number of open
+  requests, as requests opened from the server with server pushes (see the "Server push"
+  section in the module documentation) are not considered open requests. We do this because
+  clients might need to know how many open requests there are because the server limits
+  the number of concurrent requests the client can open. To know how many requests the client
+  can open, see `get_server_setting/2` with the `:max_concurrent_streams` setting.
+  """
+  @impl true
+  @spec open_request_count(t()) :: non_neg_integer()
+  def open_request_count(%Mint.HTTP2{} = conn) do
+    conn.open_client_stream_count
+  end
+
+  @doc """
   See `Mint.HTTP.put_private/3`.
   """
   @impl true

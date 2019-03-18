@@ -281,4 +281,22 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn} = HTTP1.close(conn)
     refute HTTP1.open?(conn)
   end
+
+  test "open_request_count/1", %{conn: conn} do
+    assert HTTP1.open_request_count(conn) == 0
+
+    {:ok, conn, _} = HTTP1.request(conn, "GET", "/", [], nil)
+    assert HTTP1.open_request_count(conn) == 1
+
+    {:ok, conn, _} = HTTP1.request(conn, "GET", "/", [], nil)
+    assert HTTP1.open_request_count(conn) == 2
+
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn, _responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert HTTP1.open_request_count(conn) == 1
+
+    assert {:ok, conn, _responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert HTTP1.open_request_count(conn) == 0
+  end
 end

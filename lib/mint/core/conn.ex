@@ -35,6 +35,8 @@ defmodule Mint.Core.Conn do
               | {:error, conn(), reason :: term(), [Types.response()]}
               | :unknown
 
+  @callback open_request_count(conn()) :: non_neg_integer()
+
   @callback put_private(conn(), key :: atom(), value :: term()) :: conn()
 
   @callback get_private(conn(), key :: atom(), default_value :: term()) :: term()

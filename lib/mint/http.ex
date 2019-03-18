@@ -583,6 +583,25 @@ defmodule Mint.HTTP do
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 
   @doc """
+  Returns the number of open requests.
+
+  Open requests are requests that have not yet received a `:done` response.
+  This function returns the number of open requests for both HTTP/1 and HTTP/2,
+  but for HTTP/2 only client-initiated requests are considered as open requests.
+  See `Mint.HTTP2.open_request_count/1` for more information.
+
+  ## Examples
+
+      {:ok, conn, _ref} = Mint.HTTP.request(conn, "GET", "/", [])
+      Mint.HTTP.open_request_count(conn)
+      #=> 1
+
+  """
+  @impl true
+  @spec open_request_count(t()) :: non_neg_integer()
+  def open_request_count(conn), do: conn_module(conn).open_request_count(conn)
+
+  @doc """
   Assigns a new private key and value in the connection.
 
   This storage is meant to be used to associate metadata with the connection and
