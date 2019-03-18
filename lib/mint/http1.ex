@@ -522,16 +522,18 @@ defmodule Mint.HTTP1 do
     do: [{:data, request_ref, new_data} | responses]
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
-    {:ok, %{request | content_length: Parse.content_length_header(value)}}
+    with {:ok, content_length} <- Parse.content_length_header(value),
+         do: {:ok, %{request | content_length: content_length}}
   end
 
   defp store_header(%{connection: connection} = request, "connection", value) do
-    {:ok, %{request | connection: connection ++ Parse.connection_header(value)}}
+    with {:ok, connection_header} <- Parse.connection_header(value),
+         do: {:ok, %{request | connection: connection ++ connection_header}}
   end
 
   defp store_header(%{transfer_encoding: transfer_encoding} = request, "transfer-encoding", value) do
-    {:ok,
-     %{request | transfer_encoding: transfer_encoding ++ Parse.transfer_encoding_header(value)}}
+    with {:ok, transfer_encoding_header} <- Parse.transfer_encoding_header(value),
+         do: {:ok, %{request | transfer_encoding: transfer_encoding ++ transfer_encoding_header}}
   end
 
   defp store_header(_request, "content-length", _value) do
