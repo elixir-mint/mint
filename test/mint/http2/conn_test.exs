@@ -789,21 +789,21 @@ defmodule Mint.HTTP2Test do
 
     test "server can update the initial window size and affect open streams",
          %{conn: conn} do
-      {conn, _ref} = open_request(conn)
+      {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames [headers()]
 
       {:ok, %HTTP2{} = conn, []} =
         stream_frames(conn, [settings(params: [initial_window_size: 100])])
 
-      # TODO: likely not ideal to peek into the connection here.
-      assert conn.server_settings.initial_window_size == 100
+      assert HTTP2.get_server_setting(conn, :initial_window_size) == 100
+
       # This stream is half_closed_local, so there's not point in updating its window size since
       # we won't send anything on it anymore.
-      assert conn.streams[stream_id].window_size == 65535
+      assert HTTP2.get_window_size(conn, {:request, ref}) == 65535
 
-      assert_recv_frames [settings() = frame]
-      assert settings(frame, :flags) == set_flags(:settings, [:ack])
+      assert_recv_frames [settings(flags: flags)]
+      assert flags == set_flags(:settings, [:ack])
     end
   end
 
