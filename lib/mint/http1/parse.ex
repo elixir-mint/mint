@@ -38,18 +38,17 @@ defmodule Mint.HTTP1.Parse do
   end
 
   defp split_into_downcase_tokens(string) do
-    token_list_downcase(string)
-  catch
-    {:mint, error} -> {:error, error}
-  else
-    [] -> {:error, :empty_token_list}
-    list -> {:ok, list}
+    case token_list_downcase(string) do
+      {:ok, []} -> {:error, :empty_token_list}
+      {:ok, list} -> {:ok, list}
+      :error -> {:error, {:invalid_token_list, string}}
+    end
   end
 
   # Made public for testing.
   def token_list_downcase(string), do: token_list_downcase(string, [])
 
-  defp token_list_downcase(<<>>, acc), do: :lists.reverse(acc)
+  defp token_list_downcase(<<>>, acc), do: {:ok, :lists.reverse(acc)}
 
   # Skip all whitespace and commas.
   defp token_list_downcase(<<char, rest::binary>>, acc)
@@ -63,7 +62,7 @@ defmodule Mint.HTTP1.Parse do
 
   defp token_downcase(rest, token_acc, acc), do: token_list_sep_downcase(rest, [token_acc | acc])
 
-  defp token_list_sep_downcase(<<>>, acc), do: :lists.reverse(acc)
+  defp token_list_sep_downcase(<<>>, acc), do: {:ok, :lists.reverse(acc)}
 
   defp token_list_sep_downcase(<<char, rest::binary>>, acc) when is_whitespace(char),
     do: token_list_sep_downcase(rest, acc)
@@ -71,5 +70,5 @@ defmodule Mint.HTTP1.Parse do
   defp token_list_sep_downcase(<<char, rest::binary>>, acc) when is_comma(char),
     do: token_list_downcase(rest, acc)
 
-  defp token_list_sep_downcase(_rest, _acc), do: throw({:mint, :invalid_token_list})
+  defp token_list_sep_downcase(_rest, _acc), do: :error
 end
