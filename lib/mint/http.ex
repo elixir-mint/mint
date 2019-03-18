@@ -553,13 +553,13 @@ defmodule Mint.HTTP do
 
       defp receive_next_and_stream(conn) do
         receive do
-          message -> Mint.HTTP1.stream(conn, message)
+          message -> Mint.HTTP.stream(conn, message)
         end
       end
 
   Now, we can see an example of a workflow involving `stream/2`.
 
-      {:ok, conn, request_ref} = Mint.HTTP1.request(conn, "GET", "/", _headers = [])
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", _headers = [])
 
       {:ok, conn, responses} = receive_next_and_stream(conn)
       responses
