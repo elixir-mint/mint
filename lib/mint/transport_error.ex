@@ -34,7 +34,7 @@ defmodule Mint.TransportError do
 
   """
 
-  @opaque t() :: %__MODULE__{reason: term()}
+  @opaque t() :: %__MODULE__{reason: term(), formatter_module: :inet | :ssl}
 
   defexception [:reason, :formatter_module]
 
