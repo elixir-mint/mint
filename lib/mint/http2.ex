@@ -341,6 +341,15 @@ defmodule Mint.HTTP2 do
   If you want to avoid incurring in this error, you can retrieve the value of
   the maximum number of concurrent streams supported by the server through
   `get_server_setting/2` (passing in the `:max_concurrent_streams` setting name).
+
+  ## Header list size
+
+  In HTTP/2, the server can optionally specify a maximum header list size that
+  the client needs to respect when sending headers. The header list size is calculated
+  by summing the length (in bytes) of each header name plus value, plus 32 bytes for
+  each header. Note that pseudo-headers (like `:path` or `:method`) count towards
+  this size. If the size is exceeded, an error is returned. To check what the size
+  is, use `get_server_setting/2`.
   """
   @impl true
   @spec request(
