@@ -20,6 +20,9 @@ defmodule Mint.TransportError do
 
         * `:protocol_not_negotiated` - if the ALPN protocol negotiation failed.
 
+        * `{:bad_alpn_protocol, protocol}` - when the ALPN protocol is not
+          one of the supported protocols, which are `http/1.1` and `h2`.
+
         * the `:inet.posix/0` type - if there's any other error with the socket,
           such as `:econnrefused` or `:nxdomain`.
 
@@ -46,6 +49,10 @@ defmodule Mint.TransportError do
 
   defp format_reason(:protocol_not_negotiated, _formatter) do
     "ALPN protocol not negotiated"
+  end
+
+  defp format_reason({:bad_alpn_protocol, protocol}, _formatter) do
+    "bad ALPN protocol #{inspect(protocol)}, supported protocols are \"http/1.1\" and \"h2\""
   end
 
   # :inet.format_error/1 doesn't format these messages.
