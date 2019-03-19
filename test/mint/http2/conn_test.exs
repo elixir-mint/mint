@@ -210,6 +210,18 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "client errors" do
+    @tag server_settings: [max_concurrent_streams: 1]
+    test "when the client tries to open too many concurrent requests", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert_http2_error error, {:max_concurrent_streams_reached, 1}
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "headers and continuation" do
     test "server splits headers into multiple CONTINUATION frames", %{conn: conn} do
       {conn, ref} = open_request(conn)
