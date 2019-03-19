@@ -639,6 +639,28 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "flow control" do
+    test "client tries to send data that goes over the window size of a stream/connection",
+         %{conn: conn} do
+      # First we decrease the connection size by 5 bytes, so that the connection window
+      # size is smaller than the stream window size.
+      {conn, _ref} = open_request(conn, "XXXXX")
+
+      # Then we open a streaming request.
+      {conn, ref} = open_request(conn, :stream)
+
+      data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}) + 1)
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
+      assert_http2_error error, {:exceeds_stream_window_size, window_size}
+      assert is_integer(window_size) and window_size >= 0
+
+      data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, :connection) + 1)
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
+      assert_http2_error error, {:exceeds_connection_window_size, window_size}
+      assert is_integer(window_size) and window_size >= 0
+
+      assert HTTP2.open?(conn)
+    end
+
     test "server sends a WINDOW_UPDATE with too big of a size on a stream",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
