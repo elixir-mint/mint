@@ -39,7 +39,15 @@ defmodule Mint.TransportError do
 
   """
 
-  @opaque t() :: %__MODULE__{reason: term()}
+  @type t() :: %__MODULE__{
+          reason:
+            :timeout
+            | :closed
+            | :protocol_not_negotiated
+            | {:bad_alpn_protocol, String.t()}
+            | :inet.posix()
+            | :ssl.error_alert()
+        }
 
   defexception [:reason]
 
