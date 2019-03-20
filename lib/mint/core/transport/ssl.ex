@@ -365,7 +365,7 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def wrap_error(reason) do
-    %Mint.TransportError{reason: reason, formatter_module: :ssl}
+    %Mint.TransportError{reason: reason}
   end
 
   defp ssl_opts(hostname, opts) do

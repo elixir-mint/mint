@@ -26,6 +26,8 @@ defmodule Mint.TransportError do
         * the `:inet.posix/0` type - if there's any other error with the socket,
           such as `:econnrefused` or `:nxdomain`.
 
+        * the `:ssl.error_alert/0` type - if there's an SSL error.
+
   ## Message representation
 
   If you want to convert an error reason to a human-friendly message (for example
@@ -37,33 +39,53 @@ defmodule Mint.TransportError do
 
   """
 
-  @opaque t() :: %__MODULE__{reason: term(), formatter_module: :inet | :ssl}
+  reason_type =
+    quote do
+      :timeout
+      | :closed
+      | :protocol_not_negotiated
+      | {:bad_alpn_protocol, String.t()}
+      | :inet.posix()
+    end
 
-  defexception [:reason, :formatter_module]
+  reason_type =
+    if System.otp_release() >= "21" do
+      quote do: unquote(reason_type) | :ssl.error_alert()
+    else
+      reason_type
+    end
 
-  def message(%__MODULE__{reason: reason, formatter_module: formatter_module}) do
-    format_reason(reason, formatter_module)
+  @type t() :: %__MODULE__{reason: unquote(reason_type) | term()}
+
+  defexception [:reason]
+
+  def message(%__MODULE__{reason: reason}) do
+    format_reason(reason)
   end
 
   ## Our reasons.
 
-  defp format_reason(:protocol_not_negotiated, _formatter) do
+  defp format_reason(:protocol_not_negotiated) do
     "ALPN protocol not negotiated"
   end
 
-  defp format_reason({:bad_alpn_protocol, protocol}, _formatter) do
+  defp format_reason({:bad_alpn_protocol, protocol}) do
     "bad ALPN protocol #{inspect(protocol)}, supported protocols are \"http/1.1\" and \"h2\""
   end
 
-  # :inet.format_error/1 doesn't format these messages.
-  defp format_reason(:closed, _formatter), do: "socket closed"
-  defp format_reason(:timeout, _formatter), do: "timeout"
+  defp format_reason(:closed) do
+    "socket closed"
+  end
 
-  ## gen_tcp/ssl reasons.
+  defp format_reason(:timeout) do
+    "timeout"
+  end
 
-  defp format_reason(reason, formatter) do
-    case formatter.format_error(reason) do
-      'unknown POSIX error' -> inspect(reason)
+  # :ssl.format_error/1 falls back to :inet.format_error/1 when the error is not an SSL-specific
+  # error (at least since OTP 19+), so we can just use that.
+  defp format_reason(reason) do
+    case :ssl.format_error(reason) do
+      'Unexpected error:' ++ _ -> inspect(reason)
       message -> List.to_string(message)
     end
   end
