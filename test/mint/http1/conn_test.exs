@@ -242,6 +242,36 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "body with chunked transfer-encoding with incomplete chunks", %{conn: conn} do
+    # Ripe for property testing!
+    length = 128
+    fragment_length = div(length, 2)
+    string = String.duplicate("0", length)
+    prefix = Integer.to_string(length, 16)
+
+    <<fragment::bytes-size(fragment_length), rest::binary>> = string
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    initial_response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <> prefix <> "\r\n" <> fragment
+
+    completing_response = rest <> "\r\n"
+
+    assert {:ok, conn, [status, headers]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, initial_response})
+
+    assert conn.buffer == fragment
+
+    assert {:ok, conn, [body, done]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, completing_response})
+
+    assert status == {:status, ref, 200}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert body == {:data, ref, string}
+    assert done == {:done, ref}
+  end
+
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
