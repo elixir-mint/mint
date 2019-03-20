@@ -39,15 +39,23 @@ defmodule Mint.TransportError do
 
   """
 
-  @type t() :: %__MODULE__{
-          reason:
-            :timeout
-            | :closed
-            | :protocol_not_negotiated
-            | {:bad_alpn_protocol, String.t()}
-            | :inet.posix()
-            | :ssl.error_alert()
-        }
+  reason_type =
+    quote do
+      :timeout
+      | :closed
+      | :protocol_not_negotiated
+      | {:bad_alpn_protocol, String.t()}
+      | :inet.posix()
+    end
+
+  reason_type =
+    if System.otp_release() >= "21" do
+      quote do: unquote(reason_type) | :ssl.error_alert()
+    else
+      reason_type
+    end
+
+  @type t() :: %__MODULE__{reason: unquote(reason_type) | term()}
 
   defexception [:reason]
 
