@@ -22,13 +22,16 @@ defmodule Mint.HTTPError do
       * a term of type `t:Mint.HTTP2.error_reason/0`. See its documentation for
         more information.
 
-      * `:tunnel_timeout` - when you're using a tunnel proxy and the tunnel times out.
+      * `{:proxy, reason}`, which is used when an HTTP error happens when connecting
+        to a tunnel proxy. `reason` can be:
 
-      * `{:unexpected_status, status}` - when you're using a tunnel proxy and
-        the proxy returns an unexpected status `status`.
+        * `:tunnel_timeout` - when the tunnel times out.
 
-      * `{:unexpected_trailing_responses, responses}` - when you're using a tunnel proxy
-        and the proxy returns unexpected responses (`responses`).
+        * `{:unexpected_status, status}` - when the proxy returns an unexpected
+          status `status`.
+
+        * `{:unexpected_trailing_responses, responses}` - when the proxy returns
+          unexpected responses (`responses`).
 
   ## Message representation
 
@@ -41,7 +44,19 @@ defmodule Mint.HTTPError do
 
   """
 
-  @opaque t() :: %__MODULE__{reason: term(), module: module()}
+  alias Mint.{HTTP1, HTTP2}
+
+  @type proxy_reason() ::
+          {:proxy,
+           HTTP1.error_reason()
+           | HTTP2.error_reason()
+           | :tunnel_timeout
+           | {:unexpected_status, non_neg_integer()}
+           | {:unexpected_trailing_responses, list()}}
+
+  @type t() :: %__MODULE__{
+          reason: HTTP1.error_reason() | HTTP2.error_reason() | proxy_reason() | term()
+        }
 
   defexception [:reason, :module]
 
