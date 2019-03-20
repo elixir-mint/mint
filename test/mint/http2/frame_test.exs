@@ -51,9 +51,10 @@ defmodule Mint.HTTP2.FrameTest do
     test "with bad padding" do
       # "payload" is 4 bytes, the pad length is >= 5 bytes
       payload = <<5::8, "data">>
+      debug_data = "the padding length of a :data frame is bigger than the payload length"
 
       assert Frame.decode_next(encode_raw(0x00, 0x08, 3, payload)) ==
-               {:error, {:protocol_error, {:pad_length_bigger_than_payload_length, :data}}}
+               {:error, {:protocol_error, debug_data}}
     end
   end
 
@@ -248,7 +249,7 @@ defmodule Mint.HTTP2.FrameTest do
 
     test "invalid window size increment" do
       assert Frame.decode_next(encode_raw(0x08, 0x00, 0, <<0::1, 0::31>>)) ==
-               {:error, {:protocol_error, :bad_window_size_increment}}
+               {:error, {:protocol_error, "bad WINDOW_SIZE increment"}}
     end
 
     test "with bad length" do

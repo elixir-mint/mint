@@ -216,7 +216,7 @@ defmodule Mint.HTTP2Test do
       {conn, _ref} = open_request(conn)
 
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
-      assert_http2_error error, {:max_concurrent_streams_reached, 1}
+      assert_http2_error error, :too_many_concurrent_requests
 
       assert HTTP2.open?(conn)
     end
@@ -350,7 +350,7 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [{:error, ^ref, error}] = responses
-      assert_http2_error error, {:protocol_error, :missing_status_header}
+      assert_http2_error error, :missing_status_header
 
       assert_recv_frames [rst_stream(error_code: :protocol_error)]
 
@@ -662,12 +662,12 @@ defmodule Mint.HTTP2Test do
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}) + 1)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
-      assert_http2_error error, {:exceeds_stream_window_size, window_size}
+      assert_http2_error error, {:exceeds_window_size, :request, window_size}
       assert is_integer(window_size) and window_size >= 0
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, :connection) + 1)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
-      assert_http2_error error, {:exceeds_connection_window_size, window_size}
+      assert_http2_error error, {:exceeds_window_size, :connection, window_size}
       assert is_integer(window_size) and window_size >= 0
 
       assert HTTP2.open?(conn)
@@ -688,7 +688,8 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [{:error, ^ref, error}] = responses
-      assert_http2_error error, :flow_control_error
+      assert_http2_error error, {:flow_control_error, debug_data}
+      assert debug_data =~ "window size too big"
 
       assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :flow_control_error)]
 
