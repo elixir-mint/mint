@@ -253,6 +253,56 @@ defmodule Mint.HTTP2 do
   """
   @type settings() :: [setting()]
 
+  @typedoc """
+  An HTTP/2-specific error reason.
+
+  The values can be:
+
+    * `:too_many_concurrent_requests` - when the maximum number of concurrent requests
+      allowed by the server is reached. To find out what this limit is, use `get_setting/2`
+      with the `:max_concurrent_streams` setting name.
+
+    * `{:max_header_list_size_exceeded, size, max_size}` - when the maximum size of
+      the header list is reached. `size` is the actual value of the header list size,
+      `max_size` is the maximum value allowed. See `get_setting/2` to retrieve the
+      value of the max size.
+
+    * `{:exceeds_window_size, what, window_size}` - when the data you're trying to send
+      exceeds the window size of the connection (if `what` is `:connection`) or of a request
+      (if `what` is `:request`). `window_size` is the allowed window size. See
+      `get_window_size/2`.
+
+    * `{:stream_not_found, stream_id}` - when the given request is not found.
+
+    * `:unknown_request_to_stream` - when you're trying to stream data on an unknown
+      request.
+
+    * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
+      on a request that is not open for streaming.
+
+    * `{:rst_stream, :protocol_error}` - when there's a HTTP/2 protocol error on the
+      given request.
+
+    * `{:rst_stream, :cancel}` - when the given request is canceled by the server.
+
+    * `{:goaway, error, debug_data}` - when the server sends a GOAWAY and closes the
+      connection. `error` is the error reason. `debug_data` is additional debug data.
+
+    * `{:frame_size_error, frame}` - when there's an error with the size of a frame.
+      `frame` is the frame type, such as `:settings` or `:window_update`.
+
+    * `{:protocol_error, debug_data}` - when there's a protocol error.
+      `debug_data` is a string that explains the nature of the error.
+
+    * `{:compression_error, debug_data}` - when there's a header compression error.
+      `debug_data` is a string that explains the nature of the error.
+
+    * `{:flow_control_error, debug_data}` - when there's a flow control error.
+      `debug_data` is a string that explains the nature of the error.
+
+  """
+  @type error_reason() :: term()
+
   @opaque t() :: %Mint.HTTP2{}
 
   ## Public interface
@@ -336,8 +386,7 @@ defmodule Mint.HTTP2 do
   In HTTP/2, opening a request means opening a new HTTP/2 stream (see the
   module documentation). This means that a request could fail because the
   maximum number of concurrent streams allowed by the server has been reached.
-  In that case, the error reason `{:max_concurrent_streams_reached, value}` is
-  returned where `value` is the maximum number of concurrent streams possible.
+  In that case, the error reason `:too_many_concurrent_requests` is returned.
   If you want to avoid incurring in this error, you can retrieve the value of
   the maximum number of concurrent streams supported by the server through
   `get_server_setting/2` (passing in the `:max_concurrent_streams` setting name).
@@ -800,7 +849,7 @@ defmodule Mint.HTTP2 do
       if protocol == "h2" do
         {:ok, socket}
       else
-        {:error, wrap_error({:bad_alpn_protocol, protocol})}
+        {:error, transport.wrap_error({:bad_alpn_protocol, protocol})}
       end
     end
   end
@@ -832,8 +881,7 @@ defmodule Mint.HTTP2 do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_client_stream_count >= max_concurrent_streams do
-      error = wrap_error({:max_concurrent_streams_reached, max_concurrent_streams})
-      throw({:mint, conn, error})
+      throw({:mint, conn, wrap_error(:too_many_concurrent_requests)})
     end
 
     stream = %{
@@ -936,10 +984,10 @@ defmodule Mint.HTTP2 do
 
     cond do
       data_size >= stream.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_stream_window_size, stream.window_size})})
+        throw({:mint, conn, wrap_error({:exceeds_window_size, :request, stream.window_size})})
 
       data_size >= conn.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_connection_window_size, conn.window_size})})
+        throw({:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.window_size})})
 
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
@@ -1244,7 +1292,7 @@ defmodule Mint.HTTP2 do
       # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
       {conn, _headers} when not is_nil(stream) ->
         conn = close_stream!(conn, stream.id, :protocol_error)
-        error = wrap_error({:protocol_error, :missing_status_header})
+        error = wrap_error(:missing_status_header)
         responses = [{:error, stream.ref, error} | responses]
         {conn, responses}
 
@@ -1542,7 +1590,8 @@ defmodule Mint.HTTP2 do
 
     if new_window_size > @max_window_size do
       conn = close_stream!(conn, stream_id, :flow_control_error)
-      {conn, [{:error, stream.ref, wrap_error(:flow_control_error)} | responses]}
+      error = wrap_error({:flow_control_error, "window size too big"})
+      {conn, [{:error, stream.ref, error} | responses]}
     else
       conn = put_in(conn.streams[stream_id].window_size, new_window_size)
       {conn, responses}
@@ -1654,9 +1703,10 @@ defmodule Mint.HTTP2 do
   @doc false
   def format_error(reason)
 
-  def format_error({:max_concurrent_streams_reached, max_concurrent_streams}) do
-    "the number of max concurrent HTTP/2 requests supported by the server (which is " <>
-      "#{max_concurrent_streams}) has been reached"
+  def format_error(:too_many_concurrent_requests) do
+    "the number of max concurrent HTTP/2 requests supported by the server has been reached. " <>
+      "Use Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name " <>
+      "to find out the maximum number of concurrent requests supported by the server."
   end
 
   def format_error({:max_header_list_size_exceeded, size, max_size}) do
@@ -1665,14 +1715,16 @@ defmodule Mint.HTTP2 do
       "by summing up the size in bytes of each header name, value, plus 32 for each header."
   end
 
-  def format_error({:exceeds_stream_window_size, window_size}) do
-    "the given data exceeds the request window size, which is #{window_size}. " <>
-      "The server will refill the window size of this request when ready."
-  end
+  def format_error({:exceeds_window_size, what, window_size}) do
+    what =
+      case what do
+        :request -> "request"
+        :connection -> "connection"
+      end
 
-  def format_error({:exceeds_connection_window_size, window_size}) do
-    "the given data exceeds the window size of the connection, which is #{window_size}. " <>
-      "The server will refill the window size of the connection when ready."
+    "the given data exceeds the #{what} window size, which is #{window_size}. " <>
+      "The server will refill the window size of the #{what} when ready. This will be " <>
+      "handled transparently by stream/2."
   end
 
   def format_error({:stream_not_found, stream_id}) do
@@ -1683,15 +1735,13 @@ defmodule Mint.HTTP2 do
     "can't stream chunk of data because the request is unknown"
   end
 
-  def format_error(:payload_too_big) do
-    "frame payload was too big. This is a server encoding error."
-  end
-
   def format_error(:request_is_not_streaming) do
     "can't send more data on this request since it's not streaming"
   end
 
-  # Stream-level errors.
+  def format_error(:missing_status_header) do
+    "the :status pseudo-header (which is required in HTTP/2) is missing from the response"
+  end
 
   def format_error({:rst_stream, :protocol_error}) do
     "protocol error on a request"
@@ -1701,39 +1751,16 @@ defmodule Mint.HTTP2 do
     "request canceled"
   end
 
-  def format_error(:flow_control_error) do
-    "flow control error"
-  end
-
   def format_error({:goaway, error, debug_data}) do
     "GOAWAY error #{inspect(error)}: " <> debug_data
   end
 
   def format_error({:frame_size_error, frame}) do
-    humanized_frame = frame |> Atom.to_string() |> String.upcase()
-    "frame size error for #{humanized_frame} frame"
+    "frame size error for #{inspect(frame)} frame"
   end
 
-  def format_error({:protocol_error, reason}) do
-    message =
-      case reason do
-        :bad_window_size_increment ->
-          "bad WINDOW_SIZE increment"
-
-        :pad_length_bigger_than_payload_length ->
-          "the padding length is bigger than the payload length"
-
-        :invalid_huffman_encoding ->
-          "invalid Huffman encoding"
-
-        :missing_status_header ->
-          "missing :status header"
-
-        debug_data when is_binary(debug_data) ->
-          debug_data
-      end
-
-    "protocol error: " <> message
+  def format_error({:protocol_error, debug_data}) do
+    "protocol error: " <> debug_data
   end
 
   def format_error({:compression_error, debug_data}) do
@@ -1741,24 +1768,6 @@ defmodule Mint.HTTP2 do
   end
 
   def format_error({:flow_control_error, debug_data}) do
-    "flow control error error: " <> debug_data
-  end
-
-  def format_error({:bad_alpn_protocol, protocol}) do
-    "bad ALPN protocol: #{inspect(protocol)}. Supported protocols are \"http/1.1\" and \"h2\"."
-  end
-
-  ## HPACK
-
-  def format_error({:index_not_found, index}) do
-    "HPACK index not found: #{inspect(index)}"
-  end
-
-  def format_error(:bad_integer_encoding) do
-    "bad HPACK integer encoding"
-  end
-
-  def format_error(:bad_binary_encoding) do
-    "bad HPACK binary encoding"
+    "flow control error: " <> debug_data
   end
 end

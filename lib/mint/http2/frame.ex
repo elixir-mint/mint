@@ -77,7 +77,7 @@ defmodule Mint.HTTP2.Frame do
   @spec decode_next(binary()) :: {:ok, tuple(), binary()} | :more | {:error, reason}
         when reason:
                {:frame_size_error, atom()}
-               | {:protocol_error, term()}
+               | {:protocol_error, binary()}
                | :payload_too_big
   def decode_next(bin, max_frame_size \\ 16_384) when is_binary(bin) do
     case decode_next_raw(bin) do
@@ -231,7 +231,7 @@ defmodule Mint.HTTP2.Frame do
   end
 
   defp decode_window_update(_flags, _stream_id, <<_reserved::1, 0::31>>) do
-    throw({:mint, {:protocol_error, :bad_window_size_increment}})
+    throw({:mint, {:protocol_error, "bad WINDOW_SIZE increment"}})
   end
 
   defp decode_window_update(flags, stream_id, <<_reserved::1, window_size_increment::31>>) do
@@ -250,7 +250,10 @@ defmodule Mint.HTTP2.Frame do
   defp decode_padding(frame, flags, <<pad_length, rest::binary>> = payload)
        when is_flag_set(flags, unquote(@flags[:data][:padded])) do
     if pad_length >= byte_size(payload) do
-      throw({:mint, {:protocol_error, {:pad_length_bigger_than_payload_length, frame}}})
+      debug_data =
+        "the padding length of a #{inspect(frame)} frame is bigger than the payload length"
+
+      throw({:mint, {:protocol_error, debug_data}})
     else
       # 1 byte is for the space taken by pad_length
       data_length = byte_size(payload) - pad_length - 1

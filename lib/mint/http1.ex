@@ -24,6 +24,51 @@ defmodule Mint.HTTP1 do
 
   @opaque t() :: %__MODULE__{}
 
+  @typedoc """
+  An HTTP/1-specific error reason.
+
+  The values can be:
+
+      * `:request_body_is_streaming` - when you call `request/5` to send a new
+        request but another request is already streaming.
+
+      * `{:unexpected_data, data}` - when unexpected data is received from the server.
+
+      * `:invalid_status_line` - when the HTTP/1 status line is invalid.
+
+      * `{:invalid_request_target, target}` - when the request target is invalid.
+
+      * `:invalid_header` - when headers can't be parsed correctly.
+
+      * `{:invalid_header_name, name}` - when a header name is invalid.
+
+      * `{:invalid_header_value, name, value}` - when a header value is invalid. `name`
+        is the name of the header and `value` is the invalid value.
+
+      * `:invalid_chunk_size` - when the chunk size is invalid.
+
+      * `:missing_crlf_after_chunk` - when the CRLF after a chunk is missing.
+
+      * `:invalid_trailer_header` - when trailer headers can't be parsed.
+
+      * `:more_than_one_content_length_header` - when more than one `content-length`
+        headers are in the response.
+
+      * `:transfer_encoding_and_content_length` - when both the `content-length` as well
+        as the `transfer-encoding` headers are in the response.
+
+      * `{:invalid_content_length_header, value}` - when the value of the `content-length`
+        header is invalid, that is, is not an non-negative integer.
+
+      * `:empty_token_list` - when a header that is supposed to contain a list of tokens
+        (such as the `connection` header) doesn't contain any.
+
+      * `{:invalid_token_list, string}` - when a header that is supposed to contain a list
+        of tokens (such as the `connection` header) contains a malformed list of tokens.
+
+  """
+  @type error_reason() :: term()
+
   defstruct [
     :host,
     :request,
@@ -644,10 +689,6 @@ defmodule Mint.HTTP1 do
 
   @doc false
   def format_error(reason)
-
-  def format_error(:closed) do
-    "the connection was closed"
-  end
 
   def format_error(:request_body_is_streaming) do
     "a request body is currently streaming, so no new requests can be issued"

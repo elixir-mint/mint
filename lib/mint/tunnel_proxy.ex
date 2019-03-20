@@ -55,7 +55,7 @@ defmodule Mint.TunnelProxy do
         stream(conn, ref, timeout_deadline, msg)
     after
       timeout ->
-        {:error, conn, %HTTPError{reason: :tunnel_timeout}}
+        {:error, conn, wrap_error(:tunnel_timeout)}
     end
   end
 
