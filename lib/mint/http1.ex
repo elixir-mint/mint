@@ -36,7 +36,6 @@ defmodule Mint.HTTP1 do
 
       * `:invalid_status_line` - when the HTTP/1 status line is invalid.
 
-
       * `{:invalid_request_target, target}` - when the request target is invalid.
 
       * `:invalid_header` - when headers can't be parsed correctly.
