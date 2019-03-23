@@ -280,8 +280,8 @@ defmodule Mint.HTTP2 do
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
 
-    * `{:server_closed_request, error_code}` - when the server closes the request for some
-      reason. `error_code` is the reason why the request was closed.
+    * `{:server_closed_request, error_code}` - when the server closes the request.
+      `error_code` is the reason why the request was closed.
 
     * `{:server_closed_connection, reason, debug_data, unprocessed_request_refs}` - when
       the server closes the connection gracefully or because of an error. In HTTP/2,
