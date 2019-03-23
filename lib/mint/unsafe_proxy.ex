@@ -39,7 +39,7 @@ defmodule Mint.UnsafeProxy do
   @impl true
   @spec initiate(
           module(),
-          Mint.Core.Transport.socket(),
+          Mint.Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -140,7 +140,7 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
-  @spec get_socket(t()) :: Mint.Core.Transport.socket()
+  @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%UnsafeProxy{module: module, state: state}) do
     module.get_socket(state)
   end

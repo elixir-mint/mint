@@ -330,7 +330,7 @@ defmodule Mint.HTTP2 do
   @doc false
   @spec upgrade(
           Types.scheme(),
-          Mint.Core.Transport.socket(),
+          Mint.Types.socket(),
           Types.scheme(),
           String.t(),
           :inet.port_number(),
@@ -790,7 +790,7 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec initiate(
           Types.scheme(),
-          Mint.Core.Transport.socket(),
+          Mint.Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -834,7 +834,7 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.get_socket/1`.
   """
   @impl true
-  @spec get_socket(t()) :: Mint.Core.Transport.socket()
+  @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%Mint.HTTP2{socket: socket} = _conn) do
     socket
   end

@@ -7,7 +7,7 @@ defmodule Mint.Core.Conn do
 
   @callback initiate(
               module(),
-              Mint.Core.Transport.socket(),
+              Mint.Types.socket(),
               String.t(),
               :inet.port_number(),
               keyword()
@@ -43,5 +43,5 @@ defmodule Mint.Core.Conn do
 
   @callback delete_private(conn(), key :: atom()) :: conn()
 
-  @callback get_socket(conn()) :: Mint.Core.Transport.socket()
+  @callback get_socket(conn()) :: Mint.Types.socket()
 end
