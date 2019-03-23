@@ -280,13 +280,15 @@ defmodule Mint.HTTP2 do
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
 
-    * `{:rst_stream, :protocol_error}` - when there's a HTTP/2 protocol error on the
-      given request.
+    * `{:server_closed_request, error_code}` - when the server closes the request for some
+      reason. `error_code` is the reason why the request was closed.
 
-    * `{:rst_stream, :cancel}` - when the given request is canceled by the server.
-
-    * `{:goaway, error, debug_data}` - when the server sends a GOAWAY and closes the
-      connection. `error` is the error reason. `debug_data` is additional debug data.
+    * `{:server_closed_connection, reason, debug_data, unprocessed_request_refs}` - when
+      the server closes the connection gracefully or because of an error. In HTTP/2,
+      this corresponds to a `GOAWAY` frame. `error` is the reason why the connection
+      was closed. `debug_data` is additional debug data. `unprocessed_request_refs` is
+      a list of requests that the server did not start processing and that are thus
+      safe to retry.
 
     * `{:frame_size_error, frame}` - when there's an error with the size of a frame.
       `frame` is the frame type, such as `:settings` or `:window_update`.
@@ -1324,10 +1326,10 @@ defmodule Mint.HTTP2 do
 
   # RST_STREAM
 
-  # If we receive RST_STREAM on a closed stream, we ignore it.
   defp handle_rst_stream(conn, frame, responses) do
     rst_stream(stream_id: stream_id, error_code: error_code) = frame
 
+    # If we receive RST_STREAM on a closed stream, we ignore it.
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
         # If we receive RST_STREAM then the stream is definitely closed.
@@ -1335,9 +1337,12 @@ defmodule Mint.HTTP2 do
         # it, so that if we get things like DATA on that stream we error out.
         conn = delete_stream(conn, stream)
 
-        # TODO: is this an error?
-        error = wrap_error({:rst_stream, error_code})
-        {conn, [{:error, stream.ref, error} | responses]}
+        if error_code == :no_error do
+          {conn, [{:done, stream.ref} | responses]}
+        else
+          error = wrap_error({:server_closed_request, error_code})
+          {conn, [{:error, stream.ref, error} | responses]}
+        end
 
       :error ->
         {conn, responses}
@@ -1540,7 +1545,6 @@ defmodule Mint.HTTP2 do
 
   # GOAWAY
 
-  # TODO: improve GOAWAY handling by closing the connection.
   defp handle_goaway(conn, frame, responses) do
     goaway(
       last_stream_id: last_stream_id,
@@ -1548,19 +1552,15 @@ defmodule Mint.HTTP2 do
       debug_data: debug_data
     ) = frame
 
-    unprocessed_stream_ids = Enum.filter(conn.streams, fn {id, _} -> id > last_stream_id end)
+    unprocessed_requests =
+      for {request_ref, stream_id} <- conn.ref_to_stream_id,
+          stream_id > last_stream_id,
+          do: request_ref
 
-    {conn, responses} =
-      Enum.reduce(unprocessed_stream_ids, {conn, responses}, fn {id, stream}, {conn, responses} ->
-        conn = update_in(conn.streams, &Map.delete(&1, id))
-        conn = update_in(conn.open_client_stream_count, &(&1 - 1))
-        conn = update_in(conn.ref_to_stream_id, &Map.delete(&1, stream.ref))
-        conn = put_in(conn.state, :went_away)
-        error = wrap_error({:goaway, error_code, debug_data})
-        {conn, [{:error, stream.ref, error} | responses]}
-      end)
+    conn = put_in(conn.state, :closed)
 
-    {conn, responses}
+    reason = wrap_error({:server_closed_connection, error_code, debug_data, unprocessed_requests})
+    throw({:mint, conn, reason, responses})
   end
 
   # WINDOW_UPDATE
@@ -1743,16 +1743,12 @@ defmodule Mint.HTTP2 do
     "the :status pseudo-header (which is required in HTTP/2) is missing from the response"
   end
 
-  def format_error({:rst_stream, :protocol_error}) do
-    "protocol error on a request"
+  def format_error({:server_closed_request, error_code}) do
+    "server closed request with error code #{inspect(error_code)}"
   end
 
-  def format_error({:rst_stream, :cancel}) do
-    "request canceled"
-  end
-
-  def format_error({:goaway, error, debug_data}) do
-    "GOAWAY error #{inspect(error)}: " <> debug_data
+  def format_error({:server_closed_connection, error, debug_data, _unprocessed_requests}) do
+    "server closed connection with error code #{inspect(error)} and debug data: " <> debug_data
   end
 
   def format_error({:frame_size_error, frame}) do
