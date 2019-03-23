@@ -63,7 +63,7 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [{:error, ^ref, error}] = responses
-      assert_http2_error error, {:rst_stream, :protocol_error}
+      assert_http2_error error, {:server_closed_request, :protocol_error}
 
       assert HTTP2.open?(conn)
     end
@@ -81,7 +81,7 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [{:error, ^ref, error}] = responses
-      assert_http2_error error, {:rst_stream, :cancel}
+      assert_http2_error error, {:server_closed_request, :cancel}
 
       assert HTTP2.open?(conn)
     end
@@ -173,7 +173,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(), headers(), headers()]
 
-      assert {:ok, %HTTP2{} = conn, responses} =
+      assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
                  goaway(
                    stream_id: 0,
@@ -183,20 +183,14 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert [
-               {:error, ^ref2, error2},
-               {:error, ^ref3, error3}
-             ] = responses
+      assert_http2_error error, {
+        :server_closed_connection,
+        :protocol_error,
+        "debug data",
+        unprocessed_requests
+      }
 
-      assert_http2_error error2, {:goaway, :protocol_error, "debug data"}
-      assert_http2_error error3, {:goaway, :protocol_error, "debug data"}
-
-      :ssl.close(server_get_socket())
-
-      assert_receive message
-
-      assert {:error, %HTTP2{} = conn, %TransportError{reason: :closed}, []} =
-               HTTP2.stream(conn, message)
+      assert MapSet.new(unprocessed_requests) == MapSet.new([ref2, ref3])
 
       refute HTTP2.open?(conn)
     end
@@ -1013,11 +1007,6 @@ defmodule Mint.HTTP2Test do
     {server, headers} = TestServer.decode_headers(server, hbf)
     Process.put(@pdict_key, server)
     headers
-  end
-
-  defp server_get_socket() do
-    server = Process.get(@pdict_key)
-    TestServer.get_socket(server)
   end
 
   defp open_request(conn, body \\ nil) do
