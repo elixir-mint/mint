@@ -28,7 +28,7 @@ defmodule Mint.UnsafeProxy do
         scheme: scheme,
         hostname: hostname,
         port: port,
-        module: state.__struct__,
+        module: Mint.HTTP1,
         state: state
       }
 
