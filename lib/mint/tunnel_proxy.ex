@@ -63,7 +63,7 @@ defmodule Mint.TunnelProxy do
   defp stream(conn, ref, timeout_deadline, msg) do
     case HTTP1.stream(conn, msg) do
       {:ok, conn, responses} ->
-        case handle_responses(conn, ref, timeout_deadline, responses) do
+        case handle_responses(ref, timeout_deadline, responses) do
           :done -> :ok
           :more -> receive_response(conn, ref, timeout_deadline)
           {:error, reason} -> {:error, conn, reason}
@@ -74,26 +74,26 @@ defmodule Mint.TunnelProxy do
     end
   end
 
-  defp handle_responses(conn, ref, timeout_deadline, [response | responses]) do
+  defp handle_responses(ref, timeout_deadline, [response | responses]) do
     case response do
       {:status, ^ref, status} when status in 200..299 ->
-        handle_responses(conn, ref, timeout_deadline, responses)
+        handle_responses(ref, timeout_deadline, responses)
 
       {:status, ^ref, status} ->
-        {:error, conn, wrap_error({:proxy, {:unexpected_status, status}})}
+        {:error, wrap_error({:proxy, {:unexpected_status, status}})}
 
       {:headers, ^ref, _headers} when responses == [] ->
         :done
 
       {:headers, ^ref, _headers} ->
-        {:error, conn, wrap_error({:proxy, {:unexpected_trailing_responses, responses}})}
+        {:error, wrap_error({:proxy, {:unexpected_trailing_responses, responses}})}
 
       {:error, ^ref, reason} ->
-        {:error, conn, wrap_in_proxy_error(reason)}
+        {:error, wrap_in_proxy_error(reason)}
     end
   end
 
-  defp handle_responses(_conn, _ref, _timeout_deadline, []) do
+  defp handle_responses(_ref, _timeout_deadline, []) do
     :more
   end
 
