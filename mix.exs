@@ -15,7 +15,7 @@ defmodule Mint.MixProject do
 
       # Dialyxir
       dialyzer: [
-        plt_add_apps: [:castore, :inets]
+        plt_add_apps: [:castore]
       ],
 
       # Hex
@@ -35,7 +35,7 @@ defmodule Mint.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :ssl]
+      extra_applications: [:logger, :ssl, :inets]
     ]
   end
 
