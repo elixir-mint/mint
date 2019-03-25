@@ -524,6 +524,8 @@ defmodule Mint.Core.Transport.SSL do
   @doc false
   def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
 
+  @dialyzer {:no_match, get_valid_suites: 2}
+
   for {kex, cipher, mac} <- @blacklisted_ciphers do
     defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid) do
       get_valid_suites(rest, valid)

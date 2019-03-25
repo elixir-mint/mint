@@ -13,6 +13,12 @@ defmodule Mint.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
 
+      # Dialyxir
+      dialyzer: [
+        plt_add_apps: [:castore, :inets, :public_key, :ssl],
+        plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
+      ],
+
       # Hex
       package: package(),
       description: "Small and composable HTTP client.",
@@ -50,7 +56,8 @@ defmodule Mint.MixProject do
       {:castore, "~> 0.1.0", optional: true},
       {:ex_doc, "~> 0.19.3", only: :dev},
       {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test},
-      {:stream_data, "~> 0.4.0", only: :test}
+      {:stream_data, "~> 0.4.0", only: :test},
+      {:dialyxir, "~> 1.0.0-rc.4", only: [:dev, :test], runtime: false}
     ]
   end
 end
