@@ -20,7 +20,7 @@ jobs:
         - docker-compose up --detach
         - mix test --trace --include proxy
 
-    - otp_release: '20.2'
+    - otp_release: '21.2'
       elixir: '1.8'
 
     - otp_release: '20.3.1'
