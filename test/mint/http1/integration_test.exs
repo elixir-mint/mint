@@ -42,7 +42,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl with missing CA cacertfile - httpbin.org" do
-    assert {:error, %TransportError{reason: {:tls_alert, 'unknown ca'}}} =
+    assert {:error, %TransportError{reason: reason}} =
              HTTP1.connect(
                :https,
                "httpbin.org",
@@ -53,16 +53,28 @@ defmodule Mint.HTTP1.IntegrationTest do
                  reuse_sessions: false
                ]
              )
+
+    # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+    assert reason in [
+             {:tls_alert, 'unknown ca'},
+             {:tls_alert, {:unknown_ca, 'received CLIENT ALERT: Fatal - Unknown CA'}}
+           ]
   end
 
   test "ssl with missing CA cacerts - httpbin.org" do
-    assert {:error, %TransportError{reason: {:tls_alert, 'unknown ca'}}} =
+    assert {:error, %TransportError{reason: reason}} =
              HTTP1.connect(
                :https,
                "httpbin.org",
                443,
                transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
              )
+
+    # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+    assert reason in [
+             {:tls_alert, 'unknown ca'},
+             {:tls_alert, {:unknown_ca, 'received CLIENT ALERT: Fatal - Unknown CA'}}
+           ]
   end
 
   test "keep alive - httpbin.org" do
@@ -170,10 +182,16 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl, bad certificate - badssl.com" do
-    assert {:error, %TransportError{reason: {:tls_alert, 'unknown ca'}}} =
+    assert {:error, %TransportError{reason: reason}} =
              HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
                transport_opts: [log_alert: false, reuse_sessions: false]
              )
+
+    # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+    assert reason in [
+             {:tls_alert, 'unknown ca'},
+             {:tls_alert, {:unknown_ca, 'received CLIENT ALERT: Fatal - Unknown CA'}}
+           ]
 
     assert {:ok, _conn} =
              HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
@@ -182,10 +200,18 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   test "ssl, bad hostname - badssl.com" do
-    assert {:error, %TransportError{reason: {:tls_alert, 'handshake failure'}}} =
+    assert {:error, %TransportError{reason: reason}} =
              HTTP1.connect(:https, "wrong.host.badssl.com", 443,
                transport_opts: [log_alert: false, reuse_sessions: false]
              )
+
+    # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+    assert reason in [
+             {:tls_alert, 'handshake failure'},
+             {:tls_alert,
+              {:handshake_failure,
+               'received CLIENT ALERT: Fatal - Handshake Failure - {bad_cert,hostname_check_failed}'}}
+           ]
 
     assert {:ok, _conn} =
              HTTP1.connect(:https, "wrong.host.badssl.com", 443,
