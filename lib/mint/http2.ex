@@ -430,7 +430,17 @@ defmodule Mint.HTTP2 do
         ) ::
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
-  def request(%Mint.HTTP2{} = conn, method, path, headers, body \\ nil)
+  def request(conn, method, path, headers, body \\ nil)
+
+  def request(%Mint.HTTP2{state: :closed}, _method, _path, _headers, _body) do
+    {:error, conn, wrap_error(:closed)}
+  end
+
+  def request(%Mint.HTTP2{state: :closed_for_writing}, _method, _path, _headers, _body) do
+    {:error, conn, wrap_error(:closed_for_writing)}
+  end
+
+  def request(%Mint.HTTP2{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
       {":method", method},
@@ -468,6 +478,16 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), Types.error()}
+  def stream_request_body(conn, request_ref, chunk)
+
+  def stream_request_body(%Mint.HTTP2{state: :closed}, _request_ref, _chunk) do
+    {:error, conn, wrap_error(:closed)}
+  end
+
+  def stream_request_body(%Mint.HTTP2{state: :closed_for_writing}, _request_ref, _chunk) do
+    {:error, conn, wrap_error(:closed_for_writing)}
+  end
+
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
@@ -1720,6 +1740,19 @@ defmodule Mint.HTTP2 do
 
   @doc false
   def format_error(reason)
+
+  def format_error(:closed) do
+    "the connection is closed"
+  end
+
+  def format_error(:closed_for_writing) do
+    "the connection is closed for writing, which means that you cannot issue any more " <>
+      "requests on the connection but you can expect responses to still be delivered for " <>
+      "part of the requests that are in flight. If a connection is closed for writing, " <>
+      "it usually means that you got a :server_closed_request error already, which contains " <>
+      "a list of request references for requests that have not been processed and are safe " <>
+      "to retry."
+  end
 
   def format_error(:too_many_concurrent_requests) do
     "the number of max concurrent HTTP/2 requests supported by the server has been reached. " <>
