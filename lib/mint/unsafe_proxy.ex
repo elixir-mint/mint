@@ -18,7 +18,7 @@ defmodule Mint.UnsafeProxy do
   @type host_triple() :: {Types.scheme(), hostname :: String.t(), :inet.port_number()}
 
   @spec connect(host_triple(), host_triple(), opts :: keyword()) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, t()} | {:error, Types.error()}
   def connect(proxy, host, opts \\ []) do
     {proxy_scheme, proxy_hostname, proxy_port} = proxy
     {scheme, hostname, port} = host
@@ -69,7 +69,7 @@ defmodule Mint.UnsafeProxy do
           body :: iodata() | nil | :stream
         ) ::
           {:ok, t(), Types.request_ref()}
-          | {:error, t(), term()}
+          | {:error, t(), Types.error()}
   def request(
         %UnsafeProxy{module: module, state: state} = conn,
         method,
@@ -87,7 +87,7 @@ defmodule Mint.UnsafeProxy do
 
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
-          {:ok, t()} | {:error, t(), term()}
+          {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(%UnsafeProxy{module: module, state: state} = conn, ref, body) do
     case module.stream_request_body(state, ref, body) do
       {:ok, state} -> {:ok, %{conn | state: state}}
@@ -98,7 +98,7 @@ defmodule Mint.UnsafeProxy do
   @impl true
   @spec stream(t(), term()) ::
           {:ok, t(), [Types.response()]}
-          | {:error, t(), term(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
           | :unknown
   def stream(%UnsafeProxy{module: module, state: state} = conn, message) do
     case module.stream(state, message) do

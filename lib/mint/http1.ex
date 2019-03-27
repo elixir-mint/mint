@@ -86,7 +86,7 @@ defmodule Mint.HTTP1 do
   This function doesn't support proxying.
   """
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, t()} | {:error, Types.error()}
   def connect(scheme, hostname, port, opts \\ []) do
     # TODO: Also ALPN negotiate HTTP1?
 
@@ -106,7 +106,7 @@ defmodule Mint.HTTP1 do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
     # TODO: Also ALPN negotiate HTTP1?
 
@@ -126,7 +126,7 @@ defmodule Mint.HTTP1 do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, _port, _opts) do
     transport = scheme_to_transport(scheme)
 
@@ -186,7 +186,7 @@ defmodule Mint.HTTP1 do
           body :: iodata() | nil | :stream
         ) ::
           {:ok, t(), Types.request_ref()}
-          | {:error, t(), term()}
+          | {:error, t(), Types.error()}
   def request(conn, method, path, headers, body \\ nil)
 
   def request(
@@ -233,7 +233,7 @@ defmodule Mint.HTTP1 do
   """
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
-          {:ok, t()} | {:error, t(), term()}
+          {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
         %__MODULE__{request: %{state: :stream_request, ref: ref}} = conn,
         ref,
@@ -265,7 +265,7 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec stream(t(), term()) ::
           {:ok, t(), [Types.response()]}
-          | {:error, t(), term(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
           | :unknown
   def stream(conn, message)
 

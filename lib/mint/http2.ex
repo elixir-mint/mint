@@ -313,7 +313,7 @@ defmodule Mint.HTTP2 do
   Same as `Mint.HTTP.connect/4`, but forces a HTTP/2 connection.
   """
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, t()} | {:error, Types.error()}
   def connect(scheme, hostname, port, opts \\ []) do
     transport_opts =
       opts
@@ -337,7 +337,7 @@ defmodule Mint.HTTP2 do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
     transport = scheme_to_transport(new_scheme)
 
@@ -411,7 +411,7 @@ defmodule Mint.HTTP2 do
           body :: iodata() | nil | :stream
         ) ::
           {:ok, t(), Types.request_ref()}
-          | {:error, t(), term()}
+          | {:error, t(), Types.error()}
   def request(%Mint.HTTP2{} = conn, method, path, headers, body \\ nil)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
@@ -449,7 +449,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
-          {:ok, t()} | {:error, t(), term()}
+          {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
@@ -493,7 +493,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn, ref} = Mint.HTTP2.ping(conn)
 
   """
-  @spec ping(t(), <<_::8>>) :: {:ok, t(), Types.request_ref()} | {:error, t(), term()}
+  @spec ping(t(), <<_::8>>) :: {:ok, t(), Types.request_ref()} | {:error, t(), Types.error()}
   def ping(%Mint.HTTP2{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
@@ -529,7 +529,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn} = Mint.HTTP2.put_settings(conn, max_frame_size: 100)
 
   """
-  @spec put_settings(t(), settings()) :: {:ok, t()} | {:error, t(), reason :: term()}
+  @spec put_settings(t(), settings()) :: {:ok, t()} | {:error, t(), Types.error()}
   def put_settings(%Mint.HTTP2{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
@@ -622,7 +622,7 @@ defmodule Mint.HTTP2 do
     @doc since: "0.2.0"
   end
 
-  @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()} | {:error, t(), term()}
+  @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()} | {:error, t(), Types.error()}
   def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
@@ -711,7 +711,7 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec stream(t(), term()) ::
           {:ok, t(), [Types.response()]}
-          | {:error, t(), term(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
           | :unknown
   def stream(conn, message)
 
@@ -796,7 +796,7 @@ defmodule Mint.HTTP2 do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
     client_settings_params = Keyword.get(opts, :client_settings, [])

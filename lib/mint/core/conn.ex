@@ -11,7 +11,7 @@ defmodule Mint.Core.Conn do
               String.t(),
               :inet.port_number(),
               keyword()
-            ) :: {:ok, conn()} | {:error, term()}
+            ) :: {:ok, conn()} | {:error, Types.error()}
 
   @callback open?(conn()) :: boolean()
 
@@ -25,14 +25,14 @@ defmodule Mint.Core.Conn do
               body :: iodata() | nil | :stream
             ) ::
               {:ok, conn(), Types.request_ref()}
-              | {:error, conn(), reason :: term()}
+              | {:error, conn(), Types.error()}
 
   @callback stream_request_body(conn(), Types.request_ref(), body_chunk :: iodata() | :eof) ::
-              {:ok, conn()} | {:error, conn(), reason :: term()}
+              {:ok, conn()} | {:error, conn(), Types.error()}
 
   @callback stream(conn(), term()) ::
               {:ok, conn(), [Types.response()]}
-              | {:error, conn(), reason :: term(), [Types.response()]}
+              | {:error, conn(), Types.error(), [Types.response()]}
               | :unknown
 
   @callback open_request_count(conn()) :: non_neg_integer()
