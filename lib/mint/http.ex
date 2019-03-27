@@ -366,8 +366,16 @@ defmodule Mint.HTTP do
   be used to check that a connection is open before sending requests or performing
   operations that involve talking to the server.
 
-  If a connection is not open, it has become useless and you should get rid of it.
-  If you still need a connection to the server, start a new connection with `connect/4`.
+  The `type` argument can be used to tell whether the connection is closed only for reading,
+  only for writing, or for both. In HTTP/1, a closed connection is always closed for
+  both reading and writing. In HTTP/2, the connection can be closed only for writing but
+  not for reading, meaning that you cannot send any more data to the server but you can
+  still receive data from the server. See the "Closed connection" section in the module
+  documentation of `Mint.HTTP2`.
+
+  If a connection is not open for reading and writing, it has become useless and you should
+  get rid of it. If you still need a connection to the server, start a new connection
+  with `connect/4`.
 
   ## Examples
 
