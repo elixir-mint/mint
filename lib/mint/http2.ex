@@ -258,6 +258,13 @@ defmodule Mint.HTTP2 do
 
   The values can be:
 
+    * `:closed` - when you try to make a request or stream a body chunk but the connection
+      is closed.
+
+    * `:closed_for_writing` - when you try to make a request or stream a body chunk but
+      the connection is closed for writing. This means you cannot issue any more requests.
+      See the "Closed connection" section in the module documentation for more information.
+
     * `:too_many_concurrent_requests` - when the maximum number of concurrent requests
       allowed by the server is reached. To find out what this limit is, use `get_setting/2`
       with the `:max_concurrent_streams` setting name.
@@ -432,11 +439,11 @@ defmodule Mint.HTTP2 do
           | {:error, t(), Types.error()}
   def request(conn, method, path, headers, body \\ nil)
 
-  def request(%Mint.HTTP2{state: :closed}, _method, _path, _headers, _body) do
+  def request(%Mint.HTTP2{state: :closed} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def request(%Mint.HTTP2{state: :closed_for_writing}, _method, _path, _headers, _body) do
+  def request(%Mint.HTTP2{state: :closed_for_writing} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
@@ -480,11 +487,11 @@ defmodule Mint.HTTP2 do
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, request_ref, chunk)
 
-  def stream_request_body(%Mint.HTTP2{state: :closed}, _request_ref, _chunk) do
+  def stream_request_body(%Mint.HTTP2{state: :closed} = conn, _request_ref, _chunk) do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def stream_request_body(%Mint.HTTP2{state: :closed_for_writing}, _request_ref, _chunk) do
+  def stream_request_body(%Mint.HTTP2{state: :closed_for_writing} = conn, _request_ref, _chunk) do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
@@ -1596,6 +1603,11 @@ defmodule Mint.HTTP2 do
           do: request_ref
 
     conn = put_in(conn.state, :closed_for_writing)
+
+    case conn.transport.shutdown(conn.socket, :write) do
+      :ok -> :ok
+      {:error, reason} -> throw({:mint, conn, reason, responses})
+    end
 
     reason = wrap_error({:server_closed_connection, error_code, debug_data, unprocessed_requests})
     throw({:mint, conn, reason, responses})

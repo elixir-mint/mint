@@ -282,6 +282,11 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "request/5 returns an error if the connection is closed", %{conn: conn} do
+    assert {:ok, conn} = HTTP1.close(conn)
+    assert {:error, conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [])
+  end
+
   test "open_request_count/1", %{conn: conn} do
     assert HTTP1.open_request_count(conn) == 0
 

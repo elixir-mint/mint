@@ -354,6 +354,11 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @impl true
+  def shutdown(socket, how) do
+    wrap_err(:ssl.shutdown(socket, how))
+  end
+
+  @impl true
   def setopts(socket, opts) do
     wrap_err(:ssl.setopts(socket, opts))
   end

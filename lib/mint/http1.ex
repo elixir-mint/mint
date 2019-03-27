@@ -29,6 +29,9 @@ defmodule Mint.HTTP1 do
 
   The values can be:
 
+    * `:closed` - when you try to make a request or stream a body chunk but the connection
+      is closed.
+
     * `:request_body_is_streaming` - when you call `request/5` to send a new
       request but another request is already streaming.
 
@@ -170,7 +173,7 @@ defmodule Mint.HTTP1 do
   @spec open?(t(), :read | :write | :read_and_write) :: boolean()
   def open?(conn, type \\ :read_and_write)
 
-  def open?(%__MODULE__{state: state}, _type) when type in [:read, :write, :read_and_write] do
+  def open?(%__MODULE__{state: state}, type) when type in [:read, :write, :read_and_write] do
     state == :open
   end
 
@@ -192,6 +195,10 @@ defmodule Mint.HTTP1 do
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
   def request(conn, method, path, headers, body \\ nil)
+
+  def request(%__MODULE__{state: :closed} = conn, _method, _path, _headers, _body) do
+    {:error, conn, wrap_error(:closed)}
+  end
 
   def request(
         %__MODULE__{request: %{state: :stream_request}} = conn,
@@ -693,6 +700,10 @@ defmodule Mint.HTTP1 do
 
   @doc false
   def format_error(reason)
+
+  def format_error(:closed) do
+    "the connection is closed"
+  end
 
   def format_error(:request_body_is_streaming) do
     "a request body is currently streaming, so no new requests can be issued"

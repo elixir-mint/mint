@@ -46,6 +46,11 @@ defmodule Mint.Core.Transport.TCP do
   end
 
   @impl true
+  def shutdown(socket, how) do
+    wrap_err(:gen_tcp.shutdown(socket, how))
+  end
+
+  @impl true
   def setopts(socket, opts) do
     wrap_err(:inet.setopts(socket, opts))
   end

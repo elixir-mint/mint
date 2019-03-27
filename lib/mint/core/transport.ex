@@ -25,6 +25,8 @@ defmodule Mint.Core.Transport do
 
   @callback recv(Types.socket(), bytes :: non_neg_integer()) :: {:ok, binary()} | error()
 
+  @callback shutdown(Types.socket(), how :: :write) :: :ok | error()
+
   @callback setopts(Types.socket(), opts :: keyword()) :: :ok | error()
 
   @callback getopts(Types.socket(), opts :: keyword()) :: {:ok, opts :: keyword()} | error()
