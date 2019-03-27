@@ -114,7 +114,7 @@ pkix_verify_hostname(Cert = #'OTPCertificate'{tbsCertificate = TbsCert}, Referen
 verify_hostname_extract_fqdn_default({dns_id,S}) ->
     S;
 verify_hostname_extract_fqdn_default({uri_id,URI}) ->
-    % Modified from original to remove on http_uri:parse/1 from inets
+    % Modified from original to remove dependency on http_uri:parse/1 from inets
     #{scheme := <<"https">>, host := Host} = 'Elixir.URI':parse(list_to_binary(URI)),
     binary_to_list(Host).
 
