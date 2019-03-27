@@ -290,7 +290,7 @@ defmodule Mint.HTTP do
 
   """
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, t()} | {:error, Types.error()}
   def connect(scheme, hostname, port, opts \\ []) do
     # TODO: Proxy auth
 
@@ -322,7 +322,7 @@ defmodule Mint.HTTP do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def upgrade(old_transport, transport_state, scheme, hostname, port, opts),
     do: Mint.Negotiate.upgrade(old_transport, transport_state, scheme, hostname, port, opts)
 
@@ -334,7 +334,7 @@ defmodule Mint.HTTP do
           String.t(),
           :inet.port_number(),
           keyword()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(transport, transport_state, hostname, port, opts),
     do: Mint.Negotiate.initiate(transport, transport_state, hostname, port, opts)
 
@@ -436,7 +436,7 @@ defmodule Mint.HTTP do
           body :: iodata() | nil | :stream
         ) ::
           {:ok, t(), Types.request_ref()}
-          | {:error, t(), term()}
+          | {:error, t(), Types.error()}
   def request(conn, method, path, headers, body \\ nil),
     do: conn_module(conn).request(conn, method, path, headers, body)
 
@@ -475,7 +475,7 @@ defmodule Mint.HTTP do
   """
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
-          {:ok, t()} | {:error, t(), term()}
+          {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, ref, body),
     do: conn_module(conn).stream_request_body(conn, ref, body)
 
@@ -578,7 +578,7 @@ defmodule Mint.HTTP do
   @impl true
   @spec stream(t(), term()) ::
           {:ok, t(), [Types.response()]}
-          | {:error, t(), term(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
           | :unknown
   def stream(conn, message), do: conn_module(conn).stream(conn, message)
 

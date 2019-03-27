@@ -56,6 +56,11 @@ defmodule Mint.Types do
   """
   @type scheme() :: :http | :https
 
+  @typedoc """
+  An error reason.
+  """
+  @type error() :: Mint.TransportError.t() | Mint.HTTPError.t()
+
   @typedoc false
   @type socket() :: term()
 end
