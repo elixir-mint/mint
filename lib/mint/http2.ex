@@ -406,13 +406,13 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t(), :read | :write | :read_and_write) :: boolean()
-  def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_and_write)
-      when type in [:read, :write, :read_and_write] do
+  @spec open?(t(), :read | :write | :read_write) :: boolean()
+  def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_write)
+      when type in [:read, :write, :read_write] do
     case type do
       :read -> state in [:open, :closed_for_writing]
       :write -> state == :open
-      :read_and_write -> state == :open
+      :read_write -> state == :open
     end
   end
 
