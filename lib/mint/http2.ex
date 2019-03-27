@@ -379,8 +379,14 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t()) :: boolean()
-  def open?(%Mint.HTTP2{state: state} = _conn), do: state == :open
+  @spec open?(t(), :read | :write | :read_and_write) :: boolean()
+  def open?(%Mint.HTTP2{state: state} = conn, type \\ :read_and_write) do
+    case type do
+      :read -> state in [:open, :closed_for_writing]
+      :write -> state == :open
+      :read_and_write -> state == :open
+    end
+  end
 
   @doc """
   See `Mint.HTTP.request/5`.
@@ -1557,7 +1563,7 @@ defmodule Mint.HTTP2 do
           stream_id > last_stream_id,
           do: request_ref
 
-    conn = put_in(conn.state, :closed)
+    conn = put_in(conn.state, :closed_for_writing)
 
     reason = wrap_error({:server_closed_connection, error_code, debug_data, unprocessed_requests})
     throw({:mint, conn, reason, responses})

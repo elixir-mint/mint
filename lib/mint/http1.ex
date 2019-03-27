@@ -167,8 +167,8 @@ defmodule Mint.HTTP1 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t()) :: boolean()
-  def open?(%__MODULE__{state: state}), do: state == :open
+  @spec open?(t(), :read | :write | :read_and_write) :: boolean()
+  def open?(%__MODULE__{state: state}, _type), do: state == :open
 
   @doc """
   See `Mint.HTTP.request/5`.
