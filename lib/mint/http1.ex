@@ -168,7 +168,11 @@ defmodule Mint.HTTP1 do
   """
   @impl true
   @spec open?(t(), :read | :write | :read_and_write) :: boolean()
-  def open?(%__MODULE__{state: state}, _type), do: state == :open
+  def open?(conn, type \\ :read_and_write)
+
+  def open?(%__MODULE__{state: state}, _type) when type in [:read, :write, :read_and_write] do
+    state == :open
+  end
 
   @doc """
   See `Mint.HTTP.request/5`.

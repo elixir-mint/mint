@@ -377,8 +377,8 @@ defmodule Mint.HTTP do
 
   """
   @impl true
-  @spec open?(t()) :: boolean()
-  def open?(conn), do: conn_module(conn).open?(conn)
+  @spec open?(t(), :read | :write | :read_and_write) :: boolean()
+  def open?(conn, type \\ :read_and_write), do: conn_module(conn).open?(conn, type)
 
   @doc """
   Sends a request to the connected server.

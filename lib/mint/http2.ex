@@ -371,6 +371,17 @@ defmodule Mint.HTTP2 do
       {:ok, conn}
   end
 
+  def close(%__MODULE__{state: :closed_for_writing} = conn) do
+    case conn.transport.close(conn.socket) do
+      :ok ->
+        conn = put_in(conn.state, :closed)
+        {:ok, conn}
+
+      {:error, reason} ->
+        {:error, conn, reason}
+    end
+  end
+
   def close(%__MODULE__{state: :closed} = conn) do
     {:ok, conn}
   end
@@ -380,7 +391,8 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec open?(t(), :read | :write | :read_and_write) :: boolean()
-  def open?(%Mint.HTTP2{state: state} = conn, type \\ :read_and_write) do
+  def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_and_write)
+      when type in [:read, :write, :read_and_write] do
     case type do
       :read -> state in [:open, :closed_for_writing]
       :write -> state == :open

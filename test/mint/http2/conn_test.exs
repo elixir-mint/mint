@@ -192,7 +192,8 @@ defmodule Mint.HTTP2Test do
 
       assert MapSet.new(unprocessed_requests) == MapSet.new([ref2, ref3])
 
-      refute HTTP2.open?(conn)
+      refute HTTP2.open?(conn, :write)
+      assert HTTP2.open?(conn, :read)
     end
 
     test "client closes the connection with close/1", %{conn: conn} do
