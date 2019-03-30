@@ -31,8 +31,8 @@ defmodule Mint.HTTP2 do
   reading. This means that you can't send requests or stream chunks, but the server
   might still be sending data and responses might still be returned. When the server
   closes the connection for writing, a `:server_closed_connection` error will be returned.
-  This error also contains a list of request references that are safe to retry because
-  they haven't been processed yet: you won't get any responses for these requests.
+  `{:error, request_ref, error}` is returned for requests that haven't been processed by the
+  server, with the reason of `error` being `:unprocessed`. These requests are safe to retry.
 
   ## HTTP/2 settings
 
