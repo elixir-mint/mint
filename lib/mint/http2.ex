@@ -296,15 +296,16 @@ defmodule Mint.HTTP2 do
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
 
+    * `:unprocessed` - when a request was closed because it was not processed by the server.
+      When this error is returned, it means that the server hasn't processed the request at all,
+      so it's safe to retry the given request on a different or new connection.
+
     * `{:server_closed_request, error_code}` - when the server closes the request.
       `error_code` is the reason why the request was closed.
 
-    * `{:server_closed_connection, reason, debug_data, unprocessed_request_refs}` - when
-      the server closes the connection gracefully or because of an error. In HTTP/2,
-      this corresponds to a `GOAWAY` frame. `error` is the reason why the connection
-      was closed. `debug_data` is additional debug data. `unprocessed_request_refs` is
-      a list of requests that the server did not start processing and that are thus
-      safe to retry.
+    * `{:server_closed_connection, reason, debug_data}` - when the server closes the connection
+      gracefully or because of an error. In HTTP/2, this corresponds to a `GOAWAY` frame.
+      `error` is the reason why the connection was closed. `debug_data` is additional debug data.
 
     * `{:frame_size_error, frame}` - when there's an error with the size of a frame.
       `frame` is the frame type, such as `:settings` or `:window_update`.
@@ -387,7 +388,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn}
   end
 
-  def close(%__MODULE__{state: :closed_for_writing} = conn) do
+  def close(%__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn) do
     case conn.transport.close(conn.socket) do
       :ok ->
         conn = put_in(conn.state, :closed)
@@ -409,10 +410,10 @@ defmodule Mint.HTTP2 do
   @spec open?(t(), :read | :write | :read_write) :: boolean()
   def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_write)
       when type in [:read, :write, :read_write] do
-    case type do
-      :read -> state in [:open, :closed_for_writing]
-      :write -> state == :open
-      :read_write -> state == :open
+    case state do
+      :open -> true
+      {:goaway, _error_code, _debug_data} -> type == :read
+      :closed -> false
     end
   end
 
@@ -452,7 +453,13 @@ defmodule Mint.HTTP2 do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def request(%Mint.HTTP2{state: :closed_for_writing} = conn, _method, _path, _headers, _body) do
+  def request(
+        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        _method,
+        _path,
+        _headers,
+        _body
+      ) do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
@@ -500,7 +507,11 @@ defmodule Mint.HTTP2 do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def stream_request_body(%Mint.HTTP2{state: :closed_for_writing} = conn, _request_ref, _chunk) do
+  def stream_request_body(
+        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        _request_ref,
+        _chunk
+      ) do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
@@ -1164,7 +1175,8 @@ defmodule Mint.HTTP2 do
         handle_new_data(conn, rest, responses)
 
       :more ->
-        {%{conn | buffer: data}, responses}
+        conn = put_in(conn.buffer, data)
+        handle_consumed_all_frames(conn, responses)
 
       {:error, :payload_too_big} ->
         # TODO: sometimes, this could be handled with RST_STREAM instead of a GOAWAY frame (for
@@ -1184,6 +1196,21 @@ defmodule Mint.HTTP2 do
   catch
     :throw, {:mint, conn, error} -> throw({:mint, conn, error, responses})
     :throw, {:mint, _conn, _error, _responses} = thrown -> throw(thrown)
+  end
+
+  defp handle_consumed_all_frames(%{state: state} = conn, responses) do
+    case state do
+      # TODO: should we do something with the debug data here, like logging it?
+      {:goaway, :no_error, _debug_data} ->
+        {conn, responses}
+
+      {:goaway, error_code, debug_data} ->
+        error = wrap_error({:server_closed_connection, error_code, debug_data})
+        throw({:mint, conn, error, responses})
+
+      _ ->
+        {conn, responses}
+    end
   end
 
   defp assert_valid_frame(conn, frame) do
@@ -1606,20 +1633,20 @@ defmodule Mint.HTTP2 do
       debug_data: debug_data
     ) = frame
 
-    unprocessed_requests =
-      for {request_ref, stream_id} <- conn.ref_to_stream_id,
-          stream_id > last_stream_id,
-          do: request_ref
+    # We gather all the unprocessed requests and form {:error, _, _} tuples for each one.
+    # At the same time, we delete all the unprocessed requests from the stream set.
+    {unprocessed_request_responses, conn} =
+      Enum.flat_map_reduce(conn.streams, conn, fn
+        {stream_id, _stream}, conn_acc when stream_id <= last_stream_id ->
+          {[], conn_acc}
 
-    conn = put_in(conn.state, :closed_for_writing)
+        {_stream_id, stream}, conn_acc ->
+          conn_acc = delete_stream(conn_acc, stream)
+          {[{:error, stream.ref, wrap_error(:unprocessed)}], conn_acc}
+      end)
 
-    case conn.transport.shutdown(conn.socket, :write) do
-      :ok -> :ok
-      {:error, reason} -> throw({:mint, conn, reason, responses})
-    end
-
-    reason = wrap_error({:server_closed_connection, error_code, debug_data, unprocessed_requests})
-    throw({:mint, conn, reason, responses})
+    conn = put_in(conn.state, {:goaway, error_code, debug_data})
+    {conn, unprocessed_request_responses ++ responses}
   end
 
   # WINDOW_UPDATE
@@ -1819,8 +1846,13 @@ defmodule Mint.HTTP2 do
     "server closed request with error code #{inspect(error_code)}"
   end
 
-  def format_error({:server_closed_connection, error, debug_data, _unprocessed_requests}) do
+  def format_error({:server_closed_connection, error, debug_data}) do
     "server closed connection with error code #{inspect(error)} and debug data: " <> debug_data
+  end
+
+  def format_error(:unprocessed) do
+    "request was not processed by the server, which means that it's safe to retry on a " <>
+      "different or new connection"
   end
 
   def format_error({:frame_size_error, frame}) do
