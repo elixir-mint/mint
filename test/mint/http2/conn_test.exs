@@ -165,15 +165,92 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  describe "closing the connection" do
-    test "server closes the connection with GOAWAY", %{conn: conn} do
-      {conn, _ref1} = open_request(conn)
+  describe "server closes the connection" do
+    test "with GOAWAY with :protocol_error", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      {conn, ref1} = open_request(conn)
       {conn, ref2} = open_request(conn)
-      {conn, ref3} = open_request(conn)
 
-      assert_recv_frames [headers(), headers(), headers()]
+      assert_recv_frames [headers(stream_id: first_stream_id), headers(), headers()]
 
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [
+                 goaway(
+                   last_stream_id: first_stream_id,
+                   error_code: :protocol_error,
+                   debug_data: "debug data"
+                 )
+               ])
+
+      assert_http2_error error, {
+        :server_closed_connection,
+        :protocol_error,
+        "debug data"
+      }
+
+      assert [{:error, server_ref1, error1}, {:error, server_ref2, error2}] = responses
+      assert MapSet.new([server_ref1, server_ref2]) == MapSet.new([ref1, ref2])
+
+      assert_http2_error error1, :unprocessed
+      assert_http2_error error2, :unprocessed
+
+      assert HTTP2.open_request_count(conn) == 1
+
+      refute HTTP2.open?(conn, :write)
+      assert HTTP2.open?(conn, :read)
+    end
+
+    test "with GOAWAY with :no_error and responses after the GOAWAY frame", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 goaway(last_stream_id: stream_id, error_code: :no_error, debug_data: ""),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers([{":status", "200"}]),
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert HTTP2.open_request_count(conn) == 0
+
+      refute HTTP2.open?(conn, :write)
+      assert HTTP2.open?(conn, :read)
+    end
+
+    test "with GOAWAY followed by another GOAWAY then the error reason is from the last GOAWAY",
+         %{conn: conn} do
       assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 goaway(last_stream_id: 1, error_code: :no_error, debug_data: "1"),
+                 goaway(last_stream_id: 1, error_code: :flow_control_error, debug_data: "2"),
+                 goaway(last_stream_id: 1, error_code: :protocol_error, debug_data: "3")
+               ])
+
+      assert_http2_error error, {:server_closed_connection, :protocol_error, "3"}
+
+      refute HTTP2.open?(conn, :write)
+      assert HTTP2.open?(conn, :read)
+    end
+  end
+
+  describe "closed connection" do
+    test "client closes the connection with close/1", %{conn: conn} do
+      assert {:ok, conn} = HTTP2.close(conn)
+
+      assert_recv_frames [goaway(error_code: :no_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "request/5 returns error if the connection is closed",
+         %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, _error, []} =
                stream_frames(conn, [
                  goaway(
                    stream_id: 0,
@@ -183,24 +260,13 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert_http2_error error, {
-        :server_closed_connection,
-        :protocol_error,
-        "debug data",
-        unprocessed_requests
-      }
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert_http2_error error, :closed_for_writing
 
-      assert MapSet.new(unprocessed_requests) == MapSet.new([ref2, ref3])
-
-      refute HTTP2.open?(conn)
-    end
-
-    test "client closes the connection with close/1", %{conn: conn} do
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert_recv_frames [goaway(error_code: :no_error)]
-
-      refute HTTP2.open?(conn)
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert_http2_error error, :closed
     end
   end
 

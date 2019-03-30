@@ -13,7 +13,7 @@ defmodule Mint.Core.Conn do
               keyword()
             ) :: {:ok, conn()} | {:error, Types.error()}
 
-  @callback open?(conn()) :: boolean()
+  @callback open?(conn(), :read | :write | :read_write) :: boolean()
 
   @callback close(conn()) :: {:ok, conn()}
 

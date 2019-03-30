@@ -25,6 +25,16 @@ defmodule Mint.HTTP2 do
   This is why we identify each request with a unique reference returned by `request/5`.
   See `request/5` for more information.
 
+  ## Closed connection
+
+  In HTTP/2, the connection can either be open, closed, or only closed for writing.
+  When a connection is closed for writing, the client cannot send requests or stream
+  body chunks, but it can still read data that the server might be sending. When the
+  connection gets closed on the writing side, a `:server_closed_connection` error is
+  returned. `{:error, request_ref, error}` is returned for requests that haven't been
+  processed by the server, with the reason of `error` being `:unprocessed`.
+  These requests are safe to retry.
+
   ## HTTP/2 settings
 
   HTTP/2 supports settings negotiation between servers and clients. The server advertises
@@ -258,6 +268,13 @@ defmodule Mint.HTTP2 do
 
   The values can be:
 
+    * `:closed` - when you try to make a request or stream a body chunk but the connection
+      is closed.
+
+    * `:closed_for_writing` - when you try to make a request or stream a body chunk but
+      the connection is closed for writing. This means you cannot issue any more requests.
+      See the "Closed connection" section in the module documentation for more information.
+
     * `:too_many_concurrent_requests` - when the maximum number of concurrent requests
       allowed by the server is reached. To find out what this limit is, use `get_setting/2`
       with the `:max_concurrent_streams` setting name.
@@ -280,15 +297,16 @@ defmodule Mint.HTTP2 do
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
 
+    * `:unprocessed` - when a request was closed because it was not processed by the server.
+      When this error is returned, it means that the server hasn't processed the request at all,
+      so it's safe to retry the given request on a different or new connection.
+
     * `{:server_closed_request, error_code}` - when the server closes the request.
       `error_code` is the reason why the request was closed.
 
-    * `{:server_closed_connection, reason, debug_data, unprocessed_request_refs}` - when
-      the server closes the connection gracefully or because of an error. In HTTP/2,
-      this corresponds to a `GOAWAY` frame. `error` is the reason why the connection
-      was closed. `debug_data` is additional debug data. `unprocessed_request_refs` is
-      a list of requests that the server did not start processing and that are thus
-      safe to retry.
+    * `{:server_closed_connection, reason, debug_data}` - when the server closes the connection
+      gracefully or because of an error. In HTTP/2, this corresponds to a `GOAWAY` frame.
+      `error` is the reason why the connection was closed. `debug_data` is additional debug data.
 
     * `{:frame_size_error, frame}` - when there's an error with the size of a frame.
       `frame` is the frame type, such as `:settings` or `:window_update`.
@@ -371,6 +389,17 @@ defmodule Mint.HTTP2 do
       {:ok, conn}
   end
 
+  def close(%__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn) do
+    case conn.transport.close(conn.socket) do
+      :ok ->
+        conn = put_in(conn.state, :closed)
+        {:ok, conn}
+
+      {:error, reason} ->
+        {:error, conn, reason}
+    end
+  end
+
   def close(%__MODULE__{state: :closed} = conn) do
     {:ok, conn}
   end
@@ -379,8 +408,15 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t()) :: boolean()
-  def open?(%Mint.HTTP2{state: state} = _conn), do: state == :open
+  @spec open?(t(), :read | :write | :read_write) :: boolean()
+  def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_write)
+      when type in [:read, :write, :read_write] do
+    case state do
+      :open -> true
+      {:goaway, _error_code, _debug_data} -> type == :read
+      :closed -> false
+    end
+  end
 
   @doc """
   See `Mint.HTTP.request/5`.
@@ -412,7 +448,23 @@ defmodule Mint.HTTP2 do
         ) ::
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
-  def request(%Mint.HTTP2{} = conn, method, path, headers, body \\ nil)
+  def request(conn, method, path, headers, body \\ nil)
+
+  def request(%Mint.HTTP2{state: :closed} = conn, _method, _path, _headers, _body) do
+    {:error, conn, wrap_error(:closed)}
+  end
+
+  def request(
+        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        _method,
+        _path,
+        _headers,
+        _body
+      ) do
+    {:error, conn, wrap_error(:closed_for_writing)}
+  end
+
+  def request(%Mint.HTTP2{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers = [
       {":method", method},
@@ -450,6 +502,20 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), Types.error()}
+  def stream_request_body(conn, request_ref, chunk)
+
+  def stream_request_body(%Mint.HTTP2{state: :closed} = conn, _request_ref, _chunk) do
+    {:error, conn, wrap_error(:closed)}
+  end
+
+  def stream_request_body(
+        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        _request_ref,
+        _chunk
+      ) do
+    {:error, conn, wrap_error(:closed_for_writing)}
+  end
+
   def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
@@ -1110,7 +1176,8 @@ defmodule Mint.HTTP2 do
         handle_new_data(conn, rest, responses)
 
       :more ->
-        {%{conn | buffer: data}, responses}
+        conn = put_in(conn.buffer, data)
+        handle_consumed_all_frames(conn, responses)
 
       {:error, :payload_too_big} ->
         # TODO: sometimes, this could be handled with RST_STREAM instead of a GOAWAY frame (for
@@ -1130,6 +1197,21 @@ defmodule Mint.HTTP2 do
   catch
     :throw, {:mint, conn, error} -> throw({:mint, conn, error, responses})
     :throw, {:mint, _conn, _error, _responses} = thrown -> throw(thrown)
+  end
+
+  defp handle_consumed_all_frames(%{state: state} = conn, responses) do
+    case state do
+      # TODO: should we do something with the debug data here, like logging it?
+      {:goaway, :no_error, _debug_data} ->
+        {conn, responses}
+
+      {:goaway, error_code, debug_data} ->
+        error = wrap_error({:server_closed_connection, error_code, debug_data})
+        throw({:mint, conn, error, responses})
+
+      _ ->
+        {conn, responses}
+    end
   end
 
   defp assert_valid_frame(conn, frame) do
@@ -1552,15 +1634,20 @@ defmodule Mint.HTTP2 do
       debug_data: debug_data
     ) = frame
 
-    unprocessed_requests =
-      for {request_ref, stream_id} <- conn.ref_to_stream_id,
-          stream_id > last_stream_id,
-          do: request_ref
+    # We gather all the unprocessed requests and form {:error, _, _} tuples for each one.
+    # At the same time, we delete all the unprocessed requests from the stream set.
+    {unprocessed_request_responses, conn} =
+      Enum.flat_map_reduce(conn.streams, conn, fn
+        {stream_id, _stream}, conn_acc when stream_id <= last_stream_id ->
+          {[], conn_acc}
 
-    conn = put_in(conn.state, :closed)
+        {_stream_id, stream}, conn_acc ->
+          conn_acc = delete_stream(conn_acc, stream)
+          {[{:error, stream.ref, wrap_error(:unprocessed)}], conn_acc}
+      end)
 
-    reason = wrap_error({:server_closed_connection, error_code, debug_data, unprocessed_requests})
-    throw({:mint, conn, reason, responses})
+    conn = put_in(conn.state, {:goaway, error_code, debug_data})
+    {conn, unprocessed_request_responses ++ responses}
   end
 
   # WINDOW_UPDATE
@@ -1703,6 +1790,17 @@ defmodule Mint.HTTP2 do
   @doc false
   def format_error(reason)
 
+  def format_error(:closed) do
+    "the connection is closed"
+  end
+
+  def format_error(:closed_for_writing) do
+    "the connection is closed for writing, which means that you cannot issue any more " <>
+      "requests on the connection but you can expect responses to still be delivered for " <>
+      "part of the requests that are in flight. If a connection is closed for writing, " <>
+      "it usually means that you got a :server_closed_request error already."
+  end
+
   def format_error(:too_many_concurrent_requests) do
     "the number of max concurrent HTTP/2 requests supported by the server has been reached. " <>
       "Use Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name " <>
@@ -1747,8 +1845,13 @@ defmodule Mint.HTTP2 do
     "server closed request with error code #{inspect(error_code)}"
   end
 
-  def format_error({:server_closed_connection, error, debug_data, _unprocessed_requests}) do
+  def format_error({:server_closed_connection, error, debug_data}) do
     "server closed connection with error code #{inspect(error)} and debug data: " <> debug_data
+  end
+
+  def format_error(:unprocessed) do
+    "request was not processed by the server, which means that it's safe to retry on a " <>
+      "different or new connection"
   end
 
   def format_error({:frame_size_error, frame}) do

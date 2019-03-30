@@ -55,9 +55,9 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
-  @spec open?(t()) :: boolean()
-  def open?(%UnsafeProxy{module: module, state: state}) do
-    module.open?(state)
+  @spec open?(t(), :read | :write | :read_write) :: boolean()
+  def open?(%UnsafeProxy{module: module, state: state}, type \\ :read_write) do
+    module.open?(state, type)
   end
 
   @impl true
