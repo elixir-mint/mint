@@ -34,13 +34,6 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.stream(conn, :unknown_message) == :unknown
     end
 
-    test "closed-socket messages are treated as errors", %{conn: conn} do
-      assert {:error, %HTTP2{} = conn, %TransportError{reason: :closed}, []} =
-               HTTP2.stream(conn, {:ssl_closed, conn.socket})
-
-      refute HTTP2.open?(conn)
-    end
-
     test "socket error messages are treated as errors", %{conn: conn} do
       message = {:ssl_error, conn.socket, :etimeout}
 
@@ -236,6 +229,18 @@ defmodule Mint.HTTP2Test do
 
       refute HTTP2.open?(conn, :write)
       assert HTTP2.open?(conn, :read)
+    end
+
+    test "with direct socket close and no in-flight requests", %{conn: conn} do
+      assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, {:ssl_closed, conn.socket})
+      refute HTTP2.open?(conn)
+    end
+
+    test "with direct socket close and in-flight requests", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl_closed, conn.socket})
+      assert %TransportError{reason: :closed} = error
+      refute HTTP2.open?(conn)
     end
   end
 

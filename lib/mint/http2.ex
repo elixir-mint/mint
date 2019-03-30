@@ -789,8 +789,14 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
-    error = conn.transport.wrap_error(:closed)
-    {:error, %{conn | state: :closed}, error, _responses = []}
+    conn = put_in(conn.state, :closed)
+
+    if conn.open_client_stream_count > 0 or conn.open_server_stream_count > 0 do
+      error = conn.transport.wrap_error(:closed)
+      {:error, conn, error, _responses = []}
+    else
+      {:ok, conn, _responses = []}
+    end
   end
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
