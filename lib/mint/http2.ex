@@ -27,12 +27,13 @@ defmodule Mint.HTTP2 do
 
   ## Closed connection
 
-  In HTTP/2, the server can close the connection for writing while keeping it open for
-  reading. This means that you can't send requests or stream chunks, but the server
-  might still be sending data and responses might still be returned. When the server
-  closes the connection for writing, a `:server_closed_connection` error will be returned.
-  `{:error, request_ref, error}` is returned for requests that haven't been processed by the
-  server, with the reason of `error` being `:unprocessed`. These requests are safe to retry.
+  In HTTP/2, the connection can either be open, closed, or only closed for writing.
+  When a connection is closed for writing, the client cannot send requests or stream
+  body chunks, but it can still read data that the server might be sending. When the
+  connection gets closed on the writing side, a `:server_closed_connection` error is
+  returned. `{:error, request_ref, error}` is returned for requests that haven't been
+  processed by the server, with the reason of `error` being `:unprocessed`.
+  These requests are safe to retry.
 
   ## HTTP/2 settings
 
@@ -1797,9 +1798,7 @@ defmodule Mint.HTTP2 do
     "the connection is closed for writing, which means that you cannot issue any more " <>
       "requests on the connection but you can expect responses to still be delivered for " <>
       "part of the requests that are in flight. If a connection is closed for writing, " <>
-      "it usually means that you got a :server_closed_request error already, which contains " <>
-      "a list of request references for requests that have not been processed and are safe " <>
-      "to retry."
+      "it usually means that you got a :server_closed_request error already."
   end
 
   def format_error(:too_many_concurrent_requests) do
