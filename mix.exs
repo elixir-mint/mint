@@ -53,10 +53,10 @@ defmodule Mint.MixProject do
   defp deps do
     [
       {:castore, "~> 0.1.0", optional: true},
-      {:ex_doc, "~> 0.19.3", only: :dev},
+      {:ex_doc, "~> 0.20", only: :dev},
       {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test},
       {:stream_data, "~> 0.4.3", only: [:dev, :test]},
-      {:dialyxir, "~> 1.0.0-rc.4", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.0.0-rc.6", only: [:dev, :test], runtime: false}
     ]
   end
 end
