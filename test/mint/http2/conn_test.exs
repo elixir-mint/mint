@@ -716,14 +716,18 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "flow control" do
-    test "client tries to send data that goes over the window size of a stream/connection",
+    test "client sends data that goes over window size of a stream/connection when streaming",
          %{conn: conn} do
       # First we decrease the connection size by 5 bytes, so that the connection window
       # size is smaller than the stream window size.
       {conn, _ref} = open_request(conn, "XXXXX")
 
+      assert_recv_frames [headers(), data()]
+
       # Then we open a streaming request.
       {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers()]
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}) + 1)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
@@ -1005,7 +1009,6 @@ defmodule Mint.HTTP2Test do
              end) =~ "Received PING ack but no PING requests are pending"
     end
 
-    @tag :focus
     test "if the server sends a PING ack but no PING requests match we emit a warning",
          %{conn: conn} do
       assert {:ok, conn, ref} = HTTP2.ping(conn, <<1, 2, 3, 4, 5, 6, 7, 8>>)
