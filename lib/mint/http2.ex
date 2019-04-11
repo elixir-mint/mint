@@ -1088,18 +1088,19 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp encode_data_chunk(%__MODULE__{} = conn, stream_id, chunk, enabled_flags) when is_integer(stream_id) and is_list(enabled_flags) do
+  defp encode_data_chunk(%__MODULE__{} = conn, stream_id, chunk, enabled_flags)
+       when is_integer(stream_id) and is_list(enabled_flags) do
     chunk_size = IO.iodata_length(chunk)
     frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: chunk)
     conn = update_in(conn.streams[stream_id].window_size, &(&1 - chunk_size))
     conn = update_in(conn.window_size, &(&1 - chunk_size))
 
-        conn =
-          if :end_stream in enabled_flags do
-            put_in(conn.streams[stream_id].state, :half_closed_local)
-          else
-            conn
-          end
+    conn =
+      if :end_stream in enabled_flags do
+        put_in(conn.streams[stream_id].state, :half_closed_local)
+      else
+        conn
+      end
 
     {conn, Frame.encode(frame)}
   end
