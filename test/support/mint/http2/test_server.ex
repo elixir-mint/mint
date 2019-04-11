@@ -16,8 +16,8 @@ defmodule Mint.HTTP2.TestServer do
     keyfile: Path.absname("key.pem", __DIR__)
   ]
 
-  @spec connect(keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
-  def connect(options, server_settings \\ []) do
+  @spec connect(keyword(), keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
+  def connect(options, server_settings) do
     ref = make_ref()
     parent = self()
 
