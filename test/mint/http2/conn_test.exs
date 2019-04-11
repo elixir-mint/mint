@@ -742,6 +742,14 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    @tag server_settings: [initial_window_size: 1]
+    test "if client's request goes over window size, no HEADER frames are sent", %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], "XX")
+      assert_http2_error error, {:exceeds_window_size, :request, 1}
+      assert HTTP2.open?(conn)
+      refute_receive {:ssl, _, _}
+    end
+
     test "server sends a WINDOW_UPDATE with too big of a size on a stream",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
