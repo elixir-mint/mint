@@ -479,15 +479,17 @@ defmodule Mint.HTTP2 do
     conn =
       case body do
         :stream ->
-          send_headers(conn, stream_id, headers, [:end_headers])
+          {conn, payload} = encode_headers(conn, stream_id, headers, [:end_headers])
+          send!(conn, payload)
 
         nil ->
-          send_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+          {conn, payload} = encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+          send!(conn, payload)
 
         _iodata ->
-          # TODO: Optimize here by sending a single packet on the network.
-          conn = send_headers(conn, stream_id, headers, [:end_headers])
-          conn = send_data(conn, stream_id, body, [:end_stream])
+          {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
+          {conn, data_payload} = encode_data(conn, stream_id, body, [:end_stream])
+          conn = send!(conn, [headers_payload, data_payload])
           conn
       end
 
@@ -520,13 +522,14 @@ defmodule Mint.HTTP2 do
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-        conn =
+        {conn, payload} =
           if chunk == :eof do
-            send_data(conn, stream_id, "", [:end_stream])
+            encode_data(conn, stream_id, "", [:end_stream])
           else
-            send_data(conn, stream_id, chunk, [])
+            encode_data(conn, stream_id, chunk, [])
           end
 
+        conn = send!(conn, payload)
         {:ok, conn}
 
       :error ->
@@ -971,20 +974,20 @@ defmodule Mint.HTTP2 do
     {conn, stream.id, stream.ref}
   end
 
-  defp send_headers(conn, stream_id, headers, enabled_flags) do
+  defp encode_headers(conn, stream_id, headers, enabled_flags) do
     assert_headers_smaller_than_max_header_list_size(conn, headers)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
     {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
 
     payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
-    conn = send!(conn, payload)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
     conn = put_in(conn.streams[stream_id].state, stream_state)
     conn = update_in(conn.open_client_stream_count, &(&1 + 1))
-    conn
+
+    {conn, payload}
   end
 
   defp assert_headers_smaller_than_max_header_list_size(
@@ -1046,7 +1049,7 @@ defmodule Mint.HTTP2 do
     [first_frame, middle_frames, last_frame]
   end
 
-  defp send_data(conn, stream_id, data, enabled_flags) do
+  defp encode_data(conn, stream_id, data, enabled_flags) do
     stream = fetch_stream!(conn, stream_id)
 
     if stream.state != :open do
@@ -1057,40 +1060,49 @@ defmodule Mint.HTTP2 do
     data_size = IO.iodata_length(data)
 
     cond do
-      data_size >= stream.window_size ->
+      data_size > stream.window_size ->
         throw({:mint, conn, wrap_error({:exceeds_window_size, :request, stream.window_size})})
 
-      data_size >= conn.window_size ->
+      data_size > conn.window_size ->
         throw({:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.window_size})})
 
+      # If the data size is greater than the max frame size, we chunk automatically based
+      # on the max frame size.
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
           data
           |> IO.iodata_to_binary()
           |> split_payload_in_chunks(conn.server_settings.max_frame_size)
 
-        conn =
-          Enum.reduce(chunks, conn, fn chunk, acc ->
-            send_data(acc, stream_id, chunk, [])
+        {encoded_chunks, conn} =
+          Enum.map_reduce(chunks, conn, fn chunk, acc ->
+            {acc, encoded} = encode_data_chunk(acc, stream_id, chunk, [])
+            {encoded, acc}
           end)
 
-        send_data(conn, stream_id, last_chunk, enabled_flags)
+        {conn, encoded_last_chunk} = encode_data_chunk(conn, stream_id, last_chunk, enabled_flags)
+        {conn, [encoded_chunks, encoded_last_chunk]}
 
       true ->
-        frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: data)
-        conn = send!(conn, Frame.encode(frame))
-        conn = update_in(conn.streams[stream_id].window_size, &(&1 - data_size))
-        conn = update_in(conn.window_size, &(&1 - data_size))
-
-        conn =
-          if :end_stream in enabled_flags do
-            put_in(conn.streams[stream_id].state, :half_closed_local)
-          else
-            conn
-          end
-
-        conn
+        encode_data_chunk(conn, stream_id, data, enabled_flags)
     end
+  end
+
+  defp encode_data_chunk(%__MODULE__{} = conn, stream_id, chunk, enabled_flags)
+       when is_integer(stream_id) and is_list(enabled_flags) do
+    chunk_size = IO.iodata_length(chunk)
+    frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: chunk)
+    conn = update_in(conn.streams[stream_id].window_size, &(&1 - chunk_size))
+    conn = update_in(conn.window_size, &(&1 - chunk_size))
+
+    conn =
+      if :end_stream in enabled_flags do
+        put_in(conn.streams[stream_id].state, :half_closed_local)
+      else
+        conn
+      end
+
+    {conn, Frame.encode(frame)}
   end
 
   defp split_payload_in_chunks(binary, chunk_size),
