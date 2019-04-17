@@ -933,9 +933,19 @@ defmodule Mint.HTTP2 do
 
   defp receive_server_settings(transport, socket) do
     case recv_next_frame(transport, socket, _buffer = "") do
-      {:ok, settings(), _buffer, _socket} = result -> result
-      {:ok, _frame, _buffer, _socket} -> {:error, wrap_error(:protocol_error)}
-      {:error, _reason} = error -> error
+      {:ok, settings(), _buffer, _socket} = result ->
+        result
+
+      {:ok, goaway(error_code: error_code, debug_data: debug_data), _buffer, _socket} ->
+        error = wrap_error({:server_closed_connection, error_code, debug_data})
+        {:error, error}
+
+      {:ok, frame, _buffer, _socket} ->
+        debug_data = "received invalid frame #{elem(frame, 0)} during handshake"
+        {:error, wrap_error({:protocol_error, debug_data})}
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 
