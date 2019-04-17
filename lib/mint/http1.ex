@@ -585,7 +585,6 @@ defmodule Mint.HTTP1 do
 
   defp add_body("", _request_ref, responses), do: responses
 
-  # TODO: Concat binaries or build iodata?
   defp add_body(new_data, request_ref, [{:data, request_ref, data} | responses]),
     do: [{:data, request_ref, data <> new_data} | responses]
 
