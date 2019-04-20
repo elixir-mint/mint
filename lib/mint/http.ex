@@ -142,7 +142,7 @@ defmodule Mint.HTTP do
 
   ## Protocol negotiation
 
-  If both `:http1` and `:http2` are present in the list passed in the `:protocol` options,
+  If both `:http1` and `:http2` are present in the list passed in the `:protocols` option,
   the protocol negotiation happens in the following way:
 
     * If the scheme used to connect to the server is `:http`, then HTTP/1 or HTTP/1.1 is used.
