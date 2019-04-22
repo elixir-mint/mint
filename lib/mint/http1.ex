@@ -487,8 +487,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       {0, rest} ->
-        # Here, we manually convert the last response to iodata since we're
-        # explicitly moving on to the next request.
+        # Here, we manually collapse the body buffer since we're done with the body.
         {conn, responses} = collapse_body_buffer(conn, responses)
         decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
 
