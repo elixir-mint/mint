@@ -412,14 +412,7 @@ defmodule Mint.HTTP1 do
     case message_body(conn.request) do
       {:ok, body} ->
         conn = put_in(conn.request.body, body)
-
-        case decode_body(body, conn, data, conn.request.ref, responses) do
-          {:ok, conn, responses} ->
-            {:ok, conn, iodata_to_binary_last_response(responses)}
-
-          other ->
-            other
-        end
+        decode_body(body, conn, data, conn.request.ref, responses)
 
       {:error, reason} ->
         {:error, conn, wrap_error(reason), responses}
@@ -459,8 +452,8 @@ defmodule Mint.HTTP1 do
     {:ok, conn, responses}
   end
 
-  defp decode_body(:until_closed, conn, data, request_ref, responses) do
-    responses = add_body(data, request_ref, responses)
+  defp decode_body(:until_closed, conn, data, _request_ref, responses) do
+    {conn, responses} = add_body(conn, data, responses)
     {:ok, conn, responses}
   end
 
@@ -468,16 +461,13 @@ defmodule Mint.HTTP1 do
     cond do
       length > byte_size(data) ->
         conn = put_in(conn.request.body, {:content_length, length - byte_size(data)})
-        responses = add_body(data, request_ref, responses)
+        {conn, responses} = add_body(conn, data, responses)
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
         <<body::binary-size(length), rest::binary>> = data
+        {conn, responses} = add_body(conn, body, responses)
         conn = request_done(conn)
-        responses = add_body(body, request_ref, responses)
-        # Here, we manually convert the last response to iodata since we're
-        # explicitly moving on to the next request.
-        responses = iodata_to_binary_last_response(responses)
         responses = [{:done, request_ref} | responses]
         next_request(conn, rest, responses)
     end
@@ -499,7 +489,7 @@ defmodule Mint.HTTP1 do
       {0, rest} ->
         # Here, we manually convert the last response to iodata since we're
         # explicitly moving on to the next request.
-        responses = iodata_to_binary_last_response(responses)
+        {conn, responses} = collapse_body_buffer(conn, responses)
         decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
 
       {size, rest} when size > 0 ->
@@ -546,12 +536,12 @@ defmodule Mint.HTTP1 do
       length > byte_size(data) ->
         conn = put_in(conn.buffer, "")
         conn = put_in(conn.request.body, {:chunked, length - byte_size(data)})
-        responses = add_body(data, request_ref, responses)
+        {conn, responses} = add_body(conn, data, responses)
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
         <<body::binary-size(length), rest::binary>> = data
-        responses = add_body(body, request_ref, responses)
+        conn = add_body_to_buffer(conn, body)
         conn = put_in(conn.request.body, {:chunked, :crlf})
         decode_body({:chunked, :crlf}, conn, rest, request_ref, responses)
     end
@@ -597,22 +587,24 @@ defmodule Mint.HTTP1 do
   defp add_trailing_headers(headers, request_ref, responses),
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
-  defp add_body("", _request_ref, responses), do: responses
-
-  defp add_body(new_data, request_ref, [{:data_as_iodata, request_ref, data} | responses]) do
-    [{:data_as_iodata, request_ref, [data, new_data]} | responses]
+  defp add_body(conn, data, responses) do
+    conn = add_body_to_buffer(conn, data)
+    collapse_body_buffer(conn, responses)
   end
 
-  defp add_body(new_data, request_ref, responses) do
-    [{:data_as_iodata, request_ref, new_data} | responses]
+  defp add_body_to_buffer(conn, data) do
+    update_in(conn.request.data_buffer, &[&1 | data])
   end
 
-  defp iodata_to_binary_last_response([{:data_as_iodata, ref, iodata} | responses]) do
-    [{:data, ref, IO.iodata_to_binary(iodata)} | responses]
-  end
+  defp collapse_body_buffer(conn, responses) do
+    case IO.iodata_to_binary(conn.request.data_buffer) do
+      "" ->
+        {conn, responses}
 
-  defp iodata_to_binary_last_response(responses) do
-    responses
+      data ->
+        conn = put_in(conn.request.data_buffer, [])
+        {conn, [{:data, conn.request.ref, data} | responses]}
+    end
   end
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
@@ -710,6 +702,7 @@ defmodule Mint.HTTP1 do
       version: nil,
       status: nil,
       headers_buffer: [],
+      data_buffer: [],
       content_length: nil,
       connection: [],
       transfer_encoding: [],
