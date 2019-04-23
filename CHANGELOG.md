@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.1
+
+### Bug fixes and improvements
+
+  * Fix a bug with requests exceeding the window size in HTTP/2. We were sending the headers of a request even if the body was larger than the window size. Now, if the body is larger than the window size, we error out right away.
+
+  * Fix a bug in the HTTP/2 handshake that would crash the connection in case the server sent unforeseen frames.
+
+  * Improve buffering of body chunks in HTTP/1.
+
 ## v0.2.0
 
 ### Breaking changes
