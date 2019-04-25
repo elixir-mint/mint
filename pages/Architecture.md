@@ -99,7 +99,7 @@ defmodule ConnectionProcess do
   # When the request is done, we use GenServer.reply/2 to reply to the caller that was
   # blocked waiting on this request.
   defp process_response({:done, request_ref}, state) do
-    {%{response: response, from: from}, state} = pop_in(state.conn[request_ref])
+    {%{response: response, from: from}, state} = pop_in(state.requests[request_ref])
     GenServer.reply(from, {:ok, response})
     state
   end
