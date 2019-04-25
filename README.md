@@ -12,7 +12,7 @@ To install Mint, add it to your `mix.exs` file. Unless you're using your own SSL
 defp deps do
   [
     {:castore, "~> 0.1.0"},
-    {:mint, "~> 0.1.0"}
+    {:mint, "~> 0.2.1"}
   ]
 end
 ```
@@ -84,7 +84,7 @@ When using SSL, you can pass in your own CA certificate store or use one provide
 def deps do
   [
     {:castore, "~> 0.1.0"},
-    {:mint, "~> 0.1.0"}
+    {:mint, "~> 0.2.1"}
   ]
 end
 ```
