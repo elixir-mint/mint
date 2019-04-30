@@ -5,7 +5,6 @@ defmodule Mint.HTTPError do
   This exception struct is used to represent HTTP errors of all sorts and for
   both HTTP/1 and HTTP/2.
 
-
   A `Mint.HTTPError` struct is an exception, so it can be raised as any
   other exception.
 
