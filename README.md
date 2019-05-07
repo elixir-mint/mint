@@ -35,7 +35,7 @@ This transparently chooses between HTTP/1 and HTTP/2. Requests are sent with:
 iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
 ```
 
-The connection socket runs in [*active mode*](http://erlang.org/doc/man/inet.html#setopts-2), which means that the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002):
+The connection socket runs in [*active mode*](http://erlang.org/doc/man/inet.html#setopts-2) (with `active: :once`), which means that the user of the library needs to handle [TCP messages](http://erlang.org/doc/man/gen_tcp.html#connect-4) and [SSL messages](http://erlang.org/doc/man/ssl.html#id66002):
 
 ```elixir
 iex> flush()

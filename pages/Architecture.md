@@ -1,6 +1,6 @@
 # Architecture
 
-Mint is an HTTP client with a process-less architecture. Mint provides an API where the HTTP connection is represented by a functional and immutable data structure, a **connection**. Every operation you do on the connection (like sending a request) returns an updated connection. A connection wraps a socket that is in active mode. Messages coming from the socket are delivered to the process that created the connection. You can hand those messages to Mint so that they can be parsed into responses.
+Mint is an HTTP client with a process-less architecture. Mint provides an API where the HTTP connection is represented by a functional and immutable data structure, a **connection**. Every operation you do on the connection (like sending a request) returns an updated connection. A connection wraps a socket that is in active mode (with `active: :once`). Messages coming from the socket are delivered to the process that created the connection. You can hand those messages to Mint so that they can be parsed into responses.
 
 Having a process-less architecture makes Mint a powerful and composable HTTP client. The developer has more flexibility compared to a client that forces an interface that includes processes. A Mint connection can be stored inside any kind of process, such as GenServers or GenStage processes.
 

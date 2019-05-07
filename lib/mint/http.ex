@@ -13,8 +13,8 @@ defmodule Mint.HTTP do
   does not take care of the response to that request, instead we use `Mint.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
-  set in **active mode**. This means that TCP/SSL messages will be delivered to
-  the process that started the connection.
+  set in **active mode** (with `active: :once`). This means that TCP/SSL messages
+  will be delivered to the process that started the connection.
 
   The process that owns the connection is responsible for receiving the messages
   (for example, a GenServer is responsible for defining `handle_info/2`). However,
@@ -109,11 +109,11 @@ defmodule Mint.HTTP do
   is established inside this function. If HTTP is used, then the created socket is a TCP
   socket and the `:gen_tcp` module is used to create that socket. If HTTPS is used, then
   the created socket is an SSL socket and the `:ssl` module is used to create that socket.
-  The socket is created in active mode, which is why it is important to know the type of
-  the socket: messages from the socket (of type `t:socket_message/0` will be delivered
-  directly to the process that creates the connection and tagged appropriately by the socket
-  module (see the `:gen_tcp` and `:ssl` modules). See `stream/2` for more information on the
-  messages and how to process them.
+  The socket is created in active mode (with `active: :once`), which is why it is important
+  to know the type of the socket: messages from the socket (of type `t:socket_message/0`
+  will be delivered directly to the process that creates the connection and tagged
+  appropriately by the socket module (see the `:gen_tcp` and `:ssl` modules). See `stream/2`
+  for more information on the messages and how to process them and on the socket mode.
 
   ## Options
 
@@ -507,6 +507,17 @@ defmodule Mint.HTTP do
 
   If the given `message` is not from the connection's socket,
   this function returns `:unknown`.
+
+  ## Socket mode
+
+  Mint sets the socket in `active: :once` mode. This means that a single socket
+  message at a time is delivered to the process that owns the connection. After
+  a message is delivered, then no other messages are delivered (we say the socket
+  goes in *passive* mode). When `stream/2` is called to process the message that
+  was received, Mint sets the socket back to `active: :once`. This is good to know
+  in order to understand how the socket is handled by Mint, but in normal usage
+  it just means that you will process one message at a time with `stream/2` and not
+  pay too much attention to the socket mode.
 
   ## Responses
 
