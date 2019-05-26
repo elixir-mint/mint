@@ -205,6 +205,27 @@ defmodule HTTP2.IntegrationTest do
     end
   end
 
+  describe "robynthinks.wordpress.com" do
+    @describetag connect: {"robynthinks.wordpress.com", 443}
+
+    test "GET /feed/ - regression for #171", %{conn: conn} do
+      # Using non-downcased header meant that HPACK wouldn't find it in the
+      # static built-in headers table and so it wouldn't encode it correctly.
+      headers = [{"If-Modified-Since", "Wed, 26 May 2019 07:43:40 GMT"}]
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed/", headers)
+
+      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, status}, {:headers, ^ref, _headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert status in [200, 304]
+
+      assert conn.buffer == ""
+      assert HTTP2.open?(conn)
+    end
+  end
+
   defp stream_messages_until_response(conn) do
     assert_receive message, 1000
 

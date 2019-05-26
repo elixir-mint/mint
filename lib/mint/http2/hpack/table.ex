@@ -15,6 +15,8 @@ defmodule Mint.HTTP2.HPACK.Table do
           length: non_neg_integer()
         }
 
+  # In this table, header names are matched in a *case insensitive* way.
+  # Header values are matched in a *case sensitive* way.
   @static_table [
     {":authority", nil},
     {":method", "GET"},
@@ -100,6 +102,7 @@ defmodule Mint.HTTP2.HPACK.Table do
   """
   @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
+    name = String.downcase(name)
     %{max_table_size: max_table_size, size: size} = table
     entry_size = entry_size(name, value)
 
@@ -169,6 +172,8 @@ defmodule Mint.HTTP2.HPACK.Table do
   def lookup_by_header(table, name, value)
 
   def lookup_by_header(%__MODULE__{entries: entries}, name, value) do
+    name = String.downcase(name)
+
     case static_lookup_by_header(name, value) do
       {:full, _index} = result ->
         result
@@ -185,8 +190,12 @@ defmodule Mint.HTTP2.HPACK.Table do
     end
   end
 
+  defp static_lookup_by_header(name, value) do
+    static_lookup_by_downcased_header(String.downcase(name), value)
+  end
+
   for {{name, value}, index} when is_binary(value) <- Enum.with_index(@static_table, 1) do
-    defp static_lookup_by_header(unquote(name), unquote(value)) do
+    defp static_lookup_by_downcased_header(unquote(name), unquote(value)) do
       {:full, unquote(index)}
     end
   end
@@ -198,12 +207,12 @@ defmodule Mint.HTTP2.HPACK.Table do
     |> Enum.uniq_by(&elem(&1, 0))
 
   for {name, index} <- static_table_names do
-    defp static_lookup_by_header(unquote(name), _value) do
+    defp static_lookup_by_downcased_header(unquote(name), _value) do
       {:name, unquote(index)}
     end
   end
 
-  defp static_lookup_by_header(_name, _value) do
+  defp static_lookup_by_downcased_header(_name, _value) do
     :not_found
   end
 
