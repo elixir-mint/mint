@@ -190,12 +190,8 @@ defmodule Mint.HTTP2.HPACK.Table do
     end
   end
 
-  defp static_lookup_by_header(name, value) do
-    static_lookup_by_downcased_header(String.downcase(name), value)
-  end
-
   for {{name, value}, index} when is_binary(value) <- Enum.with_index(@static_table, 1) do
-    defp static_lookup_by_downcased_header(unquote(name), unquote(value)) do
+    defp static_lookup_by_header(unquote(name), unquote(value)) do
       {:full, unquote(index)}
     end
   end
@@ -207,12 +203,12 @@ defmodule Mint.HTTP2.HPACK.Table do
     |> Enum.uniq_by(&elem(&1, 0))
 
   for {name, index} <- static_table_names do
-    defp static_lookup_by_downcased_header(unquote(name), _value) do
+    defp static_lookup_by_header(unquote(name), _value) do
       {:name, unquote(index)}
     end
   end
 
-  defp static_lookup_by_downcased_header(_name, _value) do
+  defp static_lookup_by_header(_name, _value) do
     :not_found
   end
 
