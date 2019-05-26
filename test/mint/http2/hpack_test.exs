@@ -100,7 +100,7 @@ defmodule Mint.HTTP2.HPACKTest do
         {name, value} -> constant({name, value})
       end)
 
-    random_header = {binary(min_length: 1), binary()}
+    random_header = {string(0..127, min_length: 1), binary()}
 
     frequency([
       {1, header_from_static_table},

@@ -80,7 +80,7 @@ defmodule HPACK.TableTest do
   end
 
   property "adding a header and then looking it up always returns the index of that header" do
-    check all {name, value} <- {binary(min_length: 1), binary()} do
+    check all {name, value} <- {string(0..127, min_length: 1), binary()} do
       assert %Table{} = table = Table.new(10_000)
       assert %Table{} = table = Table.add(table, name, value)
       assert {:full, 62} = Table.lookup_by_header(table, name, value)

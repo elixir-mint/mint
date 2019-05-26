@@ -1,6 +1,8 @@
 defmodule Mint.HTTP2.HPACK.Table do
   @moduledoc false
 
+  alias Mint.Core.Util
+
   defstruct [
     :max_table_size,
     entries: [],
@@ -102,8 +104,8 @@ defmodule Mint.HTTP2.HPACK.Table do
   """
   @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
-    name = String.downcase(name)
     %{max_table_size: max_table_size, size: size} = table
+    name = Util.lower_ascii(name)
     entry_size = entry_size(name, value)
 
     cond do
@@ -172,7 +174,7 @@ defmodule Mint.HTTP2.HPACK.Table do
   def lookup_by_header(table, name, value)
 
   def lookup_by_header(%__MODULE__{entries: entries}, name, value) do
-    name = String.downcase(name)
+    name = Util.lower_ascii(name)
 
     case static_lookup_by_header(name, value) do
       {:full, _index} = result ->

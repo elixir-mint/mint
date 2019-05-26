@@ -1,6 +1,8 @@
 defmodule Mint.HTTP1.Parse do
   @moduledoc false
 
+  alias Mint.Core.Util
+
   defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
   defmacro is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
   defmacro is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
@@ -12,11 +14,6 @@ defmodule Mint.HTTP1.Parse do
       is_digit(unquote(char)) or is_alpha(unquote(char)) or unquote(char) in '!#$%&\'*+-.^_`|~'
     end
   end
-
-  defp lower_char(char) when char in ?A..?Z, do: char + 32
-  defp lower_char(char), do: char
-
-  def lower(string), do: for(<<char <- string>>, do: <<lower_char(char)>>, into: "")
 
   def ignore_until_crlf(<<>>), do: :more
   def ignore_until_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
@@ -58,7 +55,7 @@ defmodule Mint.HTTP1.Parse do
   defp token_list_downcase(rest, acc), do: token_downcase(rest, _token_acc = <<>>, acc)
 
   defp token_downcase(<<char, rest::binary>>, token_acc, acc) when is_tchar(char),
-    do: token_downcase(rest, <<token_acc::binary, lower_char(char)>>, acc)
+    do: token_downcase(rest, <<token_acc::binary, Util.lower_ascii_char(char)>>, acc)
 
   defp token_downcase(rest, token_acc, acc), do: token_list_sep_downcase(rest, [token_acc | acc])
 
