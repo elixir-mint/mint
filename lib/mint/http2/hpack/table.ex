@@ -97,6 +97,12 @@ defmodule Mint.HTTP2.HPACK.Table do
   Adds the given header to the given table.
 
   If the new entry does not fit within the max table size then the oldest entries will be evicted.
+
+  Header names should be lowercase when added to the HPACK table
+  as per the [HTTP/2 spec](https://http2.github.io/http2-spec/#rfc.section.8.1.2):
+
+  > header field names MUST be converted to lowercase prior to their encoding in HTTP/2
+
   """
   @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
@@ -162,6 +168,11 @@ defmodule Mint.HTTP2.HPACK.Table do
     * `{:name, index}` if `name` is present in the table but with a different value than `value`
 
     * `:not_found` if the header name is not in the table at all
+
+  Header names should be lowercase when looked up in the HPACK table
+  as per the [HTTP/2 spec](https://http2.github.io/http2-spec/#rfc.section.8.1.2):
+
+  > header field names MUST be converted to lowercase prior to their encoding in HTTP/2
 
   """
   @spec lookup_by_header(t(), binary(), binary() | nil) ::
