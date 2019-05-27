@@ -36,8 +36,9 @@ defmodule Mint.Core.Util do
 
   # Lowercases an ASCII string more efficiently than
   # String.downcase/1.
-  def lower_ascii(string), do: for(<<char <- string>>, do: <<lower_ascii_char(char)>>, into: "")
+  def downcase_ascii(string),
+    do: for(<<char <- string>>, do: <<downcase_ascii_char(char)>>, into: "")
 
-  def lower_ascii_char(char) when char in ?A..?Z, do: char + 32
-  def lower_ascii_char(char) when char in 0..127, do: char
+  def downcase_ascii_char(char) when char in ?A..?Z, do: char + 32
+  def downcase_ascii_char(char) when char in 0..127, do: char
 end

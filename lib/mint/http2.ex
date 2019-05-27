@@ -466,12 +466,17 @@ defmodule Mint.HTTP2 do
 
   def request(%Mint.HTTP2{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
+    headers =
+      headers
+      |> downcase_header_names()
+      |> add_default_headers()
+
     headers = [
       {":method", method},
       {":path", path},
       {":scheme", conn.scheme},
       {":authority", "#{conn.hostname}:#{conn.port}"}
-      | add_default_headers(headers)
+      | headers
     ]
 
     {conn, stream_id, ref} = open_stream(conn)
@@ -1187,6 +1192,10 @@ defmodule Mint.HTTP2 do
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
     end)
+  end
+
+  defp downcase_header_names(headers) do
+    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
   end
 
   defp add_default_headers(headers) do

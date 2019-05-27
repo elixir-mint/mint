@@ -16,9 +16,6 @@ defmodule HPACK.TableTest do
     assert {:name, _} = Table.lookup_by_header(table, ":authority", nil)
     assert {:name, _} = Table.lookup_by_header(table, ":authority", "https://example.com")
 
-    # The static table is case-insensitive for header names. See #171.
-    assert {:name, _} = Table.lookup_by_header(table, "If-Modified-Since", "some date")
-
     assert Table.lookup_by_header(table, "my-nonexistent-header", nil) == :not_found
     assert Table.lookup_by_header(table, "my-nonexistent-header", "my-value") == :not_found
 
@@ -27,16 +24,6 @@ defmodule HPACK.TableTest do
     assert {:full, _} = Table.lookup_by_header(table, ":my-header", "my-value")
     assert {:name, _} = Table.lookup_by_header(table, ":my-header", "other-value")
     assert {:name, _} = Table.lookup_by_header(table, ":my-header", nil)
-
-    # Perfect match for header name with different case.
-    assert {:full, _} = Table.lookup_by_header(table, ":MY-HEADER", "my-value")
-
-    # Name match for header value with different case.
-    assert {:name, _} = Table.lookup_by_header(table, ":my-header", "MY-VALUE")
-
-    # Adding an uppercase header makes it findable when lowecase.
-    table = Table.add(table, ":OTHER-HEADER", "my-value")
-    assert {:name, _} = Table.lookup_by_header(table, ":other-header", nil)
   end
 
   test "resizing" do

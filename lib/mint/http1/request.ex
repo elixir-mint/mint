@@ -31,7 +31,7 @@ defmodule Mint.HTTP1.Request do
   end
 
   defp lower_header_keys(headers) do
-    for {name, value} <- headers, do: {Util.lower_ascii(name), value}
+    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
   end
 
   defp add_default_headers(headers, host, body) do

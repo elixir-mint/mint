@@ -1,8 +1,6 @@
 defmodule Mint.HTTP2.HPACK.Table do
   @moduledoc false
 
-  alias Mint.Core.Util
-
   defstruct [
     :max_table_size,
     entries: [],
@@ -17,8 +15,6 @@ defmodule Mint.HTTP2.HPACK.Table do
           length: non_neg_integer()
         }
 
-  # In this table, header names are matched in a *case insensitive* way.
-  # Header values are matched in a *case sensitive* way.
   @static_table [
     {":authority", nil},
     {":method", "GET"},
@@ -101,11 +97,16 @@ defmodule Mint.HTTP2.HPACK.Table do
   Adds the given header to the given table.
 
   If the new entry does not fit within the max table size then the oldest entries will be evicted.
+
+  Header names should be lowercase when added to the HPACK table
+  as per the [HTTP/2 spec](https://http2.github.io/http2-spec/#rfc.section.8.1.2):
+
+  > header field names MUST be converted to lowercase prior to their encoding in HTTP/2
+
   """
   @spec add(t(), binary(), binary()) :: t()
   def add(%__MODULE__{} = table, name, value) do
     %{max_table_size: max_table_size, size: size} = table
-    name = Util.lower_ascii(name)
     entry_size = entry_size(name, value)
 
     cond do
@@ -168,14 +169,17 @@ defmodule Mint.HTTP2.HPACK.Table do
 
     * `:not_found` if the header name is not in the table at all
 
+  Header names should be lowercase when looked up in the HPACK table
+  as per the [HTTP/2 spec](https://http2.github.io/http2-spec/#rfc.section.8.1.2):
+
+  > header field names MUST be converted to lowercase prior to their encoding in HTTP/2
+
   """
   @spec lookup_by_header(t(), binary(), binary() | nil) ::
           {:full, pos_integer()} | {:name, pos_integer()} | :not_found
   def lookup_by_header(table, name, value)
 
   def lookup_by_header(%__MODULE__{entries: entries}, name, value) do
-    name = Util.lower_ascii(name)
-
     case static_lookup_by_header(name, value) do
       {:full, _index} = result ->
         result

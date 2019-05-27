@@ -55,7 +55,7 @@ defmodule Mint.HTTP1.Parse do
   defp token_list_downcase(rest, acc), do: token_downcase(rest, _token_acc = <<>>, acc)
 
   defp token_downcase(<<char, rest::binary>>, token_acc, acc) when is_tchar(char),
-    do: token_downcase(rest, <<token_acc::binary, Util.lower_ascii_char(char)>>, acc)
+    do: token_downcase(rest, <<token_acc::binary, Util.downcase_ascii_char(char)>>, acc)
 
   defp token_downcase(rest, token_acc, acc), do: token_list_sep_downcase(rest, [token_acc | acc])
 
