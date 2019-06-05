@@ -291,9 +291,9 @@ defmodule Mint.HTTP1 do
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
-    # TODO: handle errors here.
 
     if conn.mode == :active do
+      # TODO: handle errors here.
       _ = transport.setopts(socket, active: :once)
     end
 
