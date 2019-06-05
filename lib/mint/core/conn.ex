@@ -43,5 +43,6 @@ defmodule Mint.Core.Conn do
 
   @callback delete_private(conn(), key :: atom()) :: conn()
 
+  # Used by proxying. Not public for the user.
   @callback get_socket(conn()) :: Mint.Types.socket()
 end
