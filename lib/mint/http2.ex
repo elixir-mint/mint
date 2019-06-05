@@ -804,8 +804,12 @@ defmodule Mint.HTTP2 do
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
-    # TODO: handle errors
-    _ = transport.setopts(socket, active: :once)
+
+    if conn.mode == :active do
+      # TODO: handle errors
+      _ = transport.setopts(socket, active: :once)
+    end
+
     {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
