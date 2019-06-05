@@ -930,6 +930,11 @@ defmodule Mint.HTTP2 do
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
 
+    unless mode in [:active, :passive] do
+      raise ArgumentError,
+            "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
+
     conn = %Mint.HTTP2{
       hostname: hostname,
       port: port,
@@ -952,7 +957,7 @@ defmodule Mint.HTTP2 do
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport.setopts(socket, active: :once) do
+         :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
     else
       error ->
