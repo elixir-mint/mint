@@ -23,7 +23,8 @@ defmodule Mint.Core.Transport do
 
   @callback close(Types.socket()) :: :ok | error()
 
-  @callback recv(Types.socket(), bytes :: non_neg_integer()) :: {:ok, binary()} | error()
+  @callback recv(Types.socket(), bytes :: non_neg_integer(), timeout()) ::
+              {:ok, binary()} | error()
 
   @callback setopts(Types.socket(), opts :: keyword()) :: :ok | error()
 

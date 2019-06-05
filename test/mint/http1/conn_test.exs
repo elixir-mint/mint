@@ -6,7 +6,7 @@ defmodule Mint.HTTP1Test do
   setup do
     {:ok, port} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
-    [conn: conn]
+    [conn: conn, port: port]
   end
 
   test "unknown message", %{conn: conn} do
@@ -303,5 +303,11 @@ defmodule Mint.HTTP1Test do
 
     assert {:ok, conn, _responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
     assert HTTP1.open_request_count(conn) == 0
+  end
+
+  test "connect/4 raises if :mode is not :active/:passive", %{port: port} do
+    assert_raise ArgumentError, ~r/^the :mode option .* got: :something_else$/, fn ->
+      HTTP1.connect(:http, "localhost", port, mode: :something_else)
+    end
   end
 end

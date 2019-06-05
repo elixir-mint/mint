@@ -37,6 +37,12 @@ defmodule Mint.Core.Conn do
 
   @callback open_request_count(conn()) :: non_neg_integer()
 
+  @callback recv(conn(), byte_count :: non_neg_integer(), timeout()) ::
+              {:ok, conn(), [Types.response()]}
+              | {:error, conn(), Types.error(), [Types.response()]}
+
+  @callback set_mode(conn(), :active | :passive) :: {:ok, conn()} | {:error, Types.error()}
+
   @callback put_private(conn(), key :: atom(), value :: term()) :: conn()
 
   @callback get_private(conn(), key :: atom(), default_value :: term()) :: term()

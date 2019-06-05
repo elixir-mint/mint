@@ -115,6 +115,25 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
+  @spec recv(t(), non_neg_integer(), timeout()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
+  def recv(%UnsafeProxy{module: module, state: state} = conn, byte_count, timeout) do
+    case module.recv(state, byte_count, timeout) do
+      {:ok, state, responses} -> {:ok, %{conn | state: state}, responses}
+      {:error, state, reason, responses} -> {:error, %{conn | state: state}, reason, responses}
+    end
+  end
+
+  @impl true
+  @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
+  def set_mode(%UnsafeProxy{module: module, state: state} = conn, mode) do
+    with {:ok, state} <- module.set_mode(state, mode) do
+      {:ok, %{conn | state: state}}
+    end
+  end
+
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(%UnsafeProxy{module: module, state: state} = conn, key, value) do
     state = module.put_private(state, key, value)

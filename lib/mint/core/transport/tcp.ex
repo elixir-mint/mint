@@ -41,8 +41,8 @@ defmodule Mint.Core.Transport.TCP do
   defdelegate close(socket), to: :gen_tcp
 
   @impl true
-  def recv(socket, bytes) do
-    wrap_err(:gen_tcp.recv(socket, bytes))
+  def recv(socket, bytes, timeout) do
+    wrap_err(:gen_tcp.recv(socket, bytes, timeout))
   end
 
   @impl true
