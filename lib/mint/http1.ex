@@ -376,9 +376,8 @@ defmodule Mint.HTTP1 do
     %{conn | private: Map.delete(private, key)}
   end
 
-  @doc """
-  See `Mint.HTTP.get_socket/1`.
-  """
+  # Made public to be used with proxying.
+  @doc false
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%__MODULE__{socket: socket} = _conn) do

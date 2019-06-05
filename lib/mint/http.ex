@@ -693,19 +693,8 @@ defmodule Mint.HTTP do
   @spec delete_private(t(), atom()) :: t()
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
-  @doc """
-  Gets the underlying TCP/SSL socket from the connection.
-
-  Right now there is no built-in way to tell if the socket being retrieved
-  is a `:gen_tcp` or an `:ssl` socket. You can store the transport (`:http`
-  or `:https`) you're using in the private store when starting the connection.
-  See `put_private/3` and `get_private/3`.
-
-  ## Examples
-
-      socket = Mint.HTTP.get_socket(conn)
-
-  """
+  # Made public to be used with proxying.
+  @doc false
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(conn), do: conn_module(conn).get_socket(conn)
