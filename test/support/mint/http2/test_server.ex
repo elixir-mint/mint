@@ -30,8 +30,15 @@ defmodule Mint.HTTP2.TestServer do
     {:ok, server_socket} = Task.await(task)
 
     # SETTINGS here.
-    assert_receive message, 100
-    assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
+    conn =
+      if options[:mode] == :passive do
+        assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, 100)
+        conn
+      else
+        assert_receive message, 100
+        assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
+        conn
+      end
 
     :ok = :ssl.setopts(server_socket, active: true)
 

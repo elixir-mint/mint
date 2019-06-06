@@ -885,7 +885,7 @@ defmodule Mint.HTTP2 do
         :passive -> false
       end
 
-    with :ok <- conn.transport.setopts(conn.socket, active) do
+    with :ok <- conn.transport.setopts(conn.socket, active: active) do
       {:ok, put_in(conn.mode, mode)}
     end
   end

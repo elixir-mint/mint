@@ -7,8 +7,9 @@ defmodule Mint.HTTP1.PropertiesTest do
   alias Mint.{HTTP1, HTTP1.TestServer}
 
   setup do
-    {:ok, port} = TestServer.start()
+    {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+    assert_receive {^server_ref, _server_socket}
     [conn: conn]
   end
 
