@@ -649,7 +649,7 @@ defmodule Mint.HTTP do
 
   `timeout` is the maximum time to wait before returning an error.
 
-  This function will raise an error if the socket is active mode.
+  This function will raise an error if the socket is in active mode.
 
   ## Examples
 
