@@ -649,6 +649,8 @@ defmodule Mint.HTTP do
 
   `timeout` is the maximum time to wait before returning an error.
 
+  This function will raise an error if the socket is active mode.
+
   ## Examples
 
       {:ok, conn, responses} = Mint.HTTP.recv(conn, 0, 5000)
