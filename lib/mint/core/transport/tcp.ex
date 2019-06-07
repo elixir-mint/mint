@@ -46,6 +46,11 @@ defmodule Mint.Core.Transport.TCP do
   end
 
   @impl true
+  def controlling_process(socket, pid) do
+    wrap_err(:gen_tcp.controlling_process(socket, pid))
+  end
+
+  @impl true
   def setopts(socket, opts) do
     wrap_err(:inet.setopts(socket, opts))
   end

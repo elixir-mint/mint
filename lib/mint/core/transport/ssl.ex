@@ -354,6 +354,35 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @impl true
+  def controlling_process(socket, pid) do
+    with {:ok, active: active} <- getopts(socket, [:active]),
+         :ok <- setopts(socket, active: false),
+         :ok <- wrap_err(:ssl.controlling_process(socket, pid)),
+         still_open? = forward_messages_to_new_controlling_process(socket, pid, true),
+         :ok <- if(active == :once and still_open?, do: setopts(socket, active: :once), else: :ok) do
+      :ok
+    end
+  end
+
+  defp forward_messages_to_new_controlling_process(socket, pid, still_open?) do
+    receive do
+      {:ssl, ^socket, _data} = message ->
+        Kernel.send(pid, message)
+        forward_messages_to_new_controlling_process(socket, pid, still_open?)
+
+      {:ssl_error, ^socket, _error} = message ->
+        Kernel.send(pid, message)
+        forward_messages_to_new_controlling_process(socket, pid, still_open?)
+
+      {:ssl_closed, ^socket} = message ->
+        Kernel.send(pid, message)
+        forward_messages_to_new_controlling_process(socket, pid, false)
+    after
+      0 -> still_open?
+    end
+  end
+
+  @impl true
   def setopts(socket, opts) do
     wrap_err(:ssl.setopts(socket, opts))
   end
