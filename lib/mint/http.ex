@@ -699,7 +699,40 @@ defmodule Mint.HTTP do
   def set_mode(conn, mode), do: conn_module(conn).set_mode(conn, mode)
 
   @doc """
-  TODO: write docs.
+  Changes the *controlling process* of the given connection to `new_pid`.
+
+  The **controlling process** is a concept that comes from the Erlang TCP and
+  SSL implementations. The controlling process of a connection is the process
+  that started the connection and that receives the messages for that connection.
+  You can change the controlling process of a connection through this function.
+
+  This function also takes care of "transferring" all the connection messages
+  that are in the mailbox of the current controlling process to the new
+  controlling process.
+
+  Rememeber that the connection is a data structure, so if you
+  change the controlling process it doesn't mean you "transferred" the
+  connection data structure itself to the other process, which you have
+  to do manually (for example by sending the connection data structure to the
+  new controlling process). If you do that, be careful of race conditions
+  and be sure to retrieve the connection in the new controlling process
+  before accepting connection messages in the new controlling process.
+
+  Note that changing controlling process means that you still need to be careful
+  about only calling `Mint` functions from a single process (ideally the new
+  controlling process) because the connection data structure is immutable.
+
+  ## Examples
+
+      send(new_pid, {:conn, conn})
+      {:ok, conn} = Mint.HTTP.controlling_process(conn, new_pid)
+
+      # In the "new_pid" process
+      receive do
+        {:conn, conn} ->
+          # Will receive connection messages.
+      end
+
   """
   # TODO: remove the check when we depend on Elixir 1.7+.
   if Version.match?(System.version(), ">= 1.7.0") do
