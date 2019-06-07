@@ -660,6 +660,11 @@ defmodule Mint.HTTP do
   @spec recv(t(), non_neg_integer(), timeout()) ::
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
+  # TODO: remove the check when we depend on Elixir 1.7+.
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
   def recv(conn, byte_count, timeout), do: conn_module(conn).recv(conn, byte_count, timeout)
 
   @doc """
@@ -686,6 +691,11 @@ defmodule Mint.HTTP do
   """
   @impl true
   @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
+  # TODO: remove the check when we depend on Elixir 1.7+.
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
   def set_mode(conn, mode), do: conn_module(conn).set_mode(conn, mode)
 
   @doc """
