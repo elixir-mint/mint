@@ -162,6 +162,7 @@ defmodule Mint.HTTP2 do
     # Transport things.
     :transport,
     :socket,
+    :mode,
 
     # Host things.
     :hostname,
@@ -797,21 +798,18 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
-    conn = put_in(conn.state, :closed)
-
-    if conn.open_client_stream_count > 0 or conn.open_server_stream_count > 0 do
-      error = conn.transport.wrap_error(:closed)
-      {:error, conn, error, _responses = []}
-    else
-      {:ok, conn, _responses = []}
-    end
+    handle_closed(conn)
   end
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
-    # TODO: handle errors
-    _ = transport.setopts(socket, active: :once)
+
+    if conn.mode == :active do
+      # TODO: handle errors
+      _ = transport.setopts(socket, active: :once)
+    end
+
     {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
@@ -837,6 +835,59 @@ defmodule Mint.HTTP2 do
   @spec open_request_count(t()) :: non_neg_integer()
   def open_request_count(%Mint.HTTP2{} = conn) do
     conn.open_client_stream_count
+  end
+
+  @doc """
+  See `Mint.HTTP.recv/3`.
+  """
+  @impl true
+  @spec recv(t(), non_neg_integer(), timeout()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
+  def recv(conn, byte_count, timeout)
+
+  def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
+    case conn.transport.recv(conn.socket, byte_count, timeout) do
+      {:ok, data} ->
+        {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+        {:ok, conn, Enum.reverse(responses)}
+
+      {:error, %TransportError{reason: :closed}} ->
+        handle_closed(conn)
+
+      {:error, reason} ->
+        error = conn.transport.wrap_error(reason)
+        {:error, %{conn | state: :closed}, error, _responses = []}
+    end
+  catch
+    :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
+  end
+
+  def recv(_conn, _byte_count, _timeout) do
+    raise ArgumentError,
+          "can't use recv/3 to synchronously receive data when the mode is :active. " <>
+            "Use Mint.HTTP.set_mode/2 to set the connection to passive mode"
+  end
+
+  @doc """
+  See `Mint.HTTP.set_mode/2`.
+  """
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
+  @impl true
+  @spec set_mode(t(), :active | :passive) :: :ok | Types.error()
+  def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
+    active =
+      case mode do
+        :active -> :once
+        :passive -> false
+      end
+
+    with :ok <- conn.transport.setopts(conn.socket, active: active) do
+      {:ok, put_in(conn.mode, mode)}
+    end
   end
 
   @doc """
@@ -879,14 +930,21 @@ defmodule Mint.HTTP2 do
         ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
+    mode = Keyword.get(opts, :mode, :active)
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_settings!(client_settings_params)
+
+    unless mode in [:active, :passive] do
+      raise ArgumentError,
+            "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
 
     conn = %Mint.HTTP2{
       hostname: hostname,
       port: port,
       transport: scheme_to_transport(scheme),
       socket: socket,
+      mode: mode,
       scheme: Atom.to_string(scheme),
       state: :open
     }
@@ -903,7 +961,7 @@ defmodule Mint.HTTP2 do
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
          conn = apply_server_settings(conn, settings(server_settings, :params)),
-         :ok <- transport.setopts(socket, active: :once) do
+         :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
     else
       error ->
@@ -921,6 +979,17 @@ defmodule Mint.HTTP2 do
   end
 
   ## Helpers
+
+  defp handle_closed(conn) do
+    conn = put_in(conn.state, :closed)
+
+    if conn.open_client_stream_count > 0 or conn.open_server_stream_count > 0 do
+      error = conn.transport.wrap_error(:closed)
+      {:error, conn, error, _responses = []}
+    else
+      {:ok, conn, _responses = []}
+    end
+  end
 
   defp negotiate(hostname, port, scheme, transport_opts) do
     transport = scheme_to_transport(scheme)
@@ -959,7 +1028,7 @@ defmodule Mint.HTTP2 do
         {:ok, frame, rest, socket}
 
       :more ->
-        with {:ok, data} <- transport.recv(socket, 0) do
+        with {:ok, data} <- transport.recv(socket, 0, _timeout = 10_000) do
           recv_next_frame(transport, socket, buffer <> data)
         end
 

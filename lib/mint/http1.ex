@@ -77,6 +77,7 @@ defmodule Mint.HTTP1 do
     :request,
     :socket,
     :transport,
+    :mode,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -130,14 +131,21 @@ defmodule Mint.HTTP1 do
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, Types.error()}
-  def initiate(scheme, socket, hostname, _port, _opts) do
+  def initiate(scheme, socket, hostname, _port, opts) do
     transport = scheme_to_transport(scheme)
+    mode = Keyword.get(opts, :mode, :active)
+
+    unless mode in [:active, :passive] do
+      raise ArgumentError,
+            "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
 
     with :ok <- inet_opts(transport, socket),
-         :ok <- transport.setopts(socket, active: :once) do
+         :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       conn = %__MODULE__{
         transport: transport,
         socket: socket,
+        mode: mode,
         host: hostname,
         state: :open
       }
@@ -283,8 +291,12 @@ defmodule Mint.HTTP1 do
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     result = handle_data(conn, data)
-    # TODO: handle errors here.
-    _ = transport.setopts(socket, active: :once)
+
+    if conn.mode == :active do
+      # TODO: handle errors here.
+      _ = transport.setopts(socket, active: :once)
+    end
+
     result
   end
 
@@ -295,9 +307,7 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    conn = put_in(conn.state, :closed)
-    error = conn.transport.wrap_error(reason)
-    {:error, conn, error, []}
+    handle_error(conn, reason)
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -331,6 +341,55 @@ defmodule Mint.HTTP1 do
       {:ok, conn, [{:done, request.ref}]}
     else
       {:error, conn, conn.transport.wrap_error(:closed), []}
+    end
+  end
+
+  defp handle_error(conn, reason) do
+    conn = put_in(conn.state, :closed)
+    error = conn.transport.wrap_error(reason)
+    {:error, conn, error, []}
+  end
+
+  @doc """
+  See `Mint.HTTP.recv/3`.
+  """
+  @impl true
+  @spec recv(t(), non_neg_integer(), timeout()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
+  def recv(conn, byte_count, timeout)
+
+  def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
+    case conn.transport.recv(conn.socket, byte_count, timeout) do
+      {:ok, data} -> handle_data(conn, data)
+      {:error, reason} -> handle_error(conn, reason)
+    end
+  end
+
+  def recv(_conn, _byte_count, _timeout) do
+    raise ArgumentError,
+          "can't use recv/3 to synchronously receive data when the mode is :active. " <>
+            "Use Mint.HTTP.set_mode/2 to set the connection to passive mode"
+  end
+
+  @doc """
+  See `Mint.HTTP.set_mode/2`.
+  """
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
+  @impl true
+  @spec set_mode(t(), :active | :passive) :: :ok | Types.error()
+  def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
+    active =
+      case mode do
+        :active -> :once
+        :passive -> false
+      end
+
+    with :ok <- conn.transport.setopts(conn.socket, active: active) do
+      {:ok, put_in(conn.mode, mode)}
     end
   end
 

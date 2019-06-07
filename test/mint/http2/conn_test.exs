@@ -983,6 +983,75 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "connection modes" do
+    @tag connect_options: [mode: :passive]
+    test "starting a connection with :passive mode and using recv/3", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf: server_encode_headers([{":status", "200"}]),
+            flags: set_flags(:headers, [:end_headers, :end_stream])
+          )
+        ])
+
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "changing the mode of a connection with set_mode/2", %{conn: conn} do
+      assert_raise ArgumentError, ~r"^can't use recv/3", fn ->
+        HTTP2.recv(conn, 0, 100)
+      end
+
+      assert {:ok, %HTTP2{} = conn} = HTTP2.set_mode(conn, :passive)
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf: server_encode_headers([{":status", "200"}]),
+            flags: set_flags(:headers, [:end_headers, :end_stream])
+          )
+        ])
+
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:done, ref}
+             ]
+
+      assert {:ok, %HTTP2{} = conn} = HTTP2.set_mode(conn, :active)
+
+      assert_raise ArgumentError, ~r"^can't use recv/3", fn ->
+        HTTP2.recv(conn, 0, 100)
+      end
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "ping" do
     test "if we send a PING we then get a :pong reply", %{conn: conn} do
       assert {:ok, conn, ref} = HTTP2.ping(conn)
@@ -1071,10 +1140,20 @@ defmodule Mint.HTTP2Test do
   end
 
   defp stream_frames(conn, frames) do
+    data = server_encode_frames(frames)
+    HTTP2.stream(conn, {:ssl, conn.socket, data})
+  end
+
+  defp server_get_socket() do
+    server = Process.get(@pdict_key)
+    TestServer.get_socket(server)
+  end
+
+  defp server_encode_frames(frames) do
     server = Process.get(@pdict_key)
     {server, data} = TestServer.encode_frames(server, frames)
     Process.put(@pdict_key, server)
-    HTTP2.stream(conn, {:ssl, conn.socket, data})
+    data
   end
 
   defp server_encode_headers(headers) do

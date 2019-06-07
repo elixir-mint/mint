@@ -4,9 +4,11 @@ defmodule Mint.HTTP1Test do
   alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
   setup do
-    {:ok, port} = TestServer.start()
+    {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
-    [conn: conn]
+    assert_receive {^server_ref, server_socket}
+
+    [conn: conn, port: port, server_ref: server_ref, server_socket: server_socket]
   end
 
   test "unknown message", %{conn: conn} do
@@ -303,5 +305,40 @@ defmodule Mint.HTTP1Test do
 
     assert {:ok, conn, _responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
     assert HTTP1.open_request_count(conn) == 0
+  end
+
+  test "connect/4 raises if :mode is not :active/:passive", %{port: port} do
+    assert_raise ArgumentError, ~r/^the :mode option .* got: :something_else$/, fn ->
+      HTTP1.connect(:http, "localhost", port, mode: :something_else)
+    end
+  end
+
+  test "starting a connection in :passive mode and using recv/3",
+       %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert_receive {^server_ref, server_socket}
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+    assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}]
+  end
+
+  test "changing the connection mode with set_mode/2",
+       %{conn: conn, server_socket: server_socket} do
+    assert_raise ArgumentError, ~r"can't use recv/3", fn ->
+      HTTP1.recv(conn, 0, 100)
+    end
+
+    assert {:ok, conn} = HTTP1.set_mode(conn, :passive)
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+    assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}]
   end
 end

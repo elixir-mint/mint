@@ -87,6 +87,15 @@ defmodule Mint.HTTP do
   doesn't ship with the certificate store itself, but it has an optional dependency on
   [CAStore](https://github.com/ericmj/castore), which provides an up-to-date certificate store. If
   you don't want to use your own certificate store, just add `:castore` to your dependencies.
+
+  ## Mode
+
+  By default Mint operates in **active mode** meaning that the process that started the
+  connection receives socket messages. Mint also supports **passive mode**, where no messages
+  are sent to the process and the process needs to fetch data out of the socket manually.
+  The mode can be controlled at connection time through the `:mode` option in `connect/4`
+  or changed dynamically through `set_mode/2`. Passive mode is generally only recommended
+  for special use cases.
   """
 
   import Mint.Core.Util
@@ -120,6 +129,9 @@ defmodule Mint.HTTP do
     * `:transport_opts` - (keyword) options to be given to the transport being used.
       These options will be merged with some default options that cannot be overridden.
       For more details, refer to the "Transport options" section below.
+
+    * `:mode` - (`:active` or `:passive`) whether to set the socket to active or
+      passive mode. See the "Mode" section in the module documentation and `set_mode/2`.
 
     * `:protocols` - (list of atoms) a list of protocols to try when connecting to the
       server. The possible values in the list are `:http1` for HTTP/1 and HTTP/1.1 and
@@ -184,8 +196,7 @@ defmodule Mint.HTTP do
 
   Common options for `:http` and `:https`:
 
-    * `:active` - managed by Mint. Should not normally be modified by the
-      application at any time.
+    * `:active` - controlled by the `:mode` option. Cannot be overridden.
 
     * `:mode` - set to `:binary`. Cannot be overriden.
 
@@ -519,6 +530,9 @@ defmodule Mint.HTTP do
   it just means that you will process one message at a time with `stream/2` and not
   pay too much attention to the socket mode.
 
+  Mint also supports passive mode to avoid receiving messages. See the "Mode" section
+  in the module documentation.
+
   ## Responses
 
   Each possible response returned by this function is a tuple with two or more elements.
@@ -619,6 +633,60 @@ defmodule Mint.HTTP do
   @impl true
   @spec open_request_count(t()) :: non_neg_integer()
   def open_request_count(conn), do: conn_module(conn).open_request_count(conn)
+
+  @doc """
+  Receives data from the socket in a blocking way.
+
+  By default Mint operates in active mode, meaning that messages are delivered
+  to the process that started the connection. However, Mint also supports passive
+  mode (see the "Mode" section in the module documentation).
+
+  In passive mode, you'll need to manually get bytes out of the socket. You can
+  do that with this function.
+
+  `byte_count` is the number of bytes you want out of the socket. If `byte_count`
+  is `0`, all available bytes will be returned.
+
+  `timeout` is the maximum time to wait before returning an error.
+
+  This function will raise an error if the socket is in active mode.
+
+  ## Examples
+
+      {:ok, conn, responses} = Mint.HTTP.recv(conn, 0, 5000)
+
+  """
+  @impl true
+  @spec recv(t(), non_neg_integer(), timeout()) ::
+          {:ok, t(), [Types.response()]}
+          | {:error, t(), Types.error(), [Types.response()]}
+  def recv(conn, byte_count, timeout), do: conn_module(conn).recv(conn, byte_count, timeout)
+
+  @doc """
+  Changes the mode of the underlying socket.
+
+  To use the connection in *active mode*, where the process that started the
+  connection receives socket messages, set the mode to `:active` (see also `stream/2`).
+  To use the connection in *passive mode*, where you need to manually receive data
+  from the socket, set the mode to `:passive` (see also `recv/3`).
+
+  The mode can also be controlled at connection time by the `:mode` option passed
+  to `connect/4`.
+
+  Note that if you're switching from active to passive mode, you still might have
+  socket messages in the process mailbox that you need to consume before doing
+  any other operation on the connection.
+
+  See the "Mode" section in the module documentation for more information on modes.
+
+  ## Examples
+
+      {:ok, conn} = Mint.HTTP.set_mode(conn, :passive)
+
+  """
+  @impl true
+  @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
+  def set_mode(conn, mode), do: conn_module(conn).set_mode(conn, mode)
 
   @doc """
   Assigns a new private key and value in the connection.
