@@ -355,6 +355,10 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def controlling_process(socket, pid) do
+    # We do this dance because it's what gen_tcp does in Erlang. However, ssl
+    # doesn't do this so we need to do it ourselves. Implementation roughly
+    # taken from this:
+    # https://github.com/erlang/otp/blob/fc1f0444e32b039194189af97fb3d5358a2b91e3/lib/kernel/src/inet.erl#L1696-L1754
     with {:ok, active: active} <- getopts(socket, [:active]),
          :ok <- setopts(socket, active: false),
          :ok <- wrap_err(:ssl.controlling_process(socket, pid)),
