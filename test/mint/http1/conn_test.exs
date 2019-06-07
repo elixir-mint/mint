@@ -341,4 +341,26 @@ defmodule Mint.HTTP1Test do
     assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
     assert responses == [{:status, ref, 200}]
   end
+
+  test "controlling_process/2", %{conn: conn, server_socket: server_socket} do
+    parent = self()
+    ref = make_ref()
+
+    new_pid =
+      spawn_link(fn ->
+        receive do
+          message -> send(parent, {ref, message})
+        end
+      end)
+
+    {:ok, conn, request_ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn} = HTTP1.controlling_process(conn, new_pid)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+    assert_receive {^ref, message}, 500
+    assert {:ok, conn, responses} = HTTP1.stream(conn, message)
+    assert responses == [{:status, request_ref, 200}]
+  end
 end

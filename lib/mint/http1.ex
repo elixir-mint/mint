@@ -400,6 +400,22 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
+  See `Mint.HTTP.controlling_process/2`.
+  """
+  # TODO: remove the check when we depend on Elixir 1.7+.
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
+  @impl true
+  @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
+  def controlling_process(%__MODULE__{} = conn, new_pid) when is_pid(new_pid) do
+    with :ok <- conn.transport.controlling_process(conn.socket, new_pid) do
+      {:ok, conn}
+    end
+  end
+
+  @doc """
   See `Mint.HTTP.open_request_count/1`.
 
   In HTTP/1, the number of open requests is the number of pipelined requests.

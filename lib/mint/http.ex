@@ -699,6 +699,18 @@ defmodule Mint.HTTP do
   def set_mode(conn, mode), do: conn_module(conn).set_mode(conn, mode)
 
   @doc """
+  TODO: write docs.
+  """
+  # TODO: remove the check when we depend on Elixir 1.7+.
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "0.3.0"
+  end
+
+  @impl true
+  @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
+  def controlling_process(conn, new_pid), do: conn_module(conn).controlling_process(conn, new_pid)
+
+  @doc """
   Assigns a new private key and value in the connection.
 
   This storage is meant to be used to associate metadata with the connection and

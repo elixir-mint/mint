@@ -43,6 +43,8 @@ defmodule Mint.Core.Conn do
 
   @callback set_mode(conn(), :active | :passive) :: {:ok, conn()} | {:error, Types.error()}
 
+  @callback controlling_process(conn(), pid()) :: {:ok, conn()} | {:error, Types.error()}
+
   @callback put_private(conn(), key :: atom(), value :: term()) :: conn()
 
   @callback get_private(conn(), key :: atom(), default_value :: term()) :: term()

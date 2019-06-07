@@ -1122,6 +1122,48 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "controlling process" do
+    test "changing the controlling process with controlling_process/2", %{conn: conn} do
+      parent = self()
+      ref = make_ref()
+
+      new_pid =
+        spawn_link(fn ->
+          receive do
+            message -> send(parent, {ref, message})
+          end
+        end)
+
+      {conn, request_ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf: server_encode_headers([{":status", "200"}]),
+            flags: set_flags(:headers, [:end_headers, :end_stream])
+          )
+        ])
+
+      {:ok, %HTTP2{} = conn} = HTTP2.controlling_process(conn, new_pid)
+
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert_receive {^ref, message}
+      assert {:ok, %HTTP2{} = conn, responses} = HTTP2.stream(conn, message)
+
+      assert responses == [
+               {:status, request_ref, 200},
+               {:headers, request_ref, []},
+               {:done, request_ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   @pdict_key {__MODULE__, :http2_test_server}
 
   defp start_connection(context) do
