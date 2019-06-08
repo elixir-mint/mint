@@ -710,7 +710,7 @@ defmodule Mint.HTTP do
   that are in the mailbox of the current controlling process to the new
   controlling process.
 
-  Rememeber that the connection is a data structure, so if you
+  Remember that the connection is a data structure, so if you
   change the controlling process it doesn't mean you "transferred" the
   connection data structure itself to the other process, which you have
   to do manually (for example by sending the connection data structure to the
