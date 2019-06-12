@@ -1130,7 +1130,9 @@ defmodule Mint.HTTP2Test do
       new_pid =
         spawn_link(fn ->
           receive do
-            message -> send(parent, {ref, message})
+            message ->
+              send(parent, {ref, message})
+              Process.sleep(:infinity)
           end
         end)
 
