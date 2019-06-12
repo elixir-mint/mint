@@ -12,8 +12,8 @@ defmodule Mint.HTTP2.TestServer do
     reuseaddr: true,
     next_protocols_advertised: ["h2"],
     alpn_preferred_protocols: ["h2"],
-    certfile: Path.absname("certificate.pem", __DIR__),
-    keyfile: Path.absname("key.pem", __DIR__)
+    certfile: Path.absname("../certificate.pem", __DIR__),
+    keyfile: Path.absname("../key.pem", __DIR__)
   ]
 
   @spec connect(keyword(), keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}

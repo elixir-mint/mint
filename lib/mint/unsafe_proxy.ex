@@ -134,6 +134,14 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
+  @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
+  def controlling_process(%UnsafeProxy{module: module, state: state} = conn, new_pid) do
+    with {:ok, state} <- module.controlling_process(state, new_pid) do
+      {:ok, %{conn | state: state}}
+    end
+  end
+
+  @impl true
   @spec put_private(t(), atom(), term()) :: t()
   def put_private(%UnsafeProxy{module: module, state: state} = conn, key, value) do
     state = module.put_private(state, key, value)

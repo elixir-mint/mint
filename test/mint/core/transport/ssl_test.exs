@@ -139,6 +139,105 @@ defmodule Mint.Core.Transport.SSLTest do
     end
   end
 
+  describe "controlling_process/2" do
+    setup do
+      parent = self()
+      ref = make_ref()
+
+      ssl_opts = [
+        mode: :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        nodelay: true,
+        certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
+        keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
+      ]
+
+      spawn_link(fn ->
+        {:ok, listen_socket} = :ssl.listen(0, ssl_opts)
+        {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+        send(parent, {ref, port})
+
+        {:ok, socket} = :ssl.transport_accept(listen_socket)
+        :ok = :ssl.ssl_accept(socket)
+
+        send(parent, {ref, socket})
+
+        # Keep the server alive forever.
+        :ok = Process.sleep(:infinity)
+      end)
+
+      assert_receive {^ref, port} when is_integer(port), 500
+
+      {:ok, socket} = SSL.connect("localhost", port, verify: :verify_none)
+      assert_receive {^ref, server_socket}, 200
+
+      {:ok, server_port: port, socket: socket, server_socket: server_socket}
+    end
+
+    test "changing the controlling process of a active: :once socket",
+         %{socket: socket, server_socket: server_socket} do
+      parent = self()
+      ref = make_ref()
+
+      # Send two SSL messages (that get translated to Erlang messages right
+      # away because of "nodelay: true"), but wait after each one so that
+      # it actually arrives and we can set the socket back to active: :once.
+      :ok = SSL.setopts(socket, active: :once)
+      :ok = :ssl.send(server_socket, "some data 1")
+      :ok = Process.sleep(100)
+
+      :ok = SSL.setopts(socket, active: :once)
+      :ok = :ssl.send(server_socket, "some data 2")
+      :ok = Process.sleep(100)
+
+      {:messages, messages} = Process.info(self(), :messages)
+      assert {:ssl, socket, "some data 1"} in messages
+      assert {:ssl, socket, "some data 2"} in messages
+
+      other_process = spawn_link(fn -> process_mirror(parent, ref) end)
+
+      assert :ok = SSL.controlling_process(socket, other_process)
+
+      assert_receive {^ref, {:ssl, ^socket, "some data 1"}}
+      assert_receive {^ref, {:ssl, ^socket, "some data 2"}}
+
+      refute_receive _message, 1
+    end
+
+    test "changing the controlling process of a passive socket",
+         %{socket: socket, server_socket: server_socket} do
+      parent = self()
+      ref = make_ref()
+
+      :ok = :ssl.send(server_socket, "some data")
+
+      other_process =
+        spawn_link(fn ->
+          assert {:ok, [active: false]} = SSL.getopts(socket, [:active])
+          :ok = SSL.setopts(socket, active: :once)
+          assert_receive message, 500
+          send(parent, {ref, message})
+        end)
+
+      assert :ok = SSL.controlling_process(socket, other_process)
+
+      assert_receive {^ref, {:ssl, ^socket, "some data"}}, 500
+
+      refute_receive _message, 1
+    end
+
+    test "changing the controlling process of a closed socket",
+         %{socket: socket} do
+      other_process = spawn_link(fn -> :ok = Process.sleep(:infinity) end)
+
+      :ok = SSL.close(socket)
+
+      assert {:error, _error} = SSL.controlling_process(socket, other_process)
+    end
+  end
+
   defp cn_cert(_context) do
     [cert: load_cert(@cn_cert)]
   end
@@ -158,5 +257,13 @@ defmodule Mint.Core.Transport.SSLTest do
   defp load_cert(path) do
     [{_, binary, _} | _] = path |> File.read!() |> :public_key.pem_decode()
     :public_key.pkix_decode_cert(binary, :otp)
+  end
+
+  defp process_mirror(parent, ref) do
+    receive do
+      message ->
+        send(parent, {ref, message})
+        process_mirror(parent, ref)
+    end
   end
 end
