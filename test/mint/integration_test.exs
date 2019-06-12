@@ -135,11 +135,12 @@ defmodule Mint.IntegrationTest do
 
       assert conn.__struct__ == Mint.UnsafeProxy
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
-      assert {:ok, conn, responses} = receive_stream(conn)
+      assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
       assert merge_body(responses, request) =~ "httpbin"
     end
 
@@ -149,11 +150,12 @@ defmodule Mint.IntegrationTest do
 
       assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
-      assert {:ok, conn, responses} = receive_stream(conn)
+      assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
       assert merge_body(responses, request) =~ "httpbin"
     end
 
@@ -166,11 +168,12 @@ defmodule Mint.IntegrationTest do
 
       assert conn.__struct__ == Mint.HTTP2
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
-      assert {:ok, conn, responses} = receive_stream(conn)
+      assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
       assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
     end
 
@@ -183,11 +186,12 @@ defmodule Mint.IntegrationTest do
 
       assert conn.__struct__ == Mint.HTTP2
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
-      assert {:ok, conn, responses} = receive_stream(conn)
+      assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
       assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
     end
   end

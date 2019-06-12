@@ -270,7 +270,7 @@ defmodule Mint.HTTP2Test do
 
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [])
       assert_http2_error error, :closed
     end
   end
@@ -564,7 +564,7 @@ defmodule Mint.HTTP2Test do
       promised_headers_hbf = server_encode_headers([{":method", "GET"}])
       normal_headers_hbf = server_encode_headers([{":status", "200"}])
 
-      assert {:error, %HTTP2{} = conn, error, responses} =
+      assert {:error, %HTTP2{} = conn, error, _responses} =
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
@@ -624,7 +624,7 @@ defmodule Mint.HTTP2Test do
 
       assert [
                {:push_promise, ^ref, promised_ref1, _},
-               {:push_promise, ^ref, promised_ref2, _},
+               {:push_promise, ^ref, _promised_ref2, _},
                {:status, ^ref, 200},
                {:headers, ^ref, []},
                {:done, ^ref}
@@ -1070,7 +1070,7 @@ defmodule Mint.HTTP2Test do
 
     test "if the server sends a PING we reply automatically", %{conn: conn} do
       opaque_data = :binary.copy(<<0>>, 8)
-      assert {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [ping(opaque_data: opaque_data)])
+      assert {:ok, %HTTP2{}, []} = stream_frames(conn, [ping(opaque_data: opaque_data)])
       assert_recv_frames [ping(opaque_data: ^opaque_data)]
     end
 
@@ -1079,7 +1079,7 @@ defmodule Mint.HTTP2Test do
       opaque_data = :binary.copy(<<0>>, 8)
 
       assert capture_log(fn ->
-               assert {:ok, %HTTP2{} = conn, []} =
+               assert {:ok, %HTTP2{}, []} =
                         stream_frames(conn, [
                           ping(opaque_data: opaque_data, flags: set_flags(:ping, [:ack]))
                         ])
@@ -1088,11 +1088,11 @@ defmodule Mint.HTTP2Test do
 
     test "if the server sends a PING ack but no PING requests match we emit a warning",
          %{conn: conn} do
-      assert {:ok, conn, ref} = HTTP2.ping(conn, <<1, 2, 3, 4, 5, 6, 7, 8>>)
+      assert {:ok, conn, _ref} = HTTP2.ping(conn, <<1, 2, 3, 4, 5, 6, 7, 8>>)
       opaque_data = <<1, 2, 3, 4, 5, 6, 7, 0>>
 
       assert capture_log(fn ->
-               assert {:ok, %HTTP2{} = conn, []} =
+               assert {:ok, %HTTP2{}, []} =
                         stream_frames(conn, [
                           ping(opaque_data: opaque_data, flags: set_flags(:ping, [:ack]))
                         ])

@@ -10,11 +10,12 @@ defmodule Mint.UnsafeProxyTest do
              UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
 
     assert {:ok, conn, request} = UnsafeProxy.request(conn, "GET", "/", [], nil)
-    assert {:ok, conn, responses} = receive_stream(conn)
+    assert {:ok, _conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
+    assert is_list(headers)
     assert merge_body(responses, request) =~ "httpbin"
   end
 end

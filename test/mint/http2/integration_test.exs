@@ -46,15 +46,18 @@ defmodule HTTP2.IntegrationTest do
       assert {:ok, %HTTP2{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^req_id, 200}, {:headers, ^req_id, _headers} | rest] = responses
 
-      if rest != [] do
-        assert [{:data, ^req_id, data}] = rest
-        assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
-      else
-        assert_receive message, 5000
-        assert {:ok, %HTTP2{} = conn, responses} = HTTP2.stream(conn, message)
-        assert [{:data, ^req_id, data}] = responses
-        assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
-      end
+      conn =
+        if rest != [] do
+          assert [{:data, ^req_id, data}] = rest
+          assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
+          conn
+        else
+          assert_receive message, 5000
+          assert {:ok, %HTTP2{} = conn, responses} = HTTP2.stream(conn, message)
+          assert [{:data, ^req_id, data}] = responses
+          assert data =~ "# ~1KB of junk to force browsers to start rendering immediately"
+          conn
+        end
 
       assert_receive message, 5000
       assert {:ok, %HTTP2{} = conn, responses} = HTTP2.stream(conn, message)
@@ -116,7 +119,7 @@ defmodule HTTP2.IntegrationTest do
 
     test "GET /serverpush", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [])
-      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+      assert {:ok, %HTTP2{} = _conn, responses} = receive_stream(conn)
 
       # TODO: improve this test by improving receive_stream/1.
       assert [

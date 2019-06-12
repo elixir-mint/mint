@@ -286,7 +286,7 @@ defmodule Mint.HTTP1Test do
 
   test "request/5 returns an error if the connection is closed", %{conn: conn} do
     assert {:ok, conn} = HTTP1.close(conn)
-    assert {:error, conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [])
+    assert {:error, _conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [])
   end
 
   test "open_request_count/1", %{conn: conn} do
@@ -360,7 +360,7 @@ defmodule Mint.HTTP1Test do
     :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
 
     assert_receive {^ref, message}, 500
-    assert {:ok, conn, responses} = HTTP1.stream(conn, message)
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, message)
     assert responses == [{:status, request_ref, 200}]
   end
 end
