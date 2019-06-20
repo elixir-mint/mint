@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.0
+
+### Breaking changes
+
+  * Remove `Mint.HTTP1.get_socket/1`, `Mint.HTTP2.get_socket/1`, and `Mint.HTTP.get_socket/1`.
+
+### Bug fixes and improvements
+
+  * Downcase all headers in HTTP/2 to mimic the behavior in HTTP/1.1.
+
+  * Add `Mint.HTTP.set_mode/2`, `Mint.HTTP1.set_mode/2`, and `Mint.HTTP2.set_mode/2` to change the mode of a socket between active and passive.
+
+  * Add a `:mode` option to the `connect/4` functions to start the socket in active or passive mode.
+
+  * Add `Mint.HTTP.recv/3`, `Mint.HTTP1.recv/3`, and `Mint.HTTP2.recv/3` to receive data from a passive socket in a blocking way.
+
+  * Add `Mint.HTTP.controlling_process/2`, `Mint.HTTP1.controlling_process/2`, and `Mint.HTTP2.controlling_process/2` to change the controlling process of a connection.
+
+  * Support trailing response headers in HTTP/2 connections.
+
 ## v0.2.1
 
 ### Bug fixes and improvements
