@@ -548,8 +548,9 @@ defmodule Mint.HTTP do
 
     * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
-      with `header_name` and `header_value` being strings. Only one `:headers`
-      response is returned per request.
+      with `header_name` and `header_value` being strings. A single `:headers` response
+      will come after the `:status` response. A single `:headers` response may come
+      after all the `:data` responses if **trailing headers** are present.
 
     * `{:data, request_ref, binary}` - returned when the server replied with
       a chunk of response body (as a binary). The request shouldn't be considered done
