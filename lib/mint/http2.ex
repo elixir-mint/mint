@@ -883,7 +883,7 @@ defmodule Mint.HTTP2 do
   end
 
   @impl true
-  @spec set_mode(t(), :active | :passive) :: :ok | {:error, Types.error()}
+  @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
   def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
     active =
       case mode do
