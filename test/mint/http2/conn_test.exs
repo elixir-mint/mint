@@ -458,6 +458,171 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "trailing headers" do
+    test "sent by the server with a normal response", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      <<trailing_hbf1::1-bytes, trailing_hbf2::binary>> =
+        server_encode_headers([{"x-trailing", "some value"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "some data", flags: set_flags(:data, [])),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: trailing_hbf1,
+                   flags: set_flags(:headers, [:end_stream])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: trailing_hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:data, ^ref, "some data"},
+               {:headers, ^ref, trailing_headers},
+               {:done, ^ref}
+             ] = responses
+
+      assert trailing_headers == [{"x-trailing", "some value"}]
+      assert HTTP2.open?(conn)
+    end
+
+    test "sent by the server directly after the \"opening\" headers (without data in between)",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: trailing_hbf,
+                   flags: set_flags(:headers, [:end_stream, :end_headers])
+                 )
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:headers, ^ref, [{"x-trailing", "some value"}]},
+               {:done, ^ref}
+             ] = responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "with a push promise request", %{conn: conn} do
+      promised_stream_id = 4
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      promised_hbf = server_encode_headers([{":method", "GET"}])
+      hbf1 = server_encode_headers([{":status", "200"}])
+      hbf2 = server_encode_headers([{":status", "200"}])
+      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: promised_hbf,
+                   promised_stream_id: promised_stream_id,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf1,
+                   flags: set_flags(:headers, [:end_stream, :end_headers])
+                 ),
+                 # Promised stream with trailing headers.
+                 headers(
+                   stream_id: promised_stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: promised_stream_id,
+                   hbf: trailing_hbf,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [
+               {:push_promise, ^ref, promised_ref, [{":method", "GET"}]},
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:done, ^ref},
+               {:status, promised_ref, 200},
+               {:headers, promised_ref, []},
+               {:headers, promised_ref, [{"x-trailing", "some value"}]},
+               {:done, promised_ref}
+             ] = responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "protocol error if trailing headers don't have END_STREAM set", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "some data", flags: set_flags(:data, [])),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: trailing_hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:data, ^ref, "some data"},
+               {:error, ^ref, error}
+             ] = responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "trailing headers didn't set the END_STREAM flag"
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "server pushes" do
     test "a PUSH_PROMISE frame and a few CONTINUATION frames are received",
          %{conn: conn} do

@@ -1070,7 +1070,8 @@ defmodule Mint.HTTP2 do
       id: conn.next_stream_id,
       ref: make_ref(),
       state: :idle,
-      window_size: conn.server_settings.initial_window_size
+      window_size: conn.server_settings.initial_window_size,
+      received_first_headers?: false
     }
 
     conn = put_in(conn.streams[stream.id], stream)
@@ -1466,16 +1467,29 @@ defmodule Mint.HTTP2 do
   # still need to process the hbf so that the HPACK table is updated, but then
   # we don't add any responses.
   defp decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?) do
-    case decode_hbf(conn, hbf) do
-      {conn, [{":status", status} | headers]} when not is_nil(stream) ->
-        ref = stream.ref
+    {conn, headers} = decode_hbf(conn, hbf)
+
+    if stream do
+      handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?)
+    else
+      _ = Logger.debug(fn -> "Received HEADERS frame on closed stream ID" end)
+      {conn, responses}
+    end
+  end
+
+  defp handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?) do
+    %{ref: ref, received_first_headers?: received_first_headers?} = stream
+
+    case headers do
+      [{":status", status} | headers] when not received_first_headers? ->
+        conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
         new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
         cond do
           # :reserved_remote means that this was a promised stream. As soon as headers come,
           # the stream goes in the :half_closed_local state (unless it's not allowed because
-          # of the client's max concurrent streams limit).
+          # of the client's max concurrent streams limit, or END_STREAM is set).
           stream.state == :reserved_remote ->
             cond do
               conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
@@ -1500,15 +1514,28 @@ defmodule Mint.HTTP2 do
             {conn, new_responses}
         end
 
-      # http://httpwg.org/specs/rfc7540.html#rfc.section.8.1.2.6
-      {conn, _headers} when not is_nil(stream) ->
+      # Trailing headers. We don't care about the :status header here.
+      headers when received_first_headers? ->
+        if end_stream? do
+          conn = close_stream!(conn, stream.id, :no_error)
+          {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
+        else
+          # Trailing headers must set the END_STREAM flag because they're
+          # the last thing allowed on the stream (other than RST_STREAM and
+          # the usual frames).
+          conn = close_stream!(conn, stream.id, :protocol_error)
+          debug_data = "trailing headers didn't set the END_STREAM flag"
+          error = wrap_error({:protocol_error, debug_data})
+          responses = [{:error, stream.ref, error} | responses]
+          {conn, responses}
+        end
+
+      # Non-trailing headers need to have a :status header, otherwise
+      # it's a protocol error.
+      _headers ->
         conn = close_stream!(conn, stream.id, :protocol_error)
         error = wrap_error(:missing_status_header)
         responses = [{:error, stream.ref, error} | responses]
-        {conn, responses}
-
-      {conn, _headers} when is_nil(stream) ->
-        _ = Logger.debug(fn -> "Received HEADERS frame on closed stream ID" end)
         {conn, responses}
     end
   end
@@ -1696,7 +1723,8 @@ defmodule Mint.HTTP2 do
       id: promised_stream_id,
       ref: make_ref(),
       state: :reserved_remote,
-      window_size: conn.server_settings.initial_window_size
+      window_size: conn.server_settings.initial_window_size,
+      received_first_headers?: false
     }
 
     conn = put_in(conn.streams[promised_stream.id], promised_stream)
