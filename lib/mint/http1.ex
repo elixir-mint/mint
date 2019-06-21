@@ -320,13 +320,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
-    # If the buffer is empty, reusing the incoming data saves
-    # a potentially large allocation of memory
-    data =
-      case conn.buffer do
-        <<>> -> data
-        buffer -> buffer <> data
-      end
+    data = maybe_concat(conn.buffer, data)
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->

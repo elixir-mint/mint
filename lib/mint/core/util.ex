@@ -41,4 +41,10 @@ defmodule Mint.Core.Util do
 
   def downcase_ascii_char(char) when char in ?A..?Z, do: char + 32
   def downcase_ascii_char(char) when char in 0..127, do: char
+
+  # If the buffer is empty, reusing the incoming data saves
+  # a potentially large allocation of memory.
+  # This should be fixed in a subsequent OTP release.
+  def maybe_concat(<<>>, data), do: data
+  def maybe_concat(buffer, data) when is_binary(buffer), do: buffer <> data
 end

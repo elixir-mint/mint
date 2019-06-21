@@ -803,7 +803,8 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+    data = maybe_concat(conn.buffer, data)
+    {conn, responses} = handle_new_data(conn, data, [])
 
     if conn.mode == :active do
       # TODO: handle errors
@@ -854,7 +855,8 @@ defmodule Mint.HTTP2 do
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} ->
-        {conn, responses} = handle_new_data(conn, conn.buffer <> data, [])
+        data = maybe_concat(conn.buffer, data)
+        {conn, responses} = handle_new_data(conn, data, [])
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, %TransportError{reason: :closed}} ->
@@ -1051,7 +1053,8 @@ defmodule Mint.HTTP2 do
 
       :more ->
         with {:ok, data} <- transport.recv(socket, 0, _timeout = 10_000) do
-          recv_next_frame(transport, socket, buffer <> data)
+          data = maybe_concat(buffer, data)
+          recv_next_frame(transport, socket, data)
         end
 
       {:error, {kind, _info} = reason} when kind in [:frame_size_error, :protocol_error] ->
