@@ -860,8 +860,7 @@ defmodule Mint.HTTP2 do
       {:error, %TransportError{reason: :closed}} ->
         handle_closed(conn)
 
-      {:error, reason} ->
-        error = conn.transport.wrap_error(reason)
+      {:error, error} ->
         {:error, %{conn | state: :closed}, error, _responses = []}
     end
   catch
