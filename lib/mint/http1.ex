@@ -307,7 +307,7 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    handle_error(conn, reason)
+    handle_error(conn, conn.transport.wrap_error(reason))
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -344,9 +344,8 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp handle_error(conn, reason) do
+  defp handle_error(conn, error) do
     conn = put_in(conn.state, :closed)
-    error = conn.transport.wrap_error(reason)
     {:error, conn, error, []}
   end
 
@@ -367,7 +366,7 @@ defmodule Mint.HTTP1 do
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} -> handle_data(conn, data)
-      {:error, reason} -> handle_error(conn, reason)
+      {:error, error} -> handle_error(conn, error)
     end
   end
 
