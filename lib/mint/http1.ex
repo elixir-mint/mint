@@ -320,7 +320,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
-    data = conn.buffer <> data
+    data = maybe_concat(conn.buffer, data)
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
