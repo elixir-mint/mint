@@ -10,7 +10,6 @@ defmodule Mint.HTTP1.Request do
   def encode(method, target, host, headers, body) do
     headers =
       headers
-      |> lower_header_keys()
       |> add_default_headers(host, body)
 
     body = [
@@ -28,10 +27,6 @@ defmodule Mint.HTTP1.Request do
   defp encode_request_line(method, target) do
     validate_target!(target)
     [method, ?\s, target, " HTTP/1.1\r\n"]
-  end
-
-  defp lower_header_keys(headers) do
-    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
   end
 
   defp add_default_headers(headers, host, body) do
@@ -61,6 +56,14 @@ defmodule Mint.HTTP1.Request do
   defp encode_body(nil), do: ""
   defp encode_body(:stream), do: ""
   defp encode_body(body), do: body
+
+  def encode_chunk(chunk) when is_binary(chunk) do
+    [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"]
+  end
+
+  def encode_chunk(:eof) do
+    "0\r\n\r\n"
+  end
 
   # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
   @hex_characters '0123456789abcdefABCDEF'
