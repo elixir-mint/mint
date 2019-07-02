@@ -433,7 +433,7 @@ defmodule Mint.HTTP1Test do
 
   describe "streaming requests" do
     @describetag :focus
-    test "transfer-encoding is set to chunked if not set already and content is chunked",
+    test "transfer-encoding is set to chunked if not set already, and content is chunked",
          %{conn: conn, server_socket: server_socket} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
 
@@ -456,10 +456,30 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     end
 
+    test "if transfer-encoding is already set to chunked, we let the user do the chunking",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} =
+        HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "chunked"}], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+               transfer-encoding: chunked
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
+
+      assert HTTP1.open?(conn)
+    end
+
     test "transfer-encoding is set to chunked if present but not chunked/identity",
          %{conn: conn, server_socket: server_socket} do
-      {:ok, conn, _ref} =
-        HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "gzip"}], :stream)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "gzip"}], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
@@ -470,6 +490,33 @@ defmodule Mint.HTTP1Test do
 
                \
                """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "5\r\nhello\r\n"
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+      assert receive_request_string(server_socket) == "0\r\n\r\n"
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "transfer-encoding is not set to chunked if already set to identity",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} =
+        HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "identity"}], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+               transfer-encoding: identity
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
 
       assert HTTP1.open?(conn)
     end

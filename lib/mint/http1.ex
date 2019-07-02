@@ -843,7 +843,7 @@ defmodule Mint.HTTP1 do
         {"transfer-encoding", value} = found
 
         with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
-          if "chunked" in tokens do
+          if "chunked" in tokens or "identity" in tokens do
             {:ok, headers, :identity}
           else
             new_transfer_encoding = {"transfer-encoding", value <> ",chunked"}
