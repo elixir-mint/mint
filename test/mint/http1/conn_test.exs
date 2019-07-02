@@ -432,7 +432,6 @@ defmodule Mint.HTTP1Test do
   end
 
   describe "streaming requests" do
-    @describetag :focus
     test "transfer-encoding is set to chunked if not set already, and content is chunked",
          %{conn: conn, server_socket: server_socket} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
