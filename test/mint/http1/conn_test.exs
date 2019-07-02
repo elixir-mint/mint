@@ -158,38 +158,6 @@ defmodule Mint.HTTP1Test do
     assert HTTP1.open?(conn)
   end
 
-  test "overridden content-length header", %{conn: conn, server_socket: server_socket} do
-    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "10"}], "body")
-
-    assert receive_request_string(server_socket) ==
-             request_string("""
-             GET / HTTP/1.1
-             host: localhost
-             user-agent: mint/0.3.0
-             content-length: 10
-
-             body\
-             """)
-
-    assert HTTP1.open?(conn)
-  end
-
-  test "overridden user-agent header", %{conn: conn, server_socket: server_socket} do
-    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"User-Agent", "myapp/1.0"}], "body")
-
-    assert receive_request_string(server_socket) ==
-             request_string("""
-             GET / HTTP/1.1
-             content-length: 4
-             host: localhost
-             user-agent: myapp/1.0
-
-             body\
-             """)
-
-    assert HTTP1.open?(conn)
-  end
-
   test "error with multiple content-length headers", %{conn: conn} do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
@@ -394,6 +362,134 @@ defmodule Mint.HTTP1Test do
     assert_receive {^ref, message}, 500
     assert {:ok, _conn, responses} = HTTP1.stream(conn, message)
     assert responses == [{:status, request_ref, 200}]
+  end
+
+  describe "non-streaming requests" do
+    test "content-length header is added if not present",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], "body")
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               content-length: 4
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               body\
+               """)
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "content-length header is not added for empty body",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               \
+               """)
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "overridden content-length header", %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "10"}], "body")
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+               content-length: 10
+
+               body\
+               """)
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "overridden user-agent header", %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"User-Agent", "myapp/1.0"}], "body")
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               content-length: 4
+               host: localhost
+               user-agent: myapp/1.0
+
+               body\
+               """)
+
+      assert HTTP1.open?(conn)
+    end
+  end
+
+  describe "streaming requests" do
+    @describetag :focus
+    test "transfer-encoding is set to chunked if not set already and content is chunked",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               transfer-encoding: chunked
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "5\r\nhello\r\n"
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+      assert receive_request_string(server_socket) == "0\r\n\r\n"
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "transfer-encoding is set to chunked if present but not chunked/identity",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} =
+        HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "gzip"}], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+               transfer-encoding: gzip,chunked
+
+               \
+               """)
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "transfer-encoding is not set if content-length is present",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "5"}], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+               content-length: 5
+
+               \
+               """)
+
+      assert HTTP1.open?(conn)
+    end
   end
 
   defp request_string(string) do
