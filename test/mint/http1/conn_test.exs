@@ -158,6 +158,38 @@ defmodule Mint.HTTP1Test do
     assert HTTP1.open?(conn)
   end
 
+  test "overridden content-length header", %{conn: conn, server_socket: server_socket} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "10"}], "body")
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             host: localhost
+             user-agent: mint/0.3.0
+             content-length: 10
+
+             body\
+             """)
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "overridden user-agent header", %{conn: conn, server_socket: server_socket} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"User-Agent", "myapp/1.0"}], "body")
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             content-length: 4
+             host: localhost
+             user-agent: myapp/1.0
+
+             body\
+             """)
+
+    assert HTTP1.open?(conn)
+  end
+
   test "error with multiple content-length headers", %{conn: conn} do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-length: 3\r\n\r\nX"
@@ -362,5 +394,14 @@ defmodule Mint.HTTP1Test do
     assert_receive {^ref, message}, 500
     assert {:ok, _conn, responses} = HTTP1.stream(conn, message)
     assert responses == [{:status, request_ref, 200}]
+  end
+
+  defp request_string(string) do
+    String.replace(string, "\n", "\r\n")
+  end
+
+  defp receive_request_string(server_socket) do
+    assert_receive {:tcp, ^server_socket, data}
+    data
   end
 end

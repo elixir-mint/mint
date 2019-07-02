@@ -15,14 +15,17 @@ defmodule Mint.HTTP1 do
 
   import Mint.Core.Util
 
+  alias Mint.Core.Util
   alias Mint.HTTP1.{Parse, Request, Response}
-  alias Mint.{HTTPError, TransportError, Types, Util}
+  alias Mint.{HTTPError, TransportError, Types}
 
   require Logger
 
   @behaviour Mint.Core.Conn
 
   @opaque t() :: %__MODULE__{}
+
+  @user_agent "mint/" <> Mix.Project.config()[:version]
 
   @typedoc """
   An HTTP/1-specific error reason.
@@ -220,12 +223,17 @@ defmodule Mint.HTTP1 do
 
   def request(%__MODULE__{} = conn, method, path, headers, body) do
     %__MODULE__{host: host, transport: transport, socket: socket} = conn
-    headers = lower_header_keys(headers)
 
-    with {:ok, iodata} <- Request.encode(method, path, host, headers, body),
+    headers =
+      headers
+      |> lower_header_keys()
+      |> add_default_headers(host)
+
+    with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
+         {:ok, iodata} <- Request.encode(method, path, headers, body),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
-      request = new_request(request_ref, method, body, headers)
+      request = new_request(request_ref, method, body, encoding)
 
       if conn.request == nil do
         conn = %__MODULE__{conn | request: request}
@@ -283,7 +291,7 @@ defmodule Mint.HTTP1 do
         ref,
         chunk
       ) do
-    case conn.transport.send(conn.socket, Request.encode_chunk(body)) do
+    case conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       :ok ->
         if chunk == :eof do
           {:ok, put_in(conn.request.state, :status)}
@@ -793,14 +801,10 @@ defmodule Mint.HTTP1 do
     {:ok, body}
   end
 
-  defp new_request(ref, method, body, headers) do
+  defp new_request(ref, method, body, encoding) do
     state =
       if body == :stream do
-        cond do
-          List.keymember?(headers, "content-length", 0) -> {:stream_request, :identity}
-          List.keymember?(headers, "transfer-encoding", 0) -> {:stream_request, :identity}
-          true -> {:stream_request, :chunked}
-        end
+        {:stream_request, encoding}
       else
         :status
       end
@@ -822,6 +826,47 @@ defmodule Mint.HTTP1 do
 
   defp lower_header_keys(headers) do
     for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
+  end
+
+  defp add_default_headers(headers, host) do
+    headers
+    |> Util.put_new_header("user-agent", @user_agent)
+    |> Util.put_new_header("host", host)
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, :stream) do
+    cond do
+      List.keymember?(headers, "content-length", 0) ->
+        {:ok, headers, :identity}
+
+      found = List.keyfind(headers, "transfer-encoding", 0) ->
+        {"transfer-encoding", value} = found
+
+        with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
+          if "chunked" in tokens do
+            {:ok, headers, :identity}
+          else
+            new_transfer_encoding = {"transfer-encoding", value <> ",chunked"}
+            headers = List.keyreplace(headers, "transfer-encoding", 0, new_transfer_encoding)
+            {:ok, headers, :chunked}
+          end
+        end
+
+      # If no content-length or transfer-encoding are present, assume
+      # chunked transfer-encoding and handle the encoding ourselves.
+      true ->
+        headers = Util.put_new_header(headers, "transfer-encoding", "chunked")
+        {:ok, headers, :chunked}
+    end
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, nil) do
+    {:ok, headers, :identity}
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, body) do
+    length = body |> IO.iodata_length() |> Integer.to_string()
+    {:ok, Util.put_new_header(headers, "content-length", length), :identity}
   end
 
   defp wrap_error(reason) do

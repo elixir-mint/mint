@@ -3,15 +3,7 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  alias Mint.Core.Util
-
-  @user_agent "mint/" <> Mix.Project.config()[:version]
-
-  def encode(method, target, host, headers, body) do
-    headers =
-      headers
-      |> add_default_headers(host, body)
-
+  def encode(method, target, headers, body) do
     body = [
       encode_request_line(method, target),
       encode_headers(headers),
@@ -29,22 +21,6 @@ defmodule Mint.HTTP1.Request do
     [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 
-  defp add_default_headers(headers, host, body) do
-    headers
-    |> add_content_length(body)
-    |> Util.put_new_header("user-agent", @user_agent)
-    |> Util.put_new_header("host", host)
-  end
-
-  defp add_content_length(headers, nil), do: headers
-
-  defp add_content_length(headers, :stream), do: headers
-
-  defp add_content_length(headers, body) do
-    length = body |> IO.iodata_length() |> Integer.to_string()
-    Util.put_new_header(headers, "content-length", length)
-  end
-
   defp encode_headers(headers) do
     Enum.reduce(headers, "", fn {name, value}, acc ->
       validate_header_name!(name)
@@ -57,12 +33,13 @@ defmodule Mint.HTTP1.Request do
   defp encode_body(:stream), do: ""
   defp encode_body(body), do: body
 
-  def encode_chunk(chunk) when is_binary(chunk) do
-    [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"]
-  end
-
   def encode_chunk(:eof) do
     "0\r\n\r\n"
+  end
+
+  def encode_chunk(chunk) do
+    length = IO.iodata_length(chunk)
+    [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
   end
 
   # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
