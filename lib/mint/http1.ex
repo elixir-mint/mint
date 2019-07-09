@@ -15,6 +15,7 @@ defmodule Mint.HTTP1 do
 
   import Mint.Core.Util
 
+  alias Mint.Core.Util
   alias Mint.HTTP1.{Parse, Request, Response}
   alias Mint.{HTTPError, TransportError, Types}
 
@@ -23,6 +24,8 @@ defmodule Mint.HTTP1 do
   @behaviour Mint.Core.Conn
 
   @opaque t() :: %__MODULE__{}
+
+  @user_agent "mint/" <> Mix.Project.config()[:version]
 
   @typedoc """
   An HTTP/1-specific error reason.
@@ -209,7 +212,7 @@ defmodule Mint.HTTP1 do
   end
 
   def request(
-        %__MODULE__{request: %{state: :stream_request}} = conn,
+        %__MODULE__{request: %{state: {:stream_request, _}}} = conn,
         _method,
         _path,
         _headers,
@@ -221,11 +224,16 @@ defmodule Mint.HTTP1 do
   def request(%__MODULE__{} = conn, method, path, headers, body) do
     %__MODULE__{host: host, transport: transport, socket: socket} = conn
 
-    with {:ok, iodata} <- Request.encode(method, path, host, headers, body),
+    headers =
+      headers
+      |> lower_header_keys()
+      |> add_default_headers(host)
+
+    with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
+         {:ok, iodata} <- Request.encode(method, path, headers, body),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
-      state = if body == :stream, do: :stream_request, else: :status
-      request = new_request(request_ref, state, method)
+      request = new_request(request_ref, method, body, encoding)
 
       if conn.request == nil do
         conn = %__MODULE__{conn | request: request}
@@ -254,7 +262,7 @@ defmodule Mint.HTTP1 do
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
-        %__MODULE__{request: %{state: :stream_request, ref: ref}} = conn,
+        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         :eof
       ) do
@@ -262,13 +270,34 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: :stream_request, ref: ref}} = conn,
+        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         body
       ) do
     case conn.transport.send(conn.socket, body) do
       :ok ->
         {:ok, conn}
+
+      {:error, %TransportError{reason: :closed} = error} ->
+        {:error, %{conn | state: :closed}, error}
+
+      {:error, error} ->
+        {:error, conn, error}
+    end
+  end
+
+  def stream_request_body(
+        %__MODULE__{request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
+        ref,
+        chunk
+      ) do
+    case conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
+      :ok ->
+        if chunk == :eof do
+          {:ok, put_in(conn.request.state, :status)}
+        else
+          {:ok, conn}
+        end
 
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
@@ -772,7 +801,14 @@ defmodule Mint.HTTP1 do
     {:ok, body}
   end
 
-  defp new_request(ref, state, method) do
+  defp new_request(ref, method, body, encoding) do
+    state =
+      if body == :stream do
+        {:stream_request, encoding}
+      else
+        :status
+      end
+
     %{
       ref: ref,
       state: state,
@@ -786,6 +822,51 @@ defmodule Mint.HTTP1 do
       transfer_encoding: [],
       body: nil
     }
+  end
+
+  defp lower_header_keys(headers) do
+    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
+  end
+
+  defp add_default_headers(headers, host) do
+    headers
+    |> Util.put_new_header("user-agent", @user_agent)
+    |> Util.put_new_header("host", host)
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, :stream) do
+    cond do
+      List.keymember?(headers, "content-length", 0) ->
+        {:ok, headers, :identity}
+
+      found = List.keyfind(headers, "transfer-encoding", 0) ->
+        {"transfer-encoding", value} = found
+
+        with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
+          if "chunked" in tokens or "identity" in tokens do
+            {:ok, headers, :identity}
+          else
+            new_transfer_encoding = {"transfer-encoding", value <> ",chunked"}
+            headers = List.keyreplace(headers, "transfer-encoding", 0, new_transfer_encoding)
+            {:ok, headers, :chunked}
+          end
+        end
+
+      # If no content-length or transfer-encoding are present, assume
+      # chunked transfer-encoding and handle the encoding ourselves.
+      true ->
+        headers = Util.put_new_header(headers, "transfer-encoding", "chunked")
+        {:ok, headers, :chunked}
+    end
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, nil) do
+    {:ok, headers, :identity}
+  end
+
+  defp add_content_length_or_transfer_encoding(headers, body) do
+    length = body |> IO.iodata_length() |> Integer.to_string()
+    {:ok, Util.put_new_header(headers, "content-length", length), :identity}
   end
 
   defp wrap_error(reason) do
