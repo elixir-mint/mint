@@ -86,7 +86,11 @@ defmodule Mint.UnsafeProxy do
   end
 
   @impl true
-  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(
+          t(),
+          Types.request_ref(),
+          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+        ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(%UnsafeProxy{module: module, state: state} = conn, ref, body) do
     case module.stream_request_body(state, ref, body) do
