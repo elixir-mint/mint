@@ -72,6 +72,10 @@ defmodule Mint.HTTP1 do
     * `{:invalid_token_list, string}` - when a header that is supposed to contain a list
       of tokens (such as the `connection` header) contains a malformed list of tokens.
 
+    * `:trailing_headers_but_not_chunked_encoding` - when you try to send trailing
+      headers through `stream_request_body/3` but the transfer encoding of the request
+      was not `chunked`.
+
   """
   @type error_reason() :: term()
 
@@ -965,5 +969,9 @@ defmodule Mint.HTTP1 do
 
   def format_error({:invalid_token_list, string}) do
     "header contains invalid tokens: #{inspect(string)}"
+  end
+
+  def format_error(:trailing_headers_but_not_chunked_encoding) do
+    "trailing headers can only be sent when using chunked transfer-encoding"
   end
 end

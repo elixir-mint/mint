@@ -529,10 +529,15 @@ defmodule Mint.HTTP2 do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
         {conn, payload} =
-          if chunk == :eof do
+          case chunk do
+            :eof ->
             encode_data(conn, stream_id, "", [:end_stream])
-          else
-            encode_data(conn, stream_id, chunk, [])
+
+            {:eof, trailing_headers} ->
+              encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])
+
+            iodata ->
+              encode_data(conn, stream_id, iodata, [])
           end
 
         conn = send!(conn, payload)
