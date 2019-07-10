@@ -257,6 +257,25 @@ defmodule Mint.HTTP1 do
 
   @doc """
   See `Mint.HTTP.stream_request_body/3`.
+
+  ## Transfer encoding and content length
+
+  When streaming the request body, Mint cannot send a precalculated `content-length`
+  request header because it doesn't know the body that you'll stream. However, Mint
+  will transparently handle the presence of a `content-length` header using this logic:
+
+    * if you specifically set a `content-length` header, then transfer encoding and
+      making sure the content length is correct for what you'll stream is up to you.
+
+    * if you specifically set the transfer encoding (`transfer-encoding` header)
+      to `chunked`, then it's up to you to
+      [properly encode chunks](https://en.wikipedia.org/wiki/Chunked_transfer_encoding).
+
+    * if you don't set the transfer encoding to `chunked` and don't provide a
+      `content-length` header, Mint will do implicit `chunked` transfer encoding
+      (setting the `transfer-encoding` header appropriately) and will take care
+      of properly encoding the chunks.
+
   """
   @impl true
   @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::

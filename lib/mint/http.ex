@@ -475,10 +475,8 @@ defmodule Mint.HTTP do
 
   This function always returns an updated connection to be stored over the old connection.
 
-  When streaming the request body, Mint cannot send a precalculated `content-length`
-  request header. It is up to you set the correct headers depending on how you stream
-  the body, either by setting the `content-length` header yourself or by using the
-  appropriate transfer encoding if using HTTP/1.
+  For information about transfer encoding and content length in HTTP/1, see
+  `Mint.HTTP1.stream_request_body/3`.
 
   ## Examples
 
