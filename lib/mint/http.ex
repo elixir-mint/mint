@@ -473,10 +473,30 @@ defmodule Mint.HTTP do
     * `:eof` - signals the end of the streaming of the request body for the given
       request. Usually the server won't send any reply until this is sent.
 
+    * `{:eof, trailing_headers}` - sends **trailing headers** and signals the end
+      of the streaming of the request body for the given request. This behaves the
+      same way as `:eof` but first sends the trailing headers. See the "Trailing headers"
+      section below.
+
   This function always returns an updated connection to be stored over the old connection.
 
   For information about transfer encoding and content length in HTTP/1, see
   `Mint.HTTP1.stream_request_body/3`.
+
+  ## Trailing headers
+
+  HTTP trailing headers can be sent after the body of a request. The behaviour is slightly
+  different for HTTP/1 and HTTP/2.
+
+  ### HTTP/1
+
+  In HTTP/1, trailing headers are only supported if the transfer encoding is set to
+  `chunked`. See the "Transfer encoding" section above.
+
+  ### HTTP/2
+
+  In HTTP/2, trailing headers behaves like normal headers. You don't need to care
+  about the transfer encoding.
 
   ## Examples
 
@@ -491,7 +511,11 @@ defmodule Mint.HTTP do
 
   """
   @impl true
-  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(
+          t(),
+          Types.request_ref(),
+          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+        ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, ref, body),
     do: conn_module(conn).stream_request_body(conn, ref, body)

@@ -508,7 +508,11 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.stream_request_body/3`.
   """
   @impl true
-  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(
+          t(),
+          Types.request_ref(),
+          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+        ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, request_ref, chunk)
 
@@ -531,7 +535,7 @@ defmodule Mint.HTTP2 do
         {conn, payload} =
           case chunk do
             :eof ->
-            encode_data(conn, stream_id, "", [:end_stream])
+              encode_data(conn, stream_id, "", [:end_stream])
 
             {:eof, trailing_headers} ->
               encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])

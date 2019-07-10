@@ -282,7 +282,11 @@ defmodule Mint.HTTP1 do
 
   """
   @impl true
-  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(
+          t(),
+          Types.request_ref(),
+          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+        ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
         %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
