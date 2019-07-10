@@ -488,14 +488,11 @@ defmodule Mint.HTTP do
   HTTP trailing headers can be sent after the body of a request. The behaviour is slightly
   different for HTTP/1 and HTTP/2.
 
-  ### HTTP/1
-
   In HTTP/1, trailing headers are only supported if the transfer encoding is set to
-  `chunked`. See the "Transfer encoding" section above.
+  `chunked`. See `Mint.HTTP1.stream_request_body/3` for more information on chunked
+  transfer encoding.
 
-  ### HTTP/2
-
-  In HTTP/2, trailing headers behaves like normal headers. You don't need to care
+  In HTTP/2, trailing headers behave like normal headers. You don't need to care
   about the transfer encoding.
 
   ## Examples
