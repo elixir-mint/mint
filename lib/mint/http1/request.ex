@@ -37,6 +37,10 @@ defmodule Mint.HTTP1.Request do
     "0\r\n\r\n"
   end
 
+  def encode_chunk({:eof, trailing_headers}) do
+    ["0\r\n", encode_headers(trailing_headers), "\r\n"]
+  end
+
   def encode_chunk(chunk) do
     length = IO.iodata_length(chunk)
     [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
