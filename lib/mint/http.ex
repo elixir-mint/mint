@@ -495,6 +495,14 @@ defmodule Mint.HTTP do
   In HTTP/2, trailing headers behave like normal headers. You don't need to care
   about the transfer encoding.
 
+  ### The `trailer` header
+
+  As specified in
+  [section 4.4 of RFC 7230](https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#rfc.section.4.4),
+  in HTTP/1 you need to specify which headers you're going to send as trailing
+  headers using the `trailer` header. The `trailer` header applies to both HTTP/1
+  and HTTP/2. See the examples below for more information.
+
   ## Examples
 
   Let's see an example of streaming an empty JSON object (`{}`) by streaming one curly
@@ -505,6 +513,16 @@ defmodule Mint.HTTP do
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "}")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, :eof)
+
+  Here's an example of sending trailing headers:
+
+      headers = [{"content-type", "application/json"}, {"trailer", "my-trailer, x-expires"}]
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
+
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{}")
+
+      trailing_headers = [{"my-trailer", "xxx"}, {"x-expires", "10 days"}]
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, {:eof, trailing_headers})
 
   """
   @impl true
