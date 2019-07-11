@@ -551,9 +551,10 @@ defmodule Mint.HTTP1Test do
                \
                """)
 
+      # Trailing headers are also downcased.
       trailing_headers = [
         {"my-trailing", "some value"},
-        {"my-other-trailing", "some other value"}
+        {"My-Other-Trailing", "some other value"}
       ]
 
       assert {:ok, conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
