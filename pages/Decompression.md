@@ -54,7 +54,7 @@ defp decompress_with_algorithm(gzip, data) when gzip in ["gzip", "x-gzip"],
   do: :zlip.gunzip(data)
 
 defp decompress_with_algorithm("deflate", data),
-  do: :zlip.unzip(data)
+  do: :zlib.unzip(data)
 
 defp decompress_data("identity", data),
   do: data
