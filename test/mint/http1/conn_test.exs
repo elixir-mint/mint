@@ -536,6 +536,44 @@ defmodule Mint.HTTP1Test do
 
       assert HTTP1.open?(conn)
     end
+
+    test "sending trailing headers with implicit chunked transfer-encoding",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               POST / HTTP/1.1
+               transfer-encoding: chunked
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               \
+               """)
+
+      trailing_headers = [
+        {"my-trailing", "some value"},
+        {"my-other-trailing", "some other value"}
+      ]
+
+      assert {:ok, conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               0
+               my-trailing: some value
+               my-other-trailing: some other value
+
+               \
+               """)
+    end
+
+    test "sending trailing headers with non-chunked transfer-encoding is an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "5"}], :stream)
+
+      assert {:error, conn, %HTTPError{reason: :trailing_headers_but_not_chunked_encoding}} =
+               HTTP1.stream_request_body(conn, ref, {:eof, [{"my-trailer", "value"}]})
+    end
   end
 
   defp request_string(string) do

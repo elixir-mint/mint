@@ -27,7 +27,11 @@ defmodule Mint.Core.Conn do
               {:ok, conn(), Types.request_ref()}
               | {:error, conn(), Types.error()}
 
-  @callback stream_request_body(conn(), Types.request_ref(), body_chunk :: iodata() | :eof) ::
+  @callback stream_request_body(
+              conn(),
+              Types.request_ref(),
+              body_chunk :: iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+            ) ::
               {:ok, conn()} | {:error, conn(), Types.error()}
 
   @callback stream(conn(), term()) ::

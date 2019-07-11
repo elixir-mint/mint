@@ -72,6 +72,10 @@ defmodule Mint.HTTP1 do
     * `{:invalid_token_list, string}` - when a header that is supposed to contain a list
       of tokens (such as the `connection` header) contains a malformed list of tokens.
 
+    * `:trailing_headers_but_not_chunked_encoding` - when you try to send trailing
+      headers through `stream_request_body/3` but the transfer encoding of the request
+      was not `chunked`.
+
   """
   @type error_reason() :: term()
 
@@ -278,7 +282,11 @@ defmodule Mint.HTTP1 do
 
   """
   @impl true
-  @spec stream_request_body(t(), Types.request_ref(), iodata() | :eof) ::
+  @spec stream_request_body(
+          t(),
+          Types.request_ref(),
+          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+        ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
         %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
@@ -286,6 +294,14 @@ defmodule Mint.HTTP1 do
         :eof
       ) do
     {:ok, put_in(conn.request.state, :status)}
+  end
+
+  def stream_request_body(
+        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        ref,
+        {:eof, _trailing_headers}
+      ) do
+    {:error, conn, wrap_error(:trailing_headers_but_not_chunked_encoding)}
   end
 
   def stream_request_body(
@@ -312,10 +328,10 @@ defmodule Mint.HTTP1 do
       ) do
     case conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       :ok ->
-        if chunk == :eof do
-          {:ok, put_in(conn.request.state, :status)}
-        else
-          {:ok, conn}
+        case chunk do
+          :eof -> {:ok, put_in(conn.request.state, :status)}
+          {:eof, _trailing_headers} -> {:ok, put_in(conn.request.state, :status)}
+          _other -> {:ok, conn}
         end
 
       {:error, %TransportError{reason: :closed} = error} ->
@@ -957,5 +973,9 @@ defmodule Mint.HTTP1 do
 
   def format_error({:invalid_token_list, string}) do
     "header contains invalid tokens: #{inspect(string)}"
+  end
+
+  def format_error(:trailing_headers_but_not_chunked_encoding) do
+    "trailing headers can only be sent when using chunked transfer-encoding"
   end
 end

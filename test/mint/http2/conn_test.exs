@@ -1121,6 +1121,33 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, :unknown_request_to_stream
       assert HTTP2.open?(conn)
     end
+
+    test "streaming a request with trailing headers", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      # Using 1000 headers will go over the default max_frame_size so that the
+      # HEADERS frame for the trailing headers will also be split into a HEADERS
+      # plus CONTINUATION frames.
+      trailing_headers = for index <- 1..1000, do: {"my-trailing-#{index}", "value"}
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
+
+      assert_recv_frames [
+        headers(stream_id: stream_id) = headers,
+        headers(stream_id: stream_id, hbf: trailing_hbf1) = trailing_headers1,
+        continuation(stream_id: stream_id, hbf: trailing_hbf2) = trailing_headers2
+      ]
+
+      assert flag_set?(headers(headers, :flags), :headers, :end_headers)
+      refute flag_set?(headers(headers, :flags), :headers, :end_stream)
+
+      refute flag_set?(headers(trailing_headers1, :flags), :headers, :end_headers)
+      assert flag_set?(headers(trailing_headers1, :flags), :headers, :end_stream)
+
+      assert flag_set?(continuation(trailing_headers2, :flags), :continuation, :end_headers)
+
+      assert server_decode_headers(trailing_hbf1 <> trailing_hbf2) == trailing_headers
+    end
   end
 
   describe "open_request_count/1" do
