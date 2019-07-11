@@ -326,6 +326,12 @@ defmodule Mint.HTTP1 do
         ref,
         chunk
       ) do
+    chunk =
+      case chunk do
+        {:eof, trailing_headers} -> {:eof, lower_header_keys(trailing_headers)}
+        other -> other
+      end
+
     case conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       :ok ->
         case chunk do
