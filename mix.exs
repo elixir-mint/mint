@@ -27,7 +27,10 @@ defmodule Mint.MixProject do
       docs: [
         source_ref: "v#{@version}",
         source_url: @repo_url,
-        extras: ["pages/Architecture.md"]
+        extras: [
+          "pages/Architecture.md",
+          "pages/Decompression.md"
+        ]
       ]
     ]
   end
