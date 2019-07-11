@@ -4,7 +4,7 @@ Many web servers use compression to reduce the size of the payload to speed up d
 
 Clients may specify acceptable compression algorithms through the [`accept-encoding`][accept-encoding] request header. It's common for clients to supply one or more values in `accept-encoding`, for example `accept-encoding: gzip, deflate, identity` in the order of preference.
 
-Servers will read the `accept-encoding` header, and respond appropriately indicating which compression is used in the response body through the [`content-encoding`][content-encoding] or [`transfer-encoding`][transfer-encoding] response headers. It's not as common to use multiple compression algorithms, but it is possible: for example, `content-encoding: gzip` or `content-encoding: br, gzip` (meaning it was compressed with `br` first, and then `gzip`).
+Servers will read the `accept-encoding` and `TE` request headers, and respond appropriately indicating which compression is used in the response body through the [`content-encoding`][content-encoding] or [`transfer-encoding`][transfer-encoding] response headers respectively. It's not as common to use multiple compression algorithms, but it is possible: for example, `content-encoding: gzip` or `content-encoding: br, gzip` (meaning it was compressed with `br` first, and then `gzip`).
 
 Mint is a low-level client so it doesn't have built-in support for decompression. In this guide we'll explore how to add support for decompression when using Mint.
 
