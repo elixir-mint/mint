@@ -98,6 +98,9 @@ defmodule Mint.Core.Util do
   end
 
   def remove_unallowed_trailing_headers(headers) do
-    Enum.reject(headers, fn {name, _value} -> name in @unallowed_trailing_headers end)
+    # TODO: don't downcase here, downcase all headers as soon as we parse them instead.
+    Enum.reject(headers, fn {name, _value} ->
+      String.downcase(name) in @unallowed_trailing_headers
+    end)
   end
 end

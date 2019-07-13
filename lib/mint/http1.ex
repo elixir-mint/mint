@@ -994,4 +994,8 @@ defmodule Mint.HTTP1 do
   def format_error(:trailing_headers_but_not_chunked_encoding) do
     "trailing headers can only be sent when using chunked transfer-encoding"
   end
+
+  def format_error({:unallowed_trailing_header, {name, value}}) do
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
+  end
 end

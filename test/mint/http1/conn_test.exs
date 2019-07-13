@@ -263,7 +263,6 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
-  @tag :focus
   test "unallowed trailing headers are removed from the trailing headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -597,7 +596,6 @@ defmodule Mint.HTTP1Test do
                HTTP1.stream_request_body(conn, ref, {:eof, [{"my-trailer", "value"}]})
     end
 
-    @tag :focus
     test "sending unallowed trailing headers is an error", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
 

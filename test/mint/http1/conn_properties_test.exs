@@ -38,7 +38,7 @@ defmodule Mint.HTTP1.PropertiesTest do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\n"
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\nmy-trailer: value\r\n\r\n"
 
     check all byte_chunks <- random_chunks(response) do
       {conn, responses} =
@@ -51,7 +51,7 @@ defmodule Mint.HTTP1.PropertiesTest do
       assert [status, headers | rest] = responses
       assert {:status, ^ref, 200} = status
       assert {:headers, ^ref, [{"transfer-encoding", "chunked"}]} = headers
-      assert merge_body_with_trailers(rest, ref) == {"0123", [{"trailer", "value"}]}
+      assert merge_body_with_trailers(rest, ref) == {"0123", [{"my-trailer", "value"}]}
       assert conn.buffer == ""
     end
   end

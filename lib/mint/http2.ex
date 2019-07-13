@@ -2016,6 +2016,10 @@ defmodule Mint.HTTP2 do
     "can't send more data on this request since it's not streaming"
   end
 
+  def format_error({:unallowed_trailing_header, {name, value}}) do
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
+  end
+
   def format_error(:missing_status_header) do
     "the :status pseudo-header (which is required in HTTP/2) is missing from the response"
   end
