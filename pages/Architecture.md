@@ -93,7 +93,7 @@ defmodule ConnectionProcess do
   end
 
   defp process_response({:data, request_ref, new_data}, state) do
-    update_in(state.requests[request_ref].response[:data], fn existing_data -> (existing_data || "") <> new_data end)
+    update_in(state.requests[request_ref].response[:data], fn data -> (data || "") <> new_data end)
   end
 
   # When the request is done, we use GenServer.reply/2 to reply to the caller that was
