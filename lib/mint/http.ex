@@ -497,11 +497,23 @@ defmodule Mint.HTTP do
 
   ### The `trailer` header
 
-  As specified in
-  [section 4.4 of RFC 7230](https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#rfc.section.4.4),
+  As specified in [section 4.4 of RFC 7230](https://tools.ietf.org/html/rfc7230#section-4.4),
   in HTTP/1 you need to specify which headers you're going to send as trailing
   headers using the `trailer` header. The `trailer` header applies to both HTTP/1
   and HTTP/2. See the examples below for more information.
+
+  ### The `te` header
+
+  As specified in  [section 4.3 of RFC 7230](https://tools.ietf.org/html/rfc7230#section-4.3),
+  the `te` (or `TE`) header is used to specify which transfer-encodings the client
+  is willing to accept (besides `chunked`). Mint supports decoding of trailing headers,
+  but if you want to notify the server that you are accepting trailing headers,
+  use the `trailers` value in the `te` header. For example:
+
+      Mint.HTTP.request(conn, "GET", "/", [{"te", "trailers"}], "some body")
+
+  Note that the `te` header can also be used to communicate which encodings you
+  support to the server.
 
   ## Examples
 
