@@ -621,6 +621,40 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    test "unallowed headers are removed", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      trailing_hbf = server_encode_headers([{"x-trailing", "value"}, {"Host", "example.com"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: trailing_hbf,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, []},
+               {:headers, ^ref, trailing_headers},
+               {:done, ^ref}
+             ] = responses
+
+      assert trailing_headers == [{"x-trailing", "value"}]
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "server pushes" do
@@ -1155,6 +1189,17 @@ defmodule Mint.HTTP2Test do
       assert flag_set?(continuation(trailing_headers2, :flags), :continuation, :end_headers)
 
       assert server_decode_headers(trailing_hbf1 <> trailing_hbf2) == trailing_headers
+    end
+
+    test "unallowed trailing headers cause an error", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      trailing_headers = [{"x-trailing", "value"}, {"Host", "example.com"}]
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
+
+      assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
     end
   end
 

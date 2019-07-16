@@ -326,26 +326,34 @@ defmodule Mint.HTTP1 do
         ref,
         chunk
       ) do
-    chunk =
+    with {:ok, chunk} <- validate_chunk(chunk),
+         :ok <- conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       case chunk do
-        {:eof, trailing_headers} -> {:eof, lower_header_keys(trailing_headers)}
-        other -> other
+        :eof -> {:ok, put_in(conn.request.state, :status)}
+        {:eof, _trailing_headers} -> {:ok, put_in(conn.request.state, :status)}
+        _other -> {:ok, conn}
       end
-
-    case conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
-      :ok ->
-        case chunk do
-          :eof -> {:ok, put_in(conn.request.state, :status)}
-          {:eof, _trailing_headers} -> {:ok, put_in(conn.request.state, :status)}
-          _other -> {:ok, conn}
-        end
-
+    else
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
 
       {:error, error} ->
         {:error, conn, error}
     end
+  end
+
+  defp validate_chunk({:eof, trailing_headers}) do
+    headers = lower_header_keys(trailing_headers)
+
+    if unallowed_header = find_unallowed_trailing_header(headers) do
+      {:error, wrap_error({:unallowed_trailing_header, unallowed_header})}
+    else
+      {:ok, {:eof, headers}}
+    end
+  end
+
+  defp validate_chunk(chunk) do
+    {:ok, chunk}
   end
 
   @doc """
@@ -702,6 +710,8 @@ defmodule Mint.HTTP1 do
         decode_trailer_headers(conn, rest, responses, headers)
 
       {:ok, :eof, rest} ->
+        headers = Util.remove_unallowed_trailing_headers(headers)
+
         responses = [
           {:done, conn.request.ref}
           | add_trailing_headers(headers, conn.request.ref, responses)
@@ -983,5 +993,9 @@ defmodule Mint.HTTP1 do
 
   def format_error(:trailing_headers_but_not_chunked_encoding) do
     "trailing headers can only be sent when using chunked transfer-encoding"
+  end
+
+  def format_error({:unallowed_trailing_header, {name, value}}) do
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
   end
 end

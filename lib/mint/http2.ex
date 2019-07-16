@@ -538,6 +538,14 @@ defmodule Mint.HTTP2 do
               encode_data(conn, stream_id, "", [:end_stream])
 
             {:eof, trailing_headers} ->
+              lowered_headers =
+                for {name, value} <- trailing_headers, do: {Util.downcase_ascii(name), value}
+
+              if unallowed_trailing_header = Util.find_unallowed_trailing_header(lowered_headers) do
+                error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
+                throw({:mint, conn, error})
+              end
+
               encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])
 
             iodata ->
@@ -1533,6 +1541,7 @@ defmodule Mint.HTTP2 do
       headers when received_first_headers? ->
         if end_stream? do
           conn = close_stream!(conn, stream.id, :no_error)
+          headers = Util.remove_unallowed_trailing_headers(headers)
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
           # Trailing headers must set the END_STREAM flag because they're
@@ -2005,6 +2014,10 @@ defmodule Mint.HTTP2 do
 
   def format_error(:request_is_not_streaming) do
     "can't send more data on this request since it's not streaming"
+  end
+
+  def format_error({:unallowed_trailing_header, {name, value}}) do
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
   end
 
   def format_error(:missing_status_header) do

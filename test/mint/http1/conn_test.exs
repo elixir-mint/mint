@@ -249,7 +249,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\ntrailer: value\r\n\r\nXXX"
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\nmy-trailer: value\r\n\r\nXXX"
 
     assert {:ok, conn, [status, headers, body, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -257,10 +257,30 @@ defmodule Mint.HTTP1Test do
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
     assert body == {:data, ref, "0123"}
-    assert trailers == {:headers, ref, [{"trailer", "value"}]}
+    assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
     assert done == {:done, ref}
 
     assert conn.buffer == "XXX"
+  end
+
+  test "unallowed trailing headers are removed from the trailing headers", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\n" <>
+        "my-trailer: value\r\ncontent-type: application/json\r\n\r\n"
+
+    assert {:ok, conn, [status, headers, body, trailers, done]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, 200}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert body == {:data, ref, "0123"}
+    assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
+    assert done == {:done, ref}
+
+    assert conn.buffer == ""
   end
 
   test "do not chunk if unknown transfer-encoding", %{conn: conn} do
@@ -574,6 +594,19 @@ defmodule Mint.HTTP1Test do
 
       assert {:error, conn, %HTTPError{reason: :trailing_headers_but_not_chunked_encoding}} =
                HTTP1.stream_request_body(conn, ref, {:eof, [{"my-trailer", "value"}]})
+    end
+
+    test "sending unallowed trailing headers is an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+
+      # The Host is an example of an unallowed header. It should be unallowed
+      # regardless of its casing.
+      trailing_headers = [{"my-trailing", "value"}, {"Host", "example.com"}]
+
+      assert {:error, conn, error} =
+               HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
+
+      assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
     end
   end
 
