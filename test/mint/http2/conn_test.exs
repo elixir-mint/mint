@@ -629,7 +629,9 @@ defmodule Mint.HTTP2Test do
 
       hbf = server_encode_headers([{":status", "200"}])
 
-      trailing_hbf = server_encode_headers([{"x-trailing", "value"}, {"Host", "example.com"}])
+      # Note that headers are lowercase in HTTP/2 responses because the spec
+      # says so.
+      trailing_hbf = server_encode_headers([{"x-trailing", "value"}, {"host", "example.com"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [

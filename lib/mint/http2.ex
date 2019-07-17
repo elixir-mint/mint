@@ -538,8 +538,7 @@ defmodule Mint.HTTP2 do
               encode_data(conn, stream_id, "", [:end_stream])
 
             {:eof, trailing_headers} ->
-              lowered_headers =
-                for {name, value} <- trailing_headers, do: {Util.downcase_ascii(name), value}
+              lowered_headers = downcase_header_names(trailing_headers)
 
               if unallowed_trailing_header = Util.find_unallowed_trailing_header(lowered_headers) do
                 error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
