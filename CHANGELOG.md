@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0
+
+### Bug fixes and improvements
+
+  * Fix a small bug with double "wrapping" of some `Mint.TransportError`s.
+  * Prevent unnecessary buffer allocations in the connections (less memory waste!).
+  * Add support for chunked transfer-encoding in HTTP/1 requests when you don't use `content-encoding`/`transfer-encoding` yourself.
+  * Add support for trailing headers in HTTP/* requests through `stream_request_body/3`.
+  * Add a page about decompressing responses in the guides.
+
 ## v0.3.0
 
 ### Breaking changes
