@@ -474,7 +474,9 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test ":authority pseudo-header does not include port if it is the scheme's default", %{conn: conn} do
+    test ":authority pseudo-header does not include port if it is the scheme's default", %{
+      conn: conn
+    } do
       # Override default https port for this test
       URI.default_port("https", conn.port)
 
