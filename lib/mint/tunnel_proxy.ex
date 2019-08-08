@@ -44,15 +44,16 @@ defmodule Mint.TunnelProxy do
 
   defp receive_response(conn, ref, timeout_deadline) do
     timeout = timeout_deadline - System.monotonic_time(:millisecond)
+    socket = HTTP1.get_socket(conn)
 
     receive do
-      {tag, _socket, _data} = msg when tag in [:tcp, :ssl] ->
+      {tag, ^socket, _data} = msg when tag in [:tcp, :ssl] ->
         stream(conn, ref, timeout_deadline, msg)
 
-      {tag, _socket, _data} = msg when tag in [:tcp_closed, :ssl_closed] ->
+      {tag, ^socket} = msg when tag in [:tcp_closed, :ssl_closed] ->
         stream(conn, ref, timeout_deadline, msg)
 
-      {tag, _socket, _data} = msg when tag in [:tcp_error, :ssl_error] ->
+      {tag, ^socket, _reason} = msg when tag in [:tcp_error, :ssl_error] ->
         stream(conn, ref, timeout_deadline, msg)
     after
       timeout ->
