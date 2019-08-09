@@ -58,6 +58,10 @@ defmodule Mint.Core.Util do
   def scheme_to_transport(:https), do: Mint.Core.Transport.SSL
   def scheme_to_transport(module) when is_atom(module), do: module
 
+  def transport_to_scheme(Mint.Core.Transport.TCP), do: :http
+  def transport_to_scheme(Mint.Core.Transport.SSL), do: :https
+  def transport_to_scheme(atom) when is_atom(atom), do: atom
+
   defp calculate_buffer(opts) do
     Keyword.fetch!(opts, :buffer)
     |> max(Keyword.fetch!(opts, :sndbuf))

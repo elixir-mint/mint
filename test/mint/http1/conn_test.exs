@@ -3,12 +3,53 @@ defmodule Mint.HTTP1Test do
 
   alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
+  @default_http_port URI.default_port("http")
+
+  setup :reset_default_http_port
+
   setup do
     {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
     assert_receive {^server_ref, server_socket}
 
     [conn: conn, port: port, server_ref: server_ref, server_socket: server_socket]
+  end
+
+  test "host header includes port", %{conn: conn, server_socket: server_socket, port: port} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             host: localhost:#{port}
+             user-agent: mint/#{Mix.Project.config()[:version]}
+
+             \
+             """)
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "host header does not include port if it is the scheme's default", %{
+    conn: conn,
+    server_socket: server_socket,
+    port: port
+  } do
+    # Override default http port for this test
+    URI.default_port("http", port)
+
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             host: localhost
+             user-agent: mint/#{Mix.Project.config()[:version]}
+
+             \
+             """)
+
+    assert HTTP1.open?(conn)
   end
 
   test "unknown message", %{conn: conn} do
@@ -386,14 +427,14 @@ defmodule Mint.HTTP1Test do
 
   describe "non-streaming requests" do
     test "content-length header is added if not present",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], "body")
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
                content-length: 4
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
 
                body\
@@ -403,13 +444,13 @@ defmodule Mint.HTTP1Test do
     end
 
     test "content-length header is not added for empty body",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
 
                \
@@ -418,13 +459,17 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     end
 
-    test "overridden content-length header", %{conn: conn, server_socket: server_socket} do
+    test "overridden content-length header", %{
+      conn: conn,
+      server_socket: server_socket,
+      port: port
+    } do
       {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "10"}], "body")
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
                content-length: 10
 
@@ -434,14 +479,14 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     end
 
-    test "overridden user-agent header", %{conn: conn, server_socket: server_socket} do
+    test "overridden user-agent header", %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"User-Agent", "myapp/1.0"}], "body")
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
                content-length: 4
-               host: localhost
+               host: localhost:#{port}
                user-agent: myapp/1.0
 
                body\
@@ -453,14 +498,14 @@ defmodule Mint.HTTP1Test do
 
   describe "streaming requests" do
     test "transfer-encoding is set to chunked if not set already, and content is chunked",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
                transfer-encoding: chunked
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
 
                \
@@ -476,14 +521,14 @@ defmodule Mint.HTTP1Test do
     end
 
     test "if transfer-encoding is already set to chunked, we let the user do the chunking",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} =
         HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "chunked"}], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
                transfer-encoding: chunked
 
@@ -497,13 +542,13 @@ defmodule Mint.HTTP1Test do
     end
 
     test "transfer-encoding is set to chunked if present but not chunked/identity",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "gzip"}], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
                transfer-encoding: gzip,chunked
 
@@ -520,14 +565,14 @@ defmodule Mint.HTTP1Test do
     end
 
     test "transfer-encoding is not set to chunked if already set to identity",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} =
         HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "identity"}], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
                transfer-encoding: identity
 
@@ -541,13 +586,13 @@ defmodule Mint.HTTP1Test do
     end
 
     test "transfer-encoding is not set if content-length is present",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [{"content-length", "5"}], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                GET / HTTP/1.1
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
                content-length: 5
 
@@ -558,14 +603,14 @@ defmodule Mint.HTTP1Test do
     end
 
     test "sending trailing headers with implicit chunked transfer-encoding",
-         %{conn: conn, server_socket: server_socket} do
+         %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
 
       assert receive_request_string(server_socket) ==
                request_string("""
                POST / HTTP/1.1
                transfer-encoding: chunked
-               host: localhost
+               host: localhost:#{port}
                user-agent: mint/#{Mix.Project.config()[:version]}
 
                \
@@ -608,6 +653,10 @@ defmodule Mint.HTTP1Test do
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
     end
+  end
+
+  defp reset_default_http_port(_context) do
+    URI.default_port("http", @default_http_port)
   end
 
   defp request_string(string) do

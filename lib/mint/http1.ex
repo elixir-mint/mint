@@ -80,7 +80,9 @@ defmodule Mint.HTTP1 do
   @type error_reason() :: term()
 
   defstruct [
+    :scheme,
     :host,
+    :port,
     :request,
     :socket,
     :transport,
@@ -138,7 +140,7 @@ defmodule Mint.HTTP1 do
           :inet.port_number(),
           keyword()
         ) :: {:ok, t()} | {:error, Types.error()}
-  def initiate(scheme, socket, hostname, _port, opts) do
+  def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
     mode = Keyword.get(opts, :mode, :active)
 
@@ -153,7 +155,9 @@ defmodule Mint.HTTP1 do
         transport: transport,
         socket: socket,
         mode: mode,
+        scheme: transport_to_scheme(transport),
         host: hostname,
+        port: port,
         state: :open
       }
 
@@ -226,12 +230,13 @@ defmodule Mint.HTTP1 do
   end
 
   def request(%__MODULE__{} = conn, method, path, headers, body) do
-    %__MODULE__{host: host, transport: transport, socket: socket} = conn
+    %__MODULE__{scheme: scheme, host: host, port: port, transport: transport, socket: socket} =
+      conn
 
     headers =
       headers
       |> lower_header_keys()
-      |> add_default_headers(host)
+      |> add_default_headers(scheme, host, port)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
          {:ok, iodata} <- Request.encode(method, path, headers, body),
@@ -879,10 +884,19 @@ defmodule Mint.HTTP1 do
     for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
   end
 
-  defp add_default_headers(headers, host) do
+  defp add_default_headers(headers, scheme, host, port) do
     headers
     |> Util.put_new_header("user-agent", @user_agent)
-    |> Util.put_new_header("host", host)
+    |> Util.put_new_header("host", host_header(scheme, host, port))
+  end
+
+  # If the port is the default for the scheme, don't add it to the host header
+  defp host_header(scheme, host, port) do
+    if URI.default_port(to_string(scheme)) == port do
+      host
+    else
+      "#{host}:#{port}"
+    end
   end
 
   defp add_content_length_or_transfer_encoding(headers, :stream) do
