@@ -45,9 +45,13 @@ defmodule ConnectionProcess do
 
   @impl true
   def init({scheme, host, port}) do
-    with {:ok, conn} <- Mint.HTTP.connect(scheme, host, port) do
-      state = %__MODULE__{conn: conn}
-      {:ok, state}
+    case Mint.HTTP.connect(scheme, host, port) do
+      {:ok, conn} ->
+        state = %__MODULE__{conn: conn}
+        {:ok, state}
+
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 
