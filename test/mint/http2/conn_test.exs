@@ -11,9 +11,6 @@ defmodule Mint.HTTP2Test do
     TransportError
   }
 
-  @default_https_port URI.default_port("https")
-
-  setup :reset_default_https_port
   setup :start_connection
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
@@ -465,32 +462,39 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(hbf: hbf)]
 
-      {_, authority} =
-        server_decode_headers(hbf)
-        |> Enum.find(&match?({":authority", _}, &1))
+      assert {":authority", authority} =
+               hbf
+               |> server_decode_headers()
+               |> List.keyfind(":authority", 0)
 
       assert authority == "#{conn.hostname}:#{conn.port}"
 
       assert HTTP2.open?(conn)
     end
 
-    test ":authority pseudo-header does not include port if it is the scheme's default", %{
-      conn: conn
-    } do
-      # Override default https port for this test
-      URI.default_port("https", conn.port)
+    test ":authority pseudo-header does not include port if it is the scheme's default",
+         %{conn: conn} do
+      default_https_port = URI.default_port("https")
 
-      {conn, _ref} = open_request(conn)
+      try do
+        # Override default https port for this test
+        URI.default_port("https", conn.port)
 
-      assert_recv_frames [headers(hbf: hbf)]
+        {conn, _ref} = open_request(conn)
 
-      {_, authority} =
-        server_decode_headers(hbf)
-        |> Enum.find(&match?({":authority", _}, &1))
+        assert_recv_frames [headers(hbf: hbf)]
 
-      assert authority == conn.hostname
+        assert {":authority", authority} =
+                 hbf
+                 |> server_decode_headers()
+                 |> List.keyfind(":authority", 0)
 
-      assert HTTP2.open?(conn)
+        assert authority == conn.hostname
+
+        assert HTTP2.open?(conn)
+      after
+        URI.default_port("https", default_https_port)
+      end
     end
   end
 
@@ -1450,10 +1454,6 @@ defmodule Mint.HTTP2Test do
   end
 
   @pdict_key {__MODULE__, :http2_test_server}
-
-  defp reset_default_https_port(_context) do
-    URI.default_port("https", @default_https_port)
-  end
 
   defp start_connection(context) do
     default_options = [transport_opts: [verify: :verify_none]]
