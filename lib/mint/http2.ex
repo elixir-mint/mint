@@ -476,7 +476,7 @@ defmodule Mint.HTTP2 do
       {":method", method},
       {":path", path},
       {":scheme", conn.scheme},
-      {":authority", "#{conn.hostname}:#{conn.port}"}
+      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
       | headers
     ]
 
@@ -1572,6 +1572,15 @@ defmodule Mint.HTTP2 do
       {:error, reason} ->
         debug_data = "unable to decode headers: #{inspect(reason)}"
         send_connection_error!(conn, :compression_error, debug_data)
+    end
+  end
+
+  # If the port is the default for the scheme, don't add it to the :authority pseudo-header
+  defp authority_pseudo_header(scheme, port, hostname) do
+    if URI.default_port(scheme) == port do
+      hostname
+    else
+      "#{hostname}:#{port}"
     end
   end
 
