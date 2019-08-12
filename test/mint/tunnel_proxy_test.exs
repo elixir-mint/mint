@@ -8,6 +8,9 @@ defmodule Mint.TunnelProxyTest do
   @moduletag :proxy
 
   test "200 response - http://httpbin.org" do
+    # Ensure we only match relevant messages
+    send(self(), {:tcp, :not_my_socket, "DATA"})
+
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
