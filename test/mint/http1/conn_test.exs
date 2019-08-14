@@ -3,53 +3,12 @@ defmodule Mint.HTTP1Test do
 
   alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
-  @default_http_port URI.default_port("http")
-
-  setup :reset_default_http_port
-
   setup do
     {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
     assert_receive {^server_ref, server_socket}
 
     [conn: conn, port: port, server_ref: server_ref, server_socket: server_socket]
-  end
-
-  test "host header includes port", %{conn: conn, server_socket: server_socket, port: port} do
-    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
-
-    assert receive_request_string(server_socket) ==
-             request_string("""
-             GET / HTTP/1.1
-             host: localhost:#{port}
-             user-agent: mint/#{Mix.Project.config()[:version]}
-
-             \
-             """)
-
-    assert HTTP1.open?(conn)
-  end
-
-  test "host header does not include port if it is the scheme's default", %{
-    conn: conn,
-    server_socket: server_socket,
-    port: port
-  } do
-    # Override default http port for this test
-    URI.default_port("http", port)
-
-    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
-
-    assert receive_request_string(server_socket) ==
-             request_string("""
-             GET / HTTP/1.1
-             host: localhost
-             user-agent: mint/#{Mix.Project.config()[:version]}
-
-             \
-             """)
-
-    assert HTTP1.open?(conn)
   end
 
   test "unknown message", %{conn: conn} do
@@ -425,6 +384,46 @@ defmodule Mint.HTTP1Test do
     assert responses == [{:status, request_ref, 200}]
   end
 
+  test "host header includes port", %{conn: conn, server_socket: server_socket, port: port} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             host: localhost:#{port}
+             user-agent: mint/#{Mix.Project.config()[:version]}
+
+             \
+             """)
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "host header does not include port if it is the scheme's default",
+       %{conn: conn, server_socket: server_socket, port: port} do
+    default_http_port = URI.default_port("http")
+
+    try do
+      # Override default http port for this test
+      URI.default_port("http", port)
+
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               \
+               """)
+
+      assert HTTP1.open?(conn)
+    after
+      URI.default_port("http", default_http_port)
+    end
+  end
+
   describe "non-streaming requests" do
     test "content-length header is added if not present",
          %{conn: conn, server_socket: server_socket, port: port} do
@@ -653,10 +652,6 @@ defmodule Mint.HTTP1Test do
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
     end
-  end
-
-  defp reset_default_http_port(_context) do
-    URI.default_port("http", @default_http_port)
   end
 
   defp request_string(string) do
