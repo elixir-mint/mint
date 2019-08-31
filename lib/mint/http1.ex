@@ -200,7 +200,7 @@ defmodule Mint.HTTP1 do
   @doc false
   @deprecated "Use Mint.HTTP1.request/5 instead"
   def request(conn, method, path, headers) do
-    request(conn, method, path, headers, nil)
+    request(conn, method, path, headers, _body = nil)
   end
 
   @doc """
