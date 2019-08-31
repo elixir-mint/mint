@@ -196,12 +196,18 @@ defmodule Mint.HTTP1 do
     state == :open
   end
 
+  # TODO: remove on v1.0.
+  @doc false
+  @deprecated "Use Mint.HTTP1.request/5 instead"
+  def request(conn, method, path, headers) do
+    request(conn, method, path, headers, nil)
+  end
+
   @doc """
   See `Mint.HTTP.request/5`.
 
   In HTTP/1 and HTTP/1.1, you can't open a new request if you're streaming the body of
-  another request. If you try, the error reason `{:error, :request_body_is_streaming}` is
-  returned.
+  another request. If you try, an error will be returned.
   """
   @impl true
   @spec request(
@@ -213,7 +219,7 @@ defmodule Mint.HTTP1 do
         ) ::
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
-  def request(conn, method, path, headers, body \\ nil)
+  def request(conn, method, path, headers, body)
 
   def request(%__MODULE__{state: :closed} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:closed)}

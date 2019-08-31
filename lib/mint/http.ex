@@ -409,7 +409,7 @@ defmodule Mint.HTTP do
   `header_name` and `header_value` being strings. `body` can have one of three
   values:
 
-    * `nil` - no body is sent with the request. This is the default value.
+    * `nil` - no body is sent with the request.
 
     * iodata - the body to send for the request.
 
@@ -442,7 +442,7 @@ defmodule Mint.HTTP do
 
   ## Examples
 
-      Mint.HTTP.request(conn, "GET", "/", _headers = [])
+      Mint.HTTP.request(conn, "GET", "/", _headers = [], _body = nil)
       Mint.HTTP.request(conn, "POST", "/path", [{"content-type", "application/json"}], "{}")
 
   """
@@ -456,8 +456,16 @@ defmodule Mint.HTTP do
         ) ::
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
-  def request(conn, method, path, headers, body \\ nil),
+
+  def request(conn, method, path, headers, body),
     do: conn_module(conn).request(conn, method, path, headers, body)
+
+  # TODO: remove on v1.0.
+  @doc false
+  @deprecated "Use Mint.HTTP.request/5 instead"
+  def request(conn, method, path, headers) do
+    request(conn, method, path, headers, _body = nil)
+  end
 
   @doc """
   Streams a chunk of the request body on the connection or signals the end of the body.

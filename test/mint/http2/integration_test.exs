@@ -22,7 +22,7 @@ defmodule HTTP2.IntegrationTest do
     @describetag connect: {"http2.golang.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [])
+      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -41,7 +41,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /clockstream", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [])
+      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_messages_until_response(conn)
       assert [{:status, ^req_id, 200}, {:headers, ^req_id, _headers} | rest] = responses
@@ -89,7 +89,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /file/gopher.png", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/file/gopher.png", [])
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/file/gopher.png", [], nil)
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [
@@ -118,7 +118,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /serverpush", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [])
+      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [], nil)
       assert {:ok, %HTTP2{} = _conn, responses} = receive_stream(conn)
 
       # TODO: improve this test by improving receive_stream/1.
@@ -142,7 +142,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -167,7 +167,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [])
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -193,7 +193,7 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [])
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -215,7 +215,7 @@ defmodule HTTP2.IntegrationTest do
       # Using non-downcased header meant that HPACK wouldn't find it in the
       # static built-in headers table and so it wouldn't encode it correctly.
       headers = [{"If-Modified-Since", "Wed, 26 May 2019 07:43:40 GMT"}]
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed/", headers)
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed/", headers, nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 

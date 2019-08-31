@@ -18,7 +18,7 @@ defmodule Mint.TunnelProxy do
 
     with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
          timeout_deadline = timeout_deadline(proxy_opts),
-         {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, []),
+         {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, [], nil),
          :ok <- receive_response(conn, ref, timeout_deadline) do
       {:ok, conn}
     else

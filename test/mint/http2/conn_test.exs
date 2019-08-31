@@ -265,12 +265,12 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :closed_for_writing
 
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :closed
     end
   end
@@ -280,7 +280,7 @@ defmodule Mint.HTTP2Test do
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :too_many_concurrent_requests
 
       assert HTTP2.open?(conn)
@@ -426,7 +426,7 @@ defmodule Mint.HTTP2Test do
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
       # between 2 and 3 times (so that we can test the behaviour above).
       headers = for i <- 1..400, do: {"a#{i}", String.duplicate("a", 100)}
-      assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers)
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers, nil)
 
       assert_recv_frames [
         headers(stream_id: stream_id, hbf: hbf1, flags: flags1),
@@ -450,7 +450,7 @@ defmodule Mint.HTTP2Test do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [])
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
 
       assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
 
