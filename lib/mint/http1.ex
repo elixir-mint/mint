@@ -935,8 +935,8 @@ defmodule Mint.HTTP1 do
   end
 
   defp add_content_length_or_transfer_encoding(headers, body) do
-    length = body |> IO.iodata_length() |> Integer.to_string()
-    {:ok, Util.put_new_header(headers, "content-length", length), :identity}
+    length_fun = fn -> body |> IO.iodata_length() |> Integer.to_string() end
+    {:ok, Util.put_new_header_lazy(headers, "content-length", length_fun), :identity}
   end
 
   defp wrap_error(reason) do

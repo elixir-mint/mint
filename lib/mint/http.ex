@@ -440,6 +440,14 @@ defmodule Mint.HTTP do
   For a quick discussion on HTTP/2 streams and requests, see the `Mint.HTTP2` module and
   `Mint.HTTP2.request/6`.
 
+  ## The `content-length` header
+
+  If you don't set the `content-length` header and you send a body with the request (that
+  is, not `nil` and not `:stream`), then Mint will add a default `content-length` header
+  to your request. If you're using HTTP/2 and streaming the request, provide the
+  `content-length` header yourself. If you're using HTTP/1, Mint might do chunked
+  transfer-encoding by default (see `Mint.HTTP1.request/6`).
+
   ## Examples
 
       Mint.HTTP.request(conn, "GET", "/", _headers = [], _body = nil)

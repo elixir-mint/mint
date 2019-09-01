@@ -496,6 +496,42 @@ defmodule Mint.HTTP2Test do
         URI.default_port("https", default_https_port)
       end
     end
+
+    test "when there's a request body, the content-length header is passed if not present",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn, "hello")
+
+      assert_recv_frames [headers(hbf: hbf), data()]
+
+      assert hbf
+             |> server_decode_headers()
+             |> List.keyfind("content-length", 0) ==
+               {"content-length", "5"}
+
+      # Let's check that content-length is not overridden if already present.
+
+      headers = [{"content-length", "10"}]
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers, "XX")
+
+      assert_recv_frames [headers(hbf: hbf), data()]
+
+      assert hbf
+             |> server_decode_headers()
+             |> List.keyfind("content-length", 0) ==
+               {"content-length", "10"}
+
+      # Let's make sure content-length isn't added if the body is nil or :stream.
+
+      {conn, _ref} = open_request(conn, nil)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      refute hbf
+             |> server_decode_headers()
+             |> List.keymember?("content-length", 0)
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "trailing headers" do
