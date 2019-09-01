@@ -35,7 +35,7 @@ defmodule Mint.HTTP1 do
     * `:closed` - when you try to make a request or stream a body chunk but the connection
       is closed.
 
-    * `:request_body_is_streaming` - when you call `request/5` to send a new
+    * `:request_body_is_streaming` - when you call `request/6` to send a new
       request but another request is already streaming.
 
     * `{:unexpected_data, data}` - when unexpected data is received from the server.
@@ -204,7 +204,7 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  See `Mint.HTTP.request/5`.
+  See `Mint.HTTP.request/6`.
 
   In HTTP/1 and HTTP/1.1, you can't open a new request if you're streaming the body of
   another request. If you try, an error will be returned.

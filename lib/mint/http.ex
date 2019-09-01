@@ -9,7 +9,7 @@ defmodule Mint.HTTP do
 
   To establish a connection with a given server, use `connect/4`. This will
   return an opaque data structure that represents the connection
-  to the server. To send a request, you can use `request/5`. Sending a request
+  to the server. To send a request, you can use `request/6`. Sending a request
   does not take care of the response to that request, instead we use `Mint.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
@@ -34,7 +34,7 @@ defmodule Mint.HTTP do
 
   `conn` is a data structure that represents the connection.
 
-  To send a request, we use `request/5`.
+  To send a request, we use `request/6`.
 
       {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], nil)
 
@@ -435,10 +435,10 @@ defmodule Mint.HTTP do
   server supports pipelining and that the request is safe to pipeline.
 
   In HTTP/1, you can't open a request if the body of another request is streaming.
-  See `Mint.HTTP1.request/5` for more information.
+  See `Mint.HTTP1.request/6` for more information.
 
   For a quick discussion on HTTP/2 streams and requests, see the `Mint.HTTP2` module and
-  `Mint.HTTP2.request/5`.
+  `Mint.HTTP2.request/6`.
 
   ## Examples
 
@@ -470,9 +470,9 @@ defmodule Mint.HTTP do
   @doc """
   Streams a chunk of the request body on the connection or signals the end of the body.
 
-  If a request is opened (through `request/5`) with the body as `:stream`, then the
+  If a request is opened (through `request/6`) with the body as `:stream`, then the
   body can be streamed through this function. The function takes a `conn`, a
-  `request_ref` returned by `request/5` to identify the request to stream the body for,
+  `request_ref` returned by `request/6` to identify the request to stream the body for,
   and a chunk of body to stream. The value of chunk can be:
 
     * iodata - a chunk of iodata is transmitted to the server as part of the body
@@ -595,7 +595,7 @@ defmodule Mint.HTTP do
   Each possible response returned by this function is a tuple with two or more elements.
   The first element is always an atom that identifies the kind of response. The second
   element is a unique reference `t:request_ref/0` that identifies the request that the response
-  belongs to. This is the term returned by `request/5`. After these two elements, there can be
+  belongs to. This is the term returned by `request/6`. After these two elements, there can be
   response-specific terms as well, documented below.
 
   These are the possible responses that can be returned.
