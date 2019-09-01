@@ -477,7 +477,7 @@ defmodule Mint.HTTP2 do
     headers =
       headers
       |> downcase_header_names()
-      |> add_default_headers()
+      |> add_default_headers(body)
 
     headers = [
       {":method", method},
@@ -1318,8 +1318,20 @@ defmodule Mint.HTTP2 do
     for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
   end
 
-  defp add_default_headers(headers) do
-    Util.put_new_header(headers, "user-agent", @user_agent)
+  defp add_default_headers(headers, body) do
+    headers
+    |> Util.put_new_header("user-agent", @user_agent)
+    |> add_default_content_length_header(body)
+  end
+
+  defp add_default_content_length_header(headers, body) when body in [nil, :stream] do
+    headers
+  end
+
+  defp add_default_content_length_header(headers, body) do
+    Util.put_new_header_lazy(headers, "content-length", fn ->
+      body |> IO.iodata_length() |> Integer.to_string()
+    end)
   end
 
   ## Frame handling

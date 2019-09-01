@@ -79,6 +79,14 @@ defmodule Mint.Core.Util do
     end
   end
 
+  def put_new_header_lazy(headers, name, fun) do
+    if List.keymember?(headers, name, 0) do
+      headers
+    else
+      [{name, fun.()} | headers]
+    end
+  end
+
   # Lowercases an ASCII string more efficiently than
   # String.downcase/1.
   def downcase_ascii(string),
