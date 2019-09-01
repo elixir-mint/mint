@@ -419,6 +419,13 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # TODO: remove on v1.0.
+  @doc false
+  @deprecated "Use Mint.HTTP2.request/5 instead"
+  def request(conn, method, path, headers) do
+    request(conn, method, path, headers, _body = nil)
+  end
+
   @doc """
   See `Mint.HTTP.request/5`.
 
@@ -449,7 +456,7 @@ defmodule Mint.HTTP2 do
         ) ::
           {:ok, t(), Types.request_ref()}
           | {:error, t(), Types.error()}
-  def request(conn, method, path, headers, body \\ nil)
+  def request(conn, method, path, headers, body)
 
   def request(%Mint.HTTP2{state: :closed} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:closed)}
