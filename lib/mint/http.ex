@@ -444,9 +444,9 @@ defmodule Mint.HTTP do
 
   If you don't set the `content-length` header and you send a body with the request (that
   is, not `nil` and not `:stream`), then Mint will add a default `content-length` header
-  to your request. If you're using HTTP/2 and streaming the request, provide the
-  `content-length` header yourself. If you're using HTTP/1, Mint might do chunked
-  transfer-encoding by default (see `Mint.HTTP1.request/6`).
+  to your request. If you're using HTTP/2 and streaming the request, you may provide the
+  `content-length` header yourself. If you're using HTTP/1, Mint will do chunked
+  transfer-encoding when a content-length is not provided (see `Mint.HTTP1.request/6`).
 
   ## Examples
 
