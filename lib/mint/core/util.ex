@@ -80,10 +80,10 @@ defmodule Mint.Core.Util do
   end
 
   def put_new_header_lazy(headers, name, fun) do
-    cond do
-      List.keymember?(headers, name, 0) -> headers
-      value = fun.() -> [{name, value} | headers]
-      true -> headers
+    if List.keymember?(headers, name, 0) do
+      headers
+    else
+      [{name, fun.()} | headers]
     end
   end
 
