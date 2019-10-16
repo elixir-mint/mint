@@ -1,7 +1,11 @@
-version: '3'
+version: "3"
 
 services:
   proxy:
     build: ./test/docker/tinyproxy
     ports:
       - "8888:8888"
+  proxy-auth:
+    build: ./test/docker/tinyproxy-auth
+    ports:
+      - "8889:8888"

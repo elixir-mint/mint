@@ -46,6 +46,46 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
+  test "407 response - proxy authentication test" do
+    assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 407}}}} =
+             Mint.TunnelProxy.connect(
+               {:http, "localhost", 8889, []},
+               {:https, "httpbin.org", 443, []}
+             )
+  end
+
+  test "401 response - proxy authentication test" do
+    invalid_auth64 = Base.encode64("test:password1")
+
+    assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 401}}}} =
+             Mint.TunnelProxy.connect(
+               {:http, "localhost", 8889,
+                [headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]]},
+               {:https, "httpbin.org", 443, []}
+             )
+  end
+
+  test "200 response - proxy authentication test" do
+    auth64 = Base.encode64("test:password")
+
+    assert {:ok, conn} =
+             Mint.TunnelProxy.connect(
+               {:http, "localhost", 8889,
+                [headers: [{"proxy-authorization", "basic #{auth64}"}]]},
+               {:https, "httpbin.org", 443, []}
+             )
+
+    assert conn.__struct__ == Mint.HTTP1
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
+    assert {:ok, _conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert is_list(headers)
+    assert merge_body(responses, request) =~ "httpbin"
+  end
+
   test "200 response with explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
