@@ -233,15 +233,53 @@ defmodule Mint.HTTP1Test do
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
         "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
 
-    assert {:ok, conn, [status, headers, body, done]} =
+    assert {:ok, conn, [status, headers, data1, data2, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert body == {:data, ref, "0123"}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
     assert done == {:done, ref}
 
     assert conn.buffer == "XXX"
+  end
+
+  test "body with chunked transfer-encoding streamed bytewise", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
+
+    assert {:ok, conn, [status, headers, data1, data2, done]} =
+             stream_message_bytewise(response, conn, [])
+
+    assert status == {:status, ref, 200}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
+    assert done == {:done, ref}
+  end
+
+  test "body with chunked transfer-encoding streamed on chunk boundary", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\n"
+    assert {:ok, conn, [status, headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    response = "01\r\n"
+    assert {:ok, conn, [data1]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    response = "2\r\n"
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    response = "23\r\n"
+    assert {:ok, conn, [data2]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, 200}
+    assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
   end
 
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
@@ -251,12 +289,13 @@ defmodule Mint.HTTP1Test do
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
         "2meta\r\n01\r\n2\r\n23\r\n0meta\r\nmy-trailer: value\r\n\r\nXXX"
 
-    assert {:ok, conn, [status, headers, body, trailers, done]} =
+    assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert body == {:data, ref, "0123"}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
     assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
     assert done == {:done, ref}
 
@@ -271,12 +310,13 @@ defmodule Mint.HTTP1Test do
         "2meta\r\n01\r\n2\r\n23\r\n0meta\r\n" <>
         "my-trailer: value\r\ncontent-type: application/json\r\n\r\n"
 
-    assert {:ok, conn, [status, headers, body, trailers, done]} =
+    assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert body == {:data, ref, "0123"}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
     assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
     assert done == {:done, ref}
 
@@ -661,5 +701,19 @@ defmodule Mint.HTTP1Test do
   defp receive_request_string(server_socket) do
     assert_receive {:tcp, ^server_socket, data}
     data
+  end
+
+  defp stream_message_bytewise(<<byte::binary-1, rest::binary>>, conn, responses) do
+    case HTTP1.stream(conn, {:tcp, conn.socket, byte}) do
+      {:ok, conn, new_responses} ->
+        stream_message_bytewise(rest, conn, responses ++ new_responses)
+
+      other ->
+        other
+    end
+  end
+
+  defp stream_message_bytewise(<<>>, conn, responses) do
+    {:ok, conn, responses}
   end
 end
