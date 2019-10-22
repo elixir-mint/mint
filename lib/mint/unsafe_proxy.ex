@@ -80,7 +80,7 @@ defmodule Mint.UnsafeProxy do
         body \\ nil
       ) do
     path = request_line(conn, path)
-    headers = Keyword.merge(headers, Map.get(conn, :proxy_headers, []))
+    headers = Keyword.merge(headers, conn.proxy_headers)
 
     case module.request(state, method, path, headers, body) do
       {:ok, state, request} -> {:ok, %{conn | state: state}, request}
