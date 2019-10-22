@@ -20,7 +20,7 @@ defmodule Mint.UnsafeProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  test "407 response - Mint.HTTP.connect with proxy missing authentication" do
+  test "407 response - proxy with missing authentication" do
     assert {:ok, conn} =
              HTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8889, []})
 
@@ -30,7 +30,7 @@ defmodule Mint.UnsafeProxyTest do
     assert {:status, ^request, 407} = status
   end
 
-  test "401 response - Mint.HTTP.connect with proxy using invalid authentication" do
+  test "401 response - proxy with invalid authentication" do
     invalid_auth64 = Base.encode64("test:wrong_password")
 
     assert {:ok, conn} =
@@ -45,7 +45,7 @@ defmodule Mint.UnsafeProxyTest do
     assert {:status, ^request, 401} = status
   end
 
-  test "200 response - Mint.HTTP.connect with proxy using valid authentication" do
+  test "200 response - proxy with valid authentication" do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
