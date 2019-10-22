@@ -13,12 +13,12 @@ defmodule Mint.TunnelProxy do
 
   defp establish_proxy(proxy, host) do
     {proxy_scheme, proxy_hostname, proxy_port, proxy_opts} = proxy
-    {_scheme, hostname, port, _opts} = host
+    {_scheme, hostname, port, opts} = host
     path = "#{hostname}:#{port}"
 
     with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
          timeout_deadline = timeout_deadline(proxy_opts),
-         headers = Keyword.get(proxy_opts, :headers, []),
+         headers = Keyword.get(opts, :proxy_headers, []),
          {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, headers, nil),
          :ok <- receive_response(conn, ref, timeout_deadline) do
       {:ok, conn}

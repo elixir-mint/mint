@@ -10,6 +10,7 @@ defmodule Mint.UnsafeProxy do
     :port,
     :scheme,
     :module,
+    :proxy_headers,
     :state
   ]
 
@@ -29,6 +30,7 @@ defmodule Mint.UnsafeProxy do
         hostname: hostname,
         port: port,
         module: Mint.HTTP1,
+        proxy_headers: Keyword.get(opts, :proxy_headers, []),
         state: state
       }
 
@@ -78,6 +80,7 @@ defmodule Mint.UnsafeProxy do
         body \\ nil
       ) do
     path = request_line(conn, path)
+    headers = Keyword.merge(headers, Map.get(conn, :proxy_headers, []))
 
     case module.request(state, method, path, headers, body) do
       {:ok, state, request} -> {:ok, %{conn | state: state}, request}

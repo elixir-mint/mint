@@ -46,33 +46,28 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  test "407 response - proxy authentication test" do
+  test "407 response - Mint.HTTP.connect with proxy missing authentication" do
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 407}}}} =
-             Mint.TunnelProxy.connect(
-               {:http, "localhost", 8889, []},
-               {:https, "httpbin.org", 443, []}
-             )
+             Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8889, []})
   end
 
-  test "401 response - proxy authentication test" do
-    invalid_auth64 = Base.encode64("test:password1")
+  test "401 response - Mint.HTTP.connect with proxy using invalid authentication" do
+    invalid_auth64 = Base.encode64("test:wrong_password")
 
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 401}}}} =
-             Mint.TunnelProxy.connect(
-               {:http, "localhost", 8889,
-                [headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]]},
-               {:https, "httpbin.org", 443, []}
+             Mint.HTTP.connect(:https, "httpbin.org", 443,
+               proxy: {:http, "localhost", 8889, []},
+               proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]
              )
   end
 
-  test "200 response - proxy authentication test" do
+  test "200 response - Mint.HTTP.connect with proxy using valid authentication" do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
-             Mint.TunnelProxy.connect(
-               {:http, "localhost", 8889,
-                [headers: [{"proxy-authorization", "basic #{auth64}"}]]},
-               {:https, "httpbin.org", 443, []}
+             Mint.HTTP.connect(:https, "httpbin.org", 443,
+               proxy: {:http, "localhost", 8889, []},
+               proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
 
     assert conn.__struct__ == Mint.HTTP1
