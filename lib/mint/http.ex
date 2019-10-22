@@ -140,6 +140,10 @@ defmodule Mint.HTTP do
       list, then Mint will negotiate the protocol. See the section "Protocol negotiation"
       below for more information. Defaults to `[:http1, :http2]`.
 
+    * `:proxy_headers` - a list of headers (`t:Mint.Types.headers/0`) to pass when using
+      a proxy. They will be used for the `CONNECT` request in tunnel proxies or merged
+      with every request for forward proxies.
+
   The following options are HTTP/1-specific and will force the connection
   to be an HTTP/1 connection.
 
@@ -303,8 +307,6 @@ defmodule Mint.HTTP do
   @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
   def connect(scheme, hostname, port, opts \\ []) do
-    # TODO: Proxy auth
-
     case Keyword.fetch(opts, :proxy) do
       {:ok, {proxy_scheme, proxy_hostname, proxy_port, proxy_opts}} ->
         case scheme_to_transport(scheme) do
