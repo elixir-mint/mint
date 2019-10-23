@@ -654,7 +654,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       {0, rest} ->
-        # Here, we manually collapse the body buffer since we're done with the body.
+        # Manually collapse the body buffer since we're done with the body
         {conn, responses} = collapse_body_buffer(conn, responses)
         decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
 
@@ -702,12 +702,12 @@ defmodule Mint.HTTP1 do
       length > byte_size(data) ->
         conn = put_in(conn.buffer, "")
         conn = put_in(conn.request.body, {:chunked, length - byte_size(data)})
-        {conn, responses} = add_body(conn, data, responses)
+        conn = add_body_to_buffer(conn, data)
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
         <<body::binary-size(length), rest::binary>> = data
-        conn = add_body_to_buffer(conn, body)
+        {conn, responses} = add_body(conn, body, responses)
         conn = put_in(conn.request.body, {:chunked, :crlf})
         decode_body({:chunked, :crlf}, conn, rest, request_ref, responses)
     end
