@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.0
+
+### Bug fixes and improvements
+
+  * Deprecate `Mint.HTTP.request/4` in favor of explicitly passing the body every time in `Mint.HTTP.request/5`. Same for `Mint.HTTP1` and `Mint.HTTP2`.
+  * Don't include port in the `authority` header if it's the default port for the used protocol.
+  * Add a default `content-length` header in HTTP/2
+  * Allow passing headers to proxies with the `:proxy_headers` option.
+  * Fix a bug with HTTP/1 chunking.
+
 ## v0.4.0
 
 ### Bug fixes and improvements

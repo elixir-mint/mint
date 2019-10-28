@@ -253,7 +253,7 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "request/6 returns error if the connection is closed",
+    test "request/5 returns error if the connection is closed",
          %{conn: conn} do
       assert {:error, %HTTP2{} = conn, _error, []} =
                stream_frames(conn, [
