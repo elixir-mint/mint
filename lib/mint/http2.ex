@@ -22,8 +22,8 @@ defmodule Mint.HTTP2 do
   We mentioned data on streams can come in arbitrary order, and streams are requests,
   so the practical effect of this is that performing request A and then request B
   does not mean that the response to request A will come before the response to request B.
-  This is why we identify each request with a unique reference returned by `request/6`.
-  See `request/6` for more information.
+  This is why we identify each request with a unique reference returned by `request/5`.
+  See `request/5` for more information.
 
   ## Closed connection
 
@@ -427,7 +427,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  See `Mint.HTTP.request/6`.
+  See `Mint.HTTP.request/5`.
 
   In HTTP/2, opening a request means opening a new HTTP/2 stream (see the
   module documentation). This means that a request could fail because the
@@ -759,13 +759,13 @@ defmodule Mint.HTTP2 do
   size. A window size is also kept per request.
 
   The only thing that affects the window size is the body of a request, regardless of
-  if it's a full request sent with `request/6` or body chunks sent through
+  if it's a full request sent with `request/5` or body chunks sent through
   `stream_request_body/3`. That means that if we make a request with a body that is
   five bytes long, like `"hello"`, the window size of the connection and the window size
   of that particular request will decrease by five bytes.
 
   If we use all the window size before the server refills it, functions like
-  `request/6` will return an error.
+  `request/5` will return an error.
 
   ## Examples
 
@@ -848,7 +848,7 @@ defmodule Mint.HTTP2 do
 
   In HTTP/2, the number of open requests is the number of requests **opened by the client**
   that have not yet received a `:done` response. It's important to note that only
-  requests opened by the client (with `request/6`) count towards the number of open
+  requests opened by the client (with `request/5`) count towards the number of open
   requests, as requests opened from the server with server pushes (see the "Server push"
   section in the module documentation) are not considered open requests. We do this because
   clients might need to know how many open requests there are because the server limits
