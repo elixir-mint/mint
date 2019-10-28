@@ -419,13 +419,6 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  # TODO: remove on v1.0.
-  @doc false
-  @deprecated "Use Mint.HTTP2.request/5 instead"
-  def request(conn, method, path, headers) do
-    request(conn, method, path, headers, _body = nil)
-  end
-
   @doc """
   See `Mint.HTTP.request/5`.
 

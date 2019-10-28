@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.0
+
+### Breaking changes
+
+  * Remove the deprecated `Mint.HTTP.request/4`, `Mint.HTTP1.request/4`, and `Mint.HTTP2.request/4`.
+
 ## v0.5.0
 
 ### Bug fixes and improvements

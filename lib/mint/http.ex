@@ -470,13 +470,6 @@ defmodule Mint.HTTP do
   def request(conn, method, path, headers, body),
     do: conn_module(conn).request(conn, method, path, headers, body)
 
-  # TODO: remove on v1.0.
-  @doc false
-  @deprecated "Use Mint.HTTP.request/5 instead"
-  def request(conn, method, path, headers) do
-    request(conn, method, path, headers, _body = nil)
-  end
-
   @doc """
   Streams a chunk of the request body on the connection or signals the end of the body.
 
