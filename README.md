@@ -1,6 +1,6 @@
 # Mint 🌱
 
-[![Build Status](https://travis-ci.org/ericmj/mint.svg?branch=master)](https://travis-ci.org/ericmj/mint)
+[![Build Status](https://travis-ci.org/elixir-mint/mint.svg?branch=master)](https://travis-ci.org/elixir-mint/mint)
 
 > Functional HTTP client for Elixir with support for HTTP/1 and HTTP/2.
 
