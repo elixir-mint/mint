@@ -2,7 +2,7 @@ defmodule Mint.MixProject do
   use Mix.Project
 
   @version "1.0.0"
-  @repo_url "https://github.com/ericmj/mint"
+  @repo_url "https://github.com/elixir-mint/mint"
 
   def project do
     [

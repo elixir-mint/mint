@@ -85,7 +85,7 @@ defmodule Mint.HTTP do
 
   When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint
   doesn't ship with the certificate store itself, but it has an optional dependency on
-  [CAStore](https://github.com/ericmj/castore), which provides an up-to-date certificate store. If
+  [CAStore](https://github.com/elixir-mint/castore), which provides an up-to-date certificate store. If
   you don't want to use your own certificate store, just add `:castore` to your dependencies.
 
   ## Mode
@@ -217,7 +217,7 @@ defmodule Mint.HTTP do
     * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
-      [CAStore](https://github.com/ericmj/castore) package or raise an
+      [CAStore](https://github.com/elixir-mint/castore) package or raise an
       exception if this package is not available.
 
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
