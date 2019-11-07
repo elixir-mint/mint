@@ -91,7 +91,7 @@ end
 
 ## Contributing
 
-If you wish to contribute check out the [issue list](https://github.com/ericmj/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
+If you wish to contribute check out the [issue list](https://github.com/elixir-mint/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
 
 Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:integration`. Proxy tests are tagged with `:proxy` and require that you run `docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
 
@@ -117,5 +117,5 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
   See the License for the specific language governing permissions and
   limitations under the License.
 
-[castore]: https://github.com/ericmj/castore
+[castore]: https://github.com/elixir-mint/castore
 [documentation]: https://hexdocs.pm/mint
