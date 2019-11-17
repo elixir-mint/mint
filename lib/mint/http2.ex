@@ -1607,16 +1607,17 @@ defmodule Mint.HTTP2 do
     :lists.reverse(before_cookie, headers)
   end
 
-  defp join_cookie_headers([{"cookie", value} | rest], before_cookie, cookie, after_cookie) do
-    new_value_iodata = if cookie, do: [cookie, "; " | value], else: value
-    join_cookie_headers(rest, before_cookie, new_value_iodata, after_cookie)
-  end
+  defp join_cookie_headers([{name, value} = header | rest], before_cookie, cookie, after_cookie) do
+    cond do
+      Util.downcase_ascii(name) == "cookie" ->
+        new_value_iodata = if cookie, do: [cookie, "; " | value], else: value
+        join_cookie_headers(rest, before_cookie, new_value_iodata, after_cookie)
 
-  defp join_cookie_headers([header | rest], before_cookie, cookie, after_cookie) do
-    if cookie do
-      join_cookie_headers(rest, before_cookie, cookie, [header | after_cookie])
-    else
-      join_cookie_headers(rest, [header | before_cookie], cookie, after_cookie)
+      cookie ->
+        join_cookie_headers(rest, before_cookie, cookie, [header | after_cookie])
+
+      true ->
+        join_cookie_headers(rest, [header | before_cookie], cookie, after_cookie)
     end
   end
 

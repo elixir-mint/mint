@@ -544,7 +544,7 @@ defmodule Mint.HTTP2Test do
           {":status", "200"},
           {"accept", "text/plain"},
           {"cookie", "a=b"},
-          {"cookie", "c=d; e=f"},
+          {"Cookie", "c=d; e=f"},
           {"content-type", "application/json"},
           {"cookie", "g=h"},
           {"x-header", "value"}
