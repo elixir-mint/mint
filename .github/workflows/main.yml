@@ -1,0 +1,59 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install OTP and Elixir
+        uses: ericmj/setup-elixir@14bacb3
+        with:
+          otp-version: 22.1
+          elixir-version: 1.9.4
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check mix format
+        run: mix format --check-formatted
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pair:
+          - erlang: 22.1
+            elixir: 1.9.4
+          - erlang: 21.3
+            elixir: 1.8.2
+          - erlang: 20.3.1
+            elixir: 1.7.4
+          - erlang: 19.3
+            elixir: 1.6.6
+          - erlang: 18.3
+            elixir: 1.5.3
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install OTP and Elixir
+        uses: ericmj/setup-elixir@14bacb3
+        with:
+          otp-version: ${{matrix.pair.erlang}}
+          elixir-version: ${{matrix.pair.elixir}}
+
+      - name: Install dependencies
+        run: |
+          mix deps.get
+          mix deps.compile
+
+      - name: Start docker
+        run: docker-compose up --build --detach
+
+      - name: Run tests
+        run: mix test --trace --include proxy
