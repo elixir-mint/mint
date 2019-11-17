@@ -562,7 +562,7 @@ defmodule Mint.HTTP2Test do
       assert [{:status, ref, 200}, {:headers, ^ref, headers}] = responses
 
       # The Cookie header maintains the order of the first appearance in the list.
-      assert [{"accept", _}, {"cookie", cookie}, {"content-type", _}, {"x-header", _}] = headers
+      assert [{"cookie", cookie}, {"accept", _}, {"content-type", _}, {"x-header", _}] = headers
 
       assert cookie == "a=b; c=d; e=f; g=h"
     end

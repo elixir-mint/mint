@@ -1513,12 +1513,12 @@ defmodule Mint.HTTP2 do
 
   defp handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?) do
     %{ref: ref, received_first_headers?: received_first_headers?} = stream
-    headers = join_cookie_headers(headers)
 
     case headers do
       [{":status", status} | headers] when not received_first_headers? ->
         conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
+        headers = join_cookie_headers(headers)
         new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
         cond do
@@ -1553,7 +1553,7 @@ defmodule Mint.HTTP2 do
       headers when received_first_headers? ->
         if end_stream? do
           conn = close_stream!(conn, stream.id, :no_error)
-          headers = Util.remove_unallowed_trailing_headers(headers)
+          headers = headers |> Util.remove_unallowed_trailing_headers() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
           # Trailing headers must set the END_STREAM flag because they're
@@ -1598,26 +1598,17 @@ defmodule Mint.HTTP2 do
   end
 
   defp join_cookie_headers(headers) do
-    join_cookie_headers(headers, _before_cookie = [], _cookie = nil, _after_cookie = [])
-  end
+    # If we have 0 or 1 Cookie headers, we just use the old list of headers.
+    case Enum.split_with(headers, fn {name, _value} -> Util.downcase_ascii(name) == "cookie" end) do
+      {[], _headers} ->
+        headers
 
-  defp join_cookie_headers([], before_cookie, cookie, after_cookie) do
-    headers = :lists.reverse(after_cookie)
-    headers = if cookie, do: [{"cookie", IO.iodata_to_binary(cookie)} | headers], else: headers
-    :lists.reverse(before_cookie, headers)
-  end
+      {[_], _headers} ->
+        headers
 
-  defp join_cookie_headers([{name, value} = header | rest], before_cookie, cookie, after_cookie) do
-    cond do
-      Util.downcase_ascii(name) == "cookie" ->
-        new_value_iodata = if cookie, do: [cookie, "; " | value], else: value
-        join_cookie_headers(rest, before_cookie, new_value_iodata, after_cookie)
-
-      cookie ->
-        join_cookie_headers(rest, before_cookie, cookie, [header | after_cookie])
-
-      true ->
-        join_cookie_headers(rest, [header | before_cookie], cookie, after_cookie)
+      {cookies, headers} ->
+        cookie = Enum.map_join(cookies, "; ", fn {_name, value} -> value end)
+        [{"cookie", cookie} | headers]
     end
   end
 
