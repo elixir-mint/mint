@@ -1513,6 +1513,7 @@ defmodule Mint.HTTP2 do
 
   defp handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?) do
     %{ref: ref, received_first_headers?: received_first_headers?} = stream
+    headers = join_cookie_headers(headers)
 
     case headers do
       [{":status", status} | headers] when not received_first_headers? ->
@@ -1593,6 +1594,29 @@ defmodule Mint.HTTP2 do
       hostname
     else
       "#{hostname}:#{port}"
+    end
+  end
+
+  defp join_cookie_headers(headers) do
+    join_cookie_headers(headers, _before_cookie = [], _cookie = nil, _after_cookie = [])
+  end
+
+  defp join_cookie_headers([], before_cookie, cookie, after_cookie) do
+    headers = :lists.reverse(after_cookie)
+    headers = if cookie, do: [{"cookie", IO.iodata_to_binary(cookie)} | headers], else: headers
+    :lists.reverse(before_cookie, headers)
+  end
+
+  defp join_cookie_headers([{"cookie", value} | rest], before_cookie, cookie, after_cookie) do
+    new_value_iodata = if cookie, do: [cookie, "; " | value], else: value
+    join_cookie_headers(rest, before_cookie, new_value_iodata, after_cookie)
+  end
+
+  defp join_cookie_headers([header | rest], before_cookie, cookie, after_cookie) do
+    if cookie do
+      join_cookie_headers(rest, before_cookie, cookie, [header | after_cookie])
+    else
+      join_cookie_headers(rest, [header | before_cookie], cookie, after_cookie)
     end
   end
 
