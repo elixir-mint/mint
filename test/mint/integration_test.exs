@@ -85,10 +85,8 @@ defmodule Mint.IntegrationTest do
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
-      assert reason in [
-               {:tls_alert, 'unknown ca'},
-               {:tls_alert, {:unknown_ca, 'received CLIENT ALERT: Fatal - Unknown CA'}}
-             ]
+      assert reason == {:tls_alert, 'unknown ca'} or
+               match?({:tls_alert, {:unknown_ca, _}}, reason)
 
       assert {:ok, _conn} =
                HTTP.connect(
@@ -109,12 +107,8 @@ defmodule Mint.IntegrationTest do
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
-      assert reason in [
-               {:tls_alert, 'handshake failure'},
-               {:tls_alert,
-                {:handshake_failure,
-                 'received CLIENT ALERT: Fatal - Handshake Failure - {bad_cert,hostname_check_failed}'}}
-             ]
+      assert reason == {:tls_alert, 'handshake failure'} or
+               match?({:tls_alert, {:handshake_failure, _}}, reason)
 
       assert {:ok, _conn} =
                HTTP.connect(
