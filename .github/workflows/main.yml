@@ -53,7 +53,7 @@ jobs:
           mix deps.compile
 
       - name: Start docker
-        run: docker-compose up --build --detach
+        run: docker-compose up --detach
 
       - name: Run tests
         run: mix test --trace --include proxy
