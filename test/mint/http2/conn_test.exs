@@ -532,6 +532,39 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    test "the Cookie header is joined into a single value if present multiple times",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf =
+        server_encode_headers([
+          {":status", "200"},
+          {"accept", "text/plain"},
+          {"cookie", "a=b"},
+          {"Cookie", "c=d; e=f"},
+          {"content-type", "application/json"},
+          {"cookie", "g=h"},
+          {"x-header", "value"}
+        ])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert [{:status, ref, 200}, {:headers, ^ref, headers}] = responses
+
+      assert [{"cookie", cookie}, {"accept", _}, {"content-type", _}, {"x-header", _}] = headers
+
+      assert cookie == "a=b; c=d; e=f; g=h"
+    end
   end
 
   describe "trailing headers" do

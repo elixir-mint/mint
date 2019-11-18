@@ -1518,6 +1518,7 @@ defmodule Mint.HTTP2 do
       [{":status", status} | headers] when not received_first_headers? ->
         conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
+        headers = join_cookie_headers(headers)
         new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
         cond do
@@ -1552,7 +1553,7 @@ defmodule Mint.HTTP2 do
       headers when received_first_headers? ->
         if end_stream? do
           conn = close_stream!(conn, stream.id, :no_error)
-          headers = Util.remove_unallowed_trailing_headers(headers)
+          headers = headers |> Util.remove_unallowed_trailing_headers() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
           # Trailing headers must set the END_STREAM flag because they're
@@ -1593,6 +1594,21 @@ defmodule Mint.HTTP2 do
       hostname
     else
       "#{hostname}:#{port}"
+    end
+  end
+
+  defp join_cookie_headers(headers) do
+    # If we have 0 or 1 Cookie headers, we just use the old list of headers.
+    case Enum.split_with(headers, fn {name, _value} -> Util.downcase_ascii(name) == "cookie" end) do
+      {[], _headers} ->
+        headers
+
+      {[_], _headers} ->
+        headers
+
+      {cookies, headers} ->
+        cookie = Enum.map_join(cookies, "; ", fn {_name, value} -> value end)
+        [{"cookie", cookie} | headers]
     end
   end
 
