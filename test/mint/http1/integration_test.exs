@@ -23,10 +23,10 @@ defmodule Mint.HTTP1.IntegrationTest do
 
     test "timeout" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 1])
+               HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 0])
 
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 1])
+               HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
     end
 
     test "SSL, path, long body" do
