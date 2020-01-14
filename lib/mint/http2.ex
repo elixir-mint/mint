@@ -1332,7 +1332,6 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
-        _ = Logger.debug(fn -> "Got frame: #{inspect(frame)}" end)
         assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
