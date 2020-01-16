@@ -8,14 +8,31 @@ defmodule HTTP2.IntegrationTest do
   @moduletag :integration
 
   setup context do
-    case context.connect do
-      {host, port} ->
+    case Map.fetch(context, :connect) do
+      {:ok, {host, port}} ->
         assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, host, port)
         [conn: conn]
 
-      _other ->
+      :error ->
         []
     end
+  end
+
+  test "TCP - nghttp2.org" do
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, "nghttp2.org", 80)
+
+    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
+
+    assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+    assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
+    assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+    assert status == 200
+    assert is_list(headers)
+
+    assert conn.buffer == ""
+    assert HTTP2.open?(conn)
   end
 
   describe "http2.golang.org" do
