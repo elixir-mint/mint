@@ -251,7 +251,7 @@ defmodule Mint.HTTP1Test do
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
-    assert {:ok, conn, [status, headers, data1, data2, done]} =
+    assert {:ok, _conn, [status, headers, data1, data2, done]} =
              stream_message_bytewise(response, conn, [])
 
     assert status == {:status, ref, 200}
@@ -274,7 +274,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     response = "23\r\n"
-    assert {:ok, conn, [data2]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert {:ok, _conn, [data2]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
@@ -661,7 +661,7 @@ defmodule Mint.HTTP1Test do
         {"My-Other-Trailing", "some other value"}
       ]
 
-      assert {:ok, conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
+      assert {:ok, _conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert receive_request_string(server_socket) ==
                request_string("""
@@ -676,7 +676,7 @@ defmodule Mint.HTTP1Test do
     test "sending trailing headers with non-chunked transfer-encoding is an error", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "5"}], :stream)
 
-      assert {:error, conn, %HTTPError{reason: :trailing_headers_but_not_chunked_encoding}} =
+      assert {:error, _conn, %HTTPError{reason: :trailing_headers_but_not_chunked_encoding}} =
                HTTP1.stream_request_body(conn, ref, {:eof, [{"my-trailer", "value"}]})
     end
 
@@ -687,7 +687,7 @@ defmodule Mint.HTTP1Test do
       # regardless of its casing.
       trailing_headers = [{"my-trailing", "value"}, {"Host", "example.com"}]
 
-      assert {:error, conn, error} =
+      assert {:error, _conn, error} =
                HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error

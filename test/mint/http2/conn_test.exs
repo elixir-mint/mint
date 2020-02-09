@@ -550,7 +550,7 @@ defmodule Mint.HTTP2Test do
           {"x-header", "value"}
         ])
 
-      assert {:ok, %HTTP2{} = conn, responses} =
+      assert {:ok, %HTTP2{} = _conn, responses} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id,
@@ -559,7 +559,7 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert [{:status, ref, 200}, {:headers, ^ref, headers}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, headers}] = responses
 
       assert [{"cookie", cookie}, {"accept", _}, {"content-type", _}, {"x-header", _}] = headers
 
@@ -1283,7 +1283,7 @@ defmodule Mint.HTTP2Test do
       # plus CONTINUATION frames.
       trailing_headers = for index <- 1..1000, do: {"my-trailing-#{index}", "value"}
 
-      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
+      assert {:ok, _conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert_recv_frames [
         headers(stream_id: stream_id) = headers,
@@ -1307,7 +1307,7 @@ defmodule Mint.HTTP2Test do
 
       trailing_headers = [{"x-trailing", "value"}, {"Host", "example.com"}]
 
-      assert {:error, %HTTP2{} = conn, error} =
+      assert {:error, %HTTP2{} = _conn, error} =
                HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
