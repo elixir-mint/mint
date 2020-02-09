@@ -8,6 +8,7 @@ defmodule Mint.IntegrationTest do
   describe "httpbin.org" do
     @describetag :integration
 
+    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(
@@ -28,6 +29,7 @@ defmodule Mint.IntegrationTest do
              ] = responses
     end
 
+    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, %TransportError{reason: :protocol_not_negotiated}} =
@@ -138,6 +140,7 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
+    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     test "200 response - https://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})

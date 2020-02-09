@@ -1165,6 +1165,22 @@ defmodule Mint.HTTP2Test do
       assert new_request_window_size == initial_request_window_size - byte_size(body_chunk)
     end
 
+    test "if the server sends an empty DATA frame, we don't send WINDOW_UPDATE back",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = _conn, responses} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+
+      assert responses == [{:data, ref, ""}, {:done, ref}]
+    end
+
     test "get_window_size/2 raises if the request is not found", %{conn: conn} do
       assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
         HTTP2.get_window_size(conn, {:request, make_ref()})

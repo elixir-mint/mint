@@ -1461,7 +1461,13 @@ defmodule Mint.HTTP2 do
     # Regardless of whether we have the stream or not, we need to abide by flow
     # control rules so we still refill the client window for the stream_id we got.
     window_size_increment = byte_size(data) + byte_size(padding || "")
-    conn = refill_client_windows(conn, stream_id, window_size_increment)
+
+    conn =
+      if window_size_increment > 0 do
+        refill_client_windows(conn, stream_id, window_size_increment)
+      else
+        conn
+      end
 
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
