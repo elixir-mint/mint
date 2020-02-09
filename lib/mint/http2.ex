@@ -1344,7 +1344,6 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
-        inspect_frame(frame, :received)
         assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
@@ -2004,10 +2003,6 @@ defmodule Mint.HTTP2 do
   end
 
   defp send!(%Mint.HTTP2{transport: transport, socket: socket} = conn, bytes) do
-    for frame <- decode_frames(bytes) do
-      inspect_frame(frame, :sent)
-    end
-
     case transport.send(socket, bytes) do
       :ok ->
         conn
@@ -2018,26 +2013,6 @@ defmodule Mint.HTTP2 do
       {:error, reason} ->
         throw({:mint, conn, reason})
     end
-  end
-
-  defp decode_frames(""), do: []
-
-  defp decode_frames(bytes) do
-    bytes = IO.iodata_to_binary(bytes)
-    {:ok, frame, rest} = Frame.decode_next(bytes, @default_max_frame_size)
-    [frame | decode_frames(rest)]
-  end
-
-  defp inspect_frame(frame, sent_or_received) do
-    import IO.ANSI
-
-    info =
-      case sent_or_received do
-        :sent -> [cyan(), "===> SENT\n", reset()]
-        :received -> [yellow(), "<=== RECEIVED\n", reset()]
-      end
-
-    # IO.puts([info, inspect(frame), "\n\n"])
   end
 
   defp wrap_error(reason) do
