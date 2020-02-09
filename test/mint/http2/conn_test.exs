@@ -1171,7 +1171,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:ok, %HTTP2{} = conn, responses} =
+      assert {:ok, %HTTP2{} = _conn, responses} =
                stream_frames(conn, [
                  data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
                ])
