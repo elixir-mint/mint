@@ -1165,7 +1165,6 @@ defmodule Mint.HTTP2Test do
       assert new_request_window_size == initial_request_window_size - byte_size(body_chunk)
     end
 
-    @tag :focus
     test "if the server sends an empty DATA frame, we don't send WINDOW_UPDATE back",
          %{conn: conn} do
       {conn, ref} = open_request(conn, :stream)
