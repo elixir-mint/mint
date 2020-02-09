@@ -2037,7 +2037,7 @@ defmodule Mint.HTTP2 do
         :received -> [yellow(), "<=== RECEIVED\n", reset()]
       end
 
-    IO.puts([info, inspect(frame), "\n\n"])
+    # IO.puts([info, inspect(frame), "\n\n"])
   end
 
   defp wrap_error(reason) do
