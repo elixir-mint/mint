@@ -21,12 +21,17 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    test "timeout" do
+    test "timeout with http" do
       assert {:error, %TransportError{reason: :timeout}} =
                HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 0])
+    end
 
-      assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
+    # TODO: remove check once we depend on OTP 19+
+    if System.otp_release() >= "19" do
+      test "timeout with https" do
+        assert {:error, %TransportError{reason: :timeout}} =
+                 HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
+      end
     end
 
     test "SSL, path, long body" do
