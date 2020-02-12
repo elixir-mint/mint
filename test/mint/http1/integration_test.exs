@@ -27,7 +27,6 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     # TODO: remove check once we depend on OTP 19+
-
     if System.otp_release() >= "19" do
       test "timeout with https" do
         assert {:error, %TransportError{reason: :timeout}} =
