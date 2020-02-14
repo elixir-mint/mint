@@ -641,6 +641,26 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     end
 
+    test "sending an empty chuunk with chunked transfer-encoding is a no-op",
+         %{conn: conn, server_socket: server_socket, port: port} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               transfer-encoding: chunked
+               host: localhost:#{port}
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "")
+      refute_receive {:tcp, _socket, _data}
+
+      assert HTTP1.open?(conn)
+    end
+
     test "sending trailing headers with implicit chunked transfer-encoding",
          %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)

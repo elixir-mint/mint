@@ -479,7 +479,8 @@ defmodule Mint.HTTP do
   and a chunk of body to stream. The value of chunk can be:
 
     * iodata - a chunk of iodata is transmitted to the server as part of the body
-      of the request.
+      of the request. If the chunk is empty, in HTTP/1 it's a no-op, while in HTTP/2
+      a `DATA` frame will be sent.
 
     * `:eof` - signals the end of the streaming of the request body for the given
       request. Usually the server won't send any reply until this is sent.
