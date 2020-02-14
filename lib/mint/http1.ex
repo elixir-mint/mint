@@ -265,6 +265,8 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.stream_request_body/3`.
 
+  In HTTP/1, sending an empty chuunk is a no-op.
+
   ## Transfer encoding and content length
 
   When streaming the request body, Mint cannot send a precalculated `content-length`
@@ -337,6 +339,9 @@ defmodule Mint.HTTP1 do
         _other -> {:ok, conn}
       end
     else
+      :empty_chunk ->
+        {:ok, conn}
+
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
 
@@ -355,8 +360,16 @@ defmodule Mint.HTTP1 do
     end
   end
 
+  defp validate_chunk(:eof) do
+    {:ok, :eof}
+  end
+
   defp validate_chunk(chunk) do
-    {:ok, chunk}
+    if IO.iodata_length(chunk) == 0 do
+      :empty_chunk
+    else
+      {:ok, chunk}
+    end
   end
 
   @doc """
