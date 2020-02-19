@@ -233,7 +233,6 @@ defmodule Mint.HTTP1 do
 
     headers =
       headers
-      |> lower_header_keys()
       |> add_default_headers(conn)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
