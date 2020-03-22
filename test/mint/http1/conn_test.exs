@@ -3,6 +3,8 @@ defmodule Mint.HTTP1Test do
 
   alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
+  require Mint.HTTP
+
   setup do
     {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
@@ -14,6 +16,15 @@ defmodule Mint.HTTP1Test do
   test "unknown message", %{conn: conn} do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     assert HTTP1.stream(conn, :unknown_message) == :unknown
+  end
+
+  test "Mint.HTTP.is_connection_message/2 guard works with HTTP1 connections", %{conn: conn} do
+    assert Mint.HTTP.is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
+    assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, conn.socket}) == true
+    assert Mint.HTTP.is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+
+    assert Mint.HTTP.is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+    assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
   end
 
   test "status", %{conn: conn} do

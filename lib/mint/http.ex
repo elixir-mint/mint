@@ -108,6 +108,42 @@ defmodule Mint.HTTP do
   @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
 
   @doc """
+  Guard to check that a given received `message` is intended for the given connection `conn`.
+
+  This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
+  `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
+  `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+
+  ## Examples
+
+      require Mint.HTTP
+
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, "")
+
+      receive do
+        message when Mint.HTTP.is_connection_message(conn, message) ->
+          Mint.HTTP.stream(conn, message)
+
+        other ->
+          # This message is related to something else or to some other connection
+      end
+
+  """
+  # TODO: remove the check when we depend on Elixir 1.7+.
+  if Version.match?(System.version(), ">= 1.7.0") do
+    @doc since: "1.0.0"
+  end
+
+  defguard is_connection_message(conn, message)
+           when is_map(conn) and
+                  is_tuple(message) and
+                  is_atom(:erlang.map_get(:__struct__, conn)) and
+                  elem(message, 1) == :erlang.map_get(:socket, conn) and
+                  ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
+                     (elem(message, 0) in [:ssl_closed, :tcp_closed] and tuple_size(message) == 2) or
+                     (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
+
+  @doc """
   Creates a new connection to a given server.
 
   Creates a new connection struct and establishes the connection to the given server,

@@ -11,6 +11,8 @@ defmodule Mint.HTTP2Test do
     TransportError
   }
 
+  require Mint.HTTP
+
   setup :start_connection
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
@@ -26,6 +28,17 @@ defmodule Mint.HTTP2Test do
       message = Exception.message(error)
       refute message =~ "got FunctionClauseError"
       assert message != inspect(error.reason)
+    end
+  end
+
+  describe "Mint.HTTP.is_mint_message/2" do
+    test "the guard works with HTTP2 connections", %{conn: conn} do
+      assert Mint.HTTP.is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
+      assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, conn.socket}) == true
+      assert Mint.HTTP.is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+
+      assert Mint.HTTP.is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+      assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
     end
   end
 
