@@ -149,7 +149,6 @@ defmodule Mint.HTTP do
                           tuple_size(message) == 2) or
                        (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
   else
-    @doc since: "1.1.0"
     defmacro is_connection_message(_conn, _message) do
       raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.10+"
     end
