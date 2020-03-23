@@ -46,6 +46,39 @@ defmodule Mint.Core.Util do
                                 "warning"
                               ])
 
+  # We have to do this if/else dance inside the macro because defguard
+  # is not available in Elixir 1.5, and macro expansion would raise
+  # when expanding the if even if we were on Elixir 1.5. This way, we
+  # only expand to the defguard code if we are on Elixir 1.10 and on
+  # (which is where this macro is supported).
+  defmacro define_is_connection_message_guard do
+    # TODO: remove the conditional definition when we depend on Elixir 1.10+.
+    if Version.match?(System.version(), ">= 1.10.0") do
+      quote do
+        @doc since: "1.1.0"
+        defguard is_connection_message(conn, message)
+                 when is_map(conn) and
+                        is_tuple(message) and
+                        is_map_key(conn, :__struct__) and
+                        is_map_key(conn, :socket) and
+                        is_atom(:erlang.map_get(:__struct__, conn)) and
+                        elem(message, 1) == :erlang.map_get(:socket, conn) and
+                        ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
+                           (elem(message, 0) in [:ssl_closed, :tcp_closed] and
+                              tuple_size(message) == 2) or
+                           (elem(message, 0) in [:ssl_error, :tcp_error] and
+                              tuple_size(message) == 3))
+      end
+    else
+      quote do
+        defmacro is_connection_message(_conn, _message) do
+          raise ArgumentError,
+                "the is_connection_message/2 macro is only available with Elixir 1.10+"
+        end
+      end
+    end
+  end
+
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),

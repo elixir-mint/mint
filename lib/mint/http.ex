@@ -134,25 +134,7 @@ defmodule Mint.HTTP do
       end
 
   """
-  # TODO: remove the conditional definition when we depend on Elixir 1.10+.
-  if Version.match?(System.version(), ">= 1.10.0") do
-    @doc since: "1.1.0"
-    defguard is_connection_message(conn, message)
-             when is_map(conn) and
-                    is_tuple(message) and
-                    is_map_key(conn, :__struct__) and
-                    is_map_key(conn, :socket) and
-                    is_atom(:erlang.map_get(:__struct__, conn)) and
-                    elem(message, 1) == :erlang.map_get(:socket, conn) and
-                    ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
-                       (elem(message, 0) in [:ssl_closed, :tcp_closed] and
-                          tuple_size(message) == 2) or
-                       (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
-  else
-    defmacro is_connection_message(_conn, _message) do
-      raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.10+"
-    end
-  end
+  define_is_connection_message_guard()
 
   @doc """
   Creates a new connection to a given server.
