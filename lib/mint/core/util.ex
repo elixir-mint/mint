@@ -52,7 +52,8 @@ defmodule Mint.Core.Util do
   # only expand to the defguard code if we are on Elixir 1.10 and on
   # (which is where this macro is supported).
   defmacro define_is_connection_message_guard do
-    # TODO: remove the conditional definition when we depend on Elixir 1.10+.
+  # TODO: Remove the conditional definition when we depend on Elixir 1.10+
+  # TODO: Use is_struct/2 and map.field access when we depend on Elixir 1.11+
     if Version.match?(System.version(), ">= 1.10.0") do
       quote do
         @doc since: "1.1.0"
