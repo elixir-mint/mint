@@ -31,8 +31,8 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  # TODO: Remove check once we depend on Elixir 1.6+.
-  if Version.match?(System.version(), ">= 1.6.0") do
+  # TODO: Remove check once we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
     describe "Mint.HTTP.is_mint_message/2" do
       test "the guard works with HTTP2 connections", %{conn: conn} do
         import Mint.HTTP, only: [is_connection_message: 2]

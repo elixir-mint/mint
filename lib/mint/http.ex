@@ -116,7 +116,8 @@ defmodule Mint.HTTP do
 
   This macro can be used in guards.
 
-  **Note**: this macro is only available if you compile Mint with Elixir 1.6.0 or greater.
+  **Note**: this macro is only available if you compile Mint with Elixir 1.10.0 or greater (and
+  OTP 21+, which is required by Elixir 1.10.0 and on).
 
   ## Examples
 
@@ -138,8 +139,8 @@ defmodule Mint.HTTP do
     @doc since: "1.1.0"
   end
 
-  # TODO: remove the conditional definition when we depend on Elixir 1.6+.
-  if Version.match?(System.version(), ">= 1.6.0") do
+  # TODO: remove the conditional definition when we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
     defguard is_connection_message(conn, message)
              when is_map(conn) and
                     is_tuple(message) and
@@ -153,7 +154,7 @@ defmodule Mint.HTTP do
                        (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
   else
     defmacro is_connection_message(_conn, _message) do
-      raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.6+"
+      raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.10+"
     end
   end
 

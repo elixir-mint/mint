@@ -18,8 +18,8 @@ defmodule Mint.HTTP1Test do
     assert HTTP1.stream(conn, :unknown_message) == :unknown
   end
 
-  # TODO: Remove check once we depend on Elixir 1.6+.
-  if Version.match?(System.version(), ">= 1.6.0") do
+  # TODO: Remove check once we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
     test "Mint.HTTP.is_connection_message/2 guard works with HTTP1 connections", %{conn: conn} do
       import Mint.HTTP, only: [is_connection_message: 2]
 
