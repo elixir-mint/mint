@@ -134,13 +134,9 @@ defmodule Mint.HTTP do
       end
 
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "1.1.0"
-  end
-
   # TODO: remove the conditional definition when we depend on Elixir 1.10+.
   if Version.match?(System.version(), ">= 1.10.0") do
+    @doc since: "1.1.0"
     defguard is_connection_message(conn, message)
              when is_map(conn) and
                     is_tuple(message) and
@@ -153,6 +149,7 @@ defmodule Mint.HTTP do
                           tuple_size(message) == 2) or
                        (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
   else
+    @doc since: "1.1.0"
     defmacro is_connection_message(_conn, _message) do
       raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.10+"
     end
