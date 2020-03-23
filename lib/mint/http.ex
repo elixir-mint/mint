@@ -108,6 +108,35 @@ defmodule Mint.HTTP do
   @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
 
   @doc """
+  Macro to check that a given received `message` is intended for the given connection `conn`.
+
+  This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
+  `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
+  `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+
+  This macro can be used in guards.
+
+  **Note**: this macro is only available if you compile Mint with Elixir 1.10.0 or greater (and
+  OTP 21+, which is required by Elixir 1.10.0 and on).
+
+  ## Examples
+
+      require Mint.HTTP
+
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, "")
+
+      receive do
+        message when Mint.HTTP.is_connection_message(conn, message) ->
+          Mint.HTTP.stream(conn, message)
+
+        other ->
+          # This message is related to something else or to some other connection
+      end
+
+  """
+  define_is_connection_message_guard()
+
+  @doc """
   Creates a new connection to a given server.
 
   Creates a new connection struct and establishes the connection to the given server,

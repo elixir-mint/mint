@@ -12,8 +12,8 @@ jobs:
       - name: Install OTP and Elixir
         uses: actions/setup-elixir@v1
         with:
-          otp-version: 22.2
-          elixir-version: 1.10.0
+          otp-version: 22.3
+          elixir-version: 1.10.2
 
       - name: Install dependencies
         run: mix deps.get
@@ -28,8 +28,8 @@ jobs:
       fail-fast: false
       matrix:
         pair:
-          - erlang: 22.2
-            elixir: 1.10.0
+          - erlang: 22.3
+            elixir: 1.10.2
           - erlang: 22.1
             elixir: 1.9.4
           - erlang: 21.3
