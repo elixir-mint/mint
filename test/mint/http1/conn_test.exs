@@ -18,13 +18,24 @@ defmodule Mint.HTTP1Test do
     assert HTTP1.stream(conn, :unknown_message) == :unknown
   end
 
-  test "Mint.HTTP.is_connection_message/2 guard works with HTTP1 connections", %{conn: conn} do
-    assert Mint.HTTP.is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
-    assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, conn.socket}) == true
-    assert Mint.HTTP.is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+  # TODO: Remove check once we depend on Elixir 1.6+.
+  if Version.match?(System.version(), ">= 1.6.0") do
+    test "Mint.HTTP.is_connection_message/2 guard works with HTTP1 connections", %{conn: conn} do
+      import Mint.HTTP, only: [is_connection_message: 2]
 
-    assert Mint.HTTP.is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
-    assert Mint.HTTP.is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
+      assert is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
+      assert is_connection_message(conn, {:tcp_closed, conn.socket}) == true
+      assert is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+
+      assert is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+      assert is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
+
+      assert is_connection_message(_conn = %HTTP1{}, {:tcp, conn.socket, "foo"}) == false
+
+      # If the first argument is not a connection struct, we return false.
+      assert is_connection_message(%{socket: conn.socket}, {:tcp, conn.socket, "foo"}) == false
+      assert is_connection_message(%URI{}, {:tcp, conn.socket, "foo"}) == false
+    end
   end
 
   test "status", %{conn: conn} do

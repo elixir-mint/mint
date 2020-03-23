@@ -116,6 +116,8 @@ defmodule Mint.HTTP do
 
   This macro can be used in guards.
 
+  **Note**: this macro is only available if you compile Mint with Elixir 1.6.0 or greater.
+
   ## Examples
 
       require Mint.HTTP
@@ -133,17 +135,27 @@ defmodule Mint.HTTP do
   """
   # TODO: remove the check when we depend on Elixir 1.7+.
   if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "1.0.0"
+    @doc since: "1.1.0"
   end
 
-  defguard is_connection_message(conn, message)
-           when is_map(conn) and
-                  is_tuple(message) and
-                  is_atom(:erlang.map_get(:__struct__, conn)) and
-                  elem(message, 1) == :erlang.map_get(:socket, conn) and
-                  ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
-                     (elem(message, 0) in [:ssl_closed, :tcp_closed] and tuple_size(message) == 2) or
-                     (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
+  # TODO: remove the conditional definition when we depend on Elixir 1.6+.
+  if Version.match?(System.version(), ">= 1.6.0") do
+    defguard is_connection_message(conn, message)
+             when is_map(conn) and
+                    is_tuple(message) and
+                    is_map_key(conn, :__struct__) and
+                    is_map_key(conn, :socket) and
+                    is_atom(:erlang.map_get(:__struct__, conn)) and
+                    elem(message, 1) == :erlang.map_get(:socket, conn) and
+                    ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
+                       (elem(message, 0) in [:ssl_closed, :tcp_closed] and
+                          tuple_size(message) == 2) or
+                       (elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3))
+  else
+    defmacro is_connection_message(_conn, _message) do
+      raise ArgumentError, "the is_connection_message/2 macro is only available with Elixir 1.6+"
+    end
+  end
 
   @doc """
   Creates a new connection to a given server.
