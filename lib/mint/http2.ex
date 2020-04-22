@@ -441,7 +441,7 @@ defmodule Mint.HTTP2 do
   
   ## Request body size
   
-  If the request body size exceeds the window size of HTTP/2 stream created by the
+  If the request body size exceeds the window size of the HTTP/2 stream created by the
   request or the window size of the connection the peer may fail the request and
   close the connection.
   
