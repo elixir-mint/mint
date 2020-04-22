@@ -441,9 +441,9 @@ defmodule Mint.HTTP2 do
   
   ## Request body size
   
-  If the request body size exceeds the window size of the HTTP/2 stream created by the
-  request or the window size of the connection the peer may fail the request and
-  close the connection.
+  If the request body size will exceed the window size of the HTTP/2 stream created by the
+  request or the window size of the connection Mint will return a `:exceeds_window_size`
+  error.
   
   To ensure you do not exceed the window size it is recommended to stream the request
   body by initially passing `:stream` as the body and sending the body in chunks using
