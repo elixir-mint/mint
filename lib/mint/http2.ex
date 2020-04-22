@@ -438,6 +438,17 @@ defmodule Mint.HTTP2 do
   each header. Note that pseudo-headers (like `:path` or `:method`) count towards
   this size. If the size is exceeded, an error is returned. To check what the size
   is, use `get_server_setting/2`.
+  
+  ## Request body size
+  
+  If the request body size exceeds the window size of HTTP/2 stream created by the
+  request or the window size of the connection the peer may fail the request and
+  close the connection.
+  
+  To ensure you do not exceed the window size it is recommended to stream the request
+  body by initially passing `:stream` as the body and sending the body in chunks using
+  `stream_request_body/3` and using `get_window_size/2` to get the window size of the
+  request and connection.
   """
   @impl true
   @spec request(
