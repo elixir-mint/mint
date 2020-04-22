@@ -143,8 +143,8 @@ defmodule Mint.UnsafeProxy do
   @impl true
   @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
   def controlling_process(%UnsafeProxy{module: module, state: state} = conn, new_pid) do
-    with {:ok, state} <- module.controlling_process(state, new_pid) do
-      {:ok, %{conn | state: state}}
+    with {:ok, _} <- module.controlling_process(state, new_pid) do
+      {:ok, conn}
     end
   end
 

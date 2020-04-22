@@ -808,10 +808,8 @@ defmodule Mint.HTTP do
   new controlling process). If you do that, be careful of race conditions
   and be sure to retrieve the connection in the new controlling process
   before accepting connection messages in the new controlling process.
-
-  Note that changing controlling process means that you still need to be careful
-  about only calling `Mint` functions from a single process (ideally the new
-  controlling process) because the connection data structure is immutable.
+  In fact, this function is guaranteed to return the connection unchanged,
+  so you are free to ignore the connection entry returned in `{:ok, conn}`.
 
   ## Examples
 
