@@ -148,10 +148,10 @@ defmodule Mint.HTTP do
   socket and the `:gen_tcp` module is used to create that socket. If HTTPS is used, then
   the created socket is an SSL socket and the `:ssl` module is used to create that socket.
   The socket is created in active mode (with `active: :once`), which is why it is important
-  to know the type of the socket: messages from the socket (of type `t:socket_message/0`
-  will be delivered directly to the process that creates the connection and tagged
-  appropriately by the socket module (see the `:gen_tcp` and `:ssl` modules). See `stream/2`
-  for more information on the messages and how to process them and on the socket mode.
+  to know the type of the socket: messages from the socket will be delivered directly to the
+  process that creates the connection and tagged appropriately by the socket module (see the
+  `:gen_tcp` and `:ssl` modules). See `stream/2` for more information on the messages and
+  how to process them and on the socket mode.
 
   ## Options
 
