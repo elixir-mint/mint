@@ -10,7 +10,7 @@ defmodule Mint.HTTP do
   To establish a connection with a given server, use `connect/4`. This will
   return an opaque data structure that represents the connection
   to the server. To send a request, you can use `request/5`. Sending a request
-  does not take care of the response to that request, instead we use `Mint.stream/2`
+  does not take care of the response to that request, instead we use `Mint.HTTP.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
   set in **active mode** (with `active: :once`). This means that TCP/SSL messages
