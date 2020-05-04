@@ -5,35 +5,33 @@ defmodule Mint.IntegrationTest do
 
   alias Mint.{TransportError, HTTP}
 
-  describe "httpbin.org" do
+  describe "httpstat.us" do
     @describetag :integration
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(
                  :https,
-                 "httpbin.org",
+                 "httpstat.us",
                  443
                )
 
       assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/200", [], nil)
+
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^request, 200},
                {:headers, ^request, _},
-               {:data, ^request, <<_>>},
                {:done, ^request}
              ] = responses
     end
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, %TransportError{reason: :protocol_not_negotiated}} =
-               HTTP.connect(:https, "httpbin.org", 443,
+               HTTP.connect(:https, "httpstat.us", 443,
                  protocols: [:http2],
                  transport_opts: [reuse_sessions: false]
                )
@@ -140,10 +138,9 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
-    test "200 response - https://httpbin.org" do
+    test "200 response - https://httpstat.us" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:https, "httpstat.us", 443, proxy: {:http, "localhost", 8888, []})
 
       assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -153,7 +150,7 @@ defmodule Mint.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "httpbin"
+      assert merge_body(responses, request) =~ "httpstat.us"
     end
 
     test "200 response with explicit http2 - https://http2.golang.org" do
