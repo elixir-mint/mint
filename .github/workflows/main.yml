@@ -28,9 +28,9 @@ jobs:
       fail-fast: false
       matrix:
         pair:
+          - erlang: 23.0
+            elixir: 1.10.3
           - erlang: 22.3
-            elixir: 1.10.2
-          - erlang: 22.1
             elixir: 1.9.4
           - erlang: 21.3
             elixir: 1.8.2
