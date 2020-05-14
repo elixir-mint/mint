@@ -476,6 +476,7 @@ defmodule Mint.Core.Transport.SSL do
       versions: @default_versions,
       verify: :verify_peer,
       depth: 4,
+      customize_hostname_check: [match_fun: &match_fun/2],
       secure_renegotiate: true,
       reuse_sessions: true
     ]
