@@ -75,8 +75,10 @@ defmodule Mint.HTTP1.IntegrationTest do
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+      # Newer OTP versions treat empty list for `cacerts` as if the option was not set
       assert reason == {:tls_alert, 'unknown ca'} or
-               match?({:tls_alert, {:unknown_ca, _}}, reason)
+               match?({:tls_alert, {:unknown_ca, _}}, reason) or
+               reason == {:options, {:cacertfile, []}}
     end
 
     test "keep alive" do
