@@ -416,7 +416,28 @@ defmodule Mint.Core.Transport.SSL do
       opts
       |> add_cacerts()
       |> add_partial_chain_fun()
-      |> add_verify_fun(hostname)
+      |> customize_hostname_check(hostname)
+    else
+      opts
+    end
+  end
+
+  defp customize_hostname_check(opts, host_or_ip) do
+    if ssl_major_version() >= 9 do
+      # From OTP 20.0 use built-in support for custom hostname checks
+      add_customize_hostname_check(opts)
+    else
+      # Before OTP 20.0 use mint_shims for hostname check, from a custom
+      # verify_fun
+      add_verify_fun(opts, host_or_ip)
+    end
+  end
+
+  defp add_customize_hostname_check(opts) do
+    customize_hostname_check_present? = Keyword.has_key?(opts, :customize_hostname_check)
+
+    if not customize_hostname_check_present? do
+      Keyword.put(opts, :customize_hostname_check, match_fun: &match_fun/2)
     else
       opts
     end
@@ -476,7 +497,6 @@ defmodule Mint.Core.Transport.SSL do
       versions: @default_versions,
       verify: :verify_peer,
       depth: 4,
-      customize_hostname_check: [match_fun: &match_fun/2],
       secure_renegotiate: true,
       reuse_sessions: true
     ]
@@ -582,4 +602,10 @@ defmodule Mint.Core.Transport.SSL do
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
+
+  defp ssl_major_version do
+    Application.spec(:ssl, :vsn)
+    |> :string.to_integer()
+    |> elem(0)
+  end
 end
