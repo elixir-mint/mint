@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.0
+
+### Bug fixes and improvements
+
+  * Concatenate values in one `cookie` header if the `cookie` header is provided more than once in HTTP/2.
+  * Fix headers merging in `Mint.UnsafeProxy`.
+  * Remove some `Logger.debug/1` calls from the codebase.
+  * Assume the HTTP/2 protocol on TCP connections if using `Mint.HTTP2`.
+  * Fix a bug where we would send `WINDOW_UPDATE` frames with an increment of `0` in HTTP/2.
+  * Make the empty body chunk a no-op for `Mint.HTTP.stream_request_body/3` (only for HTTP/1).
+  * Add the `Mint.HTTP.is_connection_message/2` guard.
+  * Fix wildcard certifcate verification in OTP 23.
+
 ## v1.0.0
 
 ### Breaking changes
