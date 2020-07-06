@@ -16,7 +16,8 @@ defmodule Mint.HTTP1 do
   import Mint.Core.Util
 
   alias Mint.Core.Util
-  alias Mint.HTTP1.{Parse, Request, Response}
+
+  alias Mint.HTTP1.{Parse, Request, Response, Headers}
   alias Mint.{HTTPError, TransportError, Types}
 
   require Logger
@@ -93,6 +94,7 @@ defmodule Mint.HTTP1 do
     :transport,
     :mode,
     :scheme_as_string,
+    :downcase_request_headers,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -192,7 +194,8 @@ defmodule Mint.HTTP1 do
         port: port,
         scheme_as_string: Atom.to_string(scheme),
         state: :open,
-        log: log?
+        log: log?,
+        downcase_request_headers: Keyword.get(opts, :downcase_request_headers, true)
       }
 
       {:ok, conn}
@@ -262,11 +265,17 @@ defmodule Mint.HTTP1 do
 
     headers =
       headers
-      |> lower_header_keys()
+      |> Headers.from_raw_headers()
       |> add_default_headers(conn)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
-         {:ok, iodata} <- Request.encode(method, path, headers, body),
+         {:ok, iodata} <-
+           Request.encode(
+             method,
+             path,
+             Headers.to_raw_headers(headers, conn.downcase_request_headers),
+             body
+           ),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
       request = new_request(request_ref, method, body, encoding)
@@ -974,8 +983,8 @@ defmodule Mint.HTTP1 do
 
   defp add_default_headers(headers, conn) do
     headers
-    |> Util.put_new_header("user-agent", @user_agent)
-    |> Util.put_new_header("host", default_host_header(conn))
+    |> Headers.put_new_header("User-Agent", "user-agent", @user_agent)
+    |> Headers.put_new_header("Host", "host", default_host_header(conn))
   end
 
   # If the port is the default for the scheme, don't add it to the host header
@@ -989,18 +998,19 @@ defmodule Mint.HTTP1 do
 
   defp add_content_length_or_transfer_encoding(headers, :stream) do
     cond do
-      List.keymember?(headers, "content-length", 0) ->
+      Headers.contains_header(headers, "content-length") ->
         {:ok, headers, :identity}
 
-      found = List.keyfind(headers, "transfer-encoding", 0) ->
-        {"transfer-encoding", value} = found
+      found = Headers.find_header(headers, "transfer-encoding") ->
+        {raw_name, value} = found
 
         with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
           if "chunked" in tokens or "identity" in tokens do
             {:ok, headers, :identity}
           else
-            new_transfer_encoding = {"transfer-encoding", value <> ",chunked"}
-            headers = List.keyreplace(headers, "transfer-encoding", 0, new_transfer_encoding)
+            headers =
+              Headers.replace_header(headers, "transfer-encoding", raw_name, value <> ",chunked")
+
             {:ok, headers, :chunked}
           end
         end
@@ -1008,7 +1018,9 @@ defmodule Mint.HTTP1 do
       # If no content-length or transfer-encoding are present, assume
       # chunked transfer-encoding and handle the encoding ourselves.
       true ->
-        headers = Util.put_new_header(headers, "transfer-encoding", "chunked")
+        headers =
+          Headers.put_new_header(headers, "Transfer-Encoding", "transfer-encoding", "chunked")
+
         {:ok, headers, :chunked}
     end
   end
@@ -1019,7 +1031,9 @@ defmodule Mint.HTTP1 do
 
   defp add_content_length_or_transfer_encoding(headers, body) do
     length_fun = fn -> body |> IO.iodata_length() |> Integer.to_string() end
-    {:ok, Util.put_new_header_lazy(headers, "content-length", length_fun), :identity}
+
+    {:ok, Headers.put_new_header_lazy(headers, "Content-Length", "content-length", length_fun),
+     :identity}
   end
 
   defp wrap_error(reason) do
