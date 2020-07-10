@@ -361,28 +361,26 @@ defmodule Mint.Core.Transport.SSL do
     # https://github.com/erlang/otp/blob/fc1f0444e32b039194189af97fb3d5358a2b91e3/lib/kernel/src/inet.erl#L1696-L1754
     with {:ok, active: active} <- getopts(socket, [:active]),
          :ok <- setopts(socket, active: false),
-         :ok <- wrap_err(:ssl.controlling_process(socket, pid)),
-         still_open? = forward_messages_to_new_controlling_process(socket, pid, true),
-         :ok <- if(active == :once and still_open?, do: setopts(socket, active: :once), else: :ok) do
-      :ok
+         :ok <- forward_messages_to_new_controlling_process(socket, pid),
+         :ok <- wrap_err(:ssl.controlling_process(socket, pid)) do
+      if(active == :once, do: setopts(socket, active: :once), else: :ok)
     end
   end
 
-  defp forward_messages_to_new_controlling_process(socket, pid, still_open?) do
+  defp forward_messages_to_new_controlling_process(socket, pid) do
     receive do
       {:ssl, ^socket, _data} = message ->
         Kernel.send(pid, message)
-        forward_messages_to_new_controlling_process(socket, pid, still_open?)
+        forward_messages_to_new_controlling_process(socket, pid)
 
-      {:ssl_error, ^socket, _error} = message ->
-        Kernel.send(pid, message)
-        forward_messages_to_new_controlling_process(socket, pid, still_open?)
+      {:ssl_error, ^socket, error} ->
+        {:error, error}
 
-      {:ssl_closed, ^socket} = message ->
-        Kernel.send(pid, message)
-        forward_messages_to_new_controlling_process(socket, pid, false)
+      {:ssl_closed, ^socket} ->
+        {:error, :closed}
     after
-      0 -> still_open?
+      0 ->
+        :ok
     end
   end
 
