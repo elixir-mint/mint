@@ -7,6 +7,7 @@ defmodule Mint.IntegrationTest do
 
   describe "httpstat.us" do
     @describetag :integration
+    @describetag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
 
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
