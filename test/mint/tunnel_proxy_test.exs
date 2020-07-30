@@ -35,7 +35,6 @@ defmodule Mint.TunnelProxyTest do
                {:https, "httpstat.us", 443, []}
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -70,7 +69,6 @@ defmodule Mint.TunnelProxyTest do
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
