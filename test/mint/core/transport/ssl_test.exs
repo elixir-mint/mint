@@ -215,13 +215,13 @@ defmodule Mint.Core.Transport.SSLTest do
 
       other_process =
         spawn_link(fn ->
-          assert {:ok, [active: false]} = SSL.getopts(socket, [:active])
-          :ok = SSL.setopts(socket, active: :once)
           assert_receive message, 500
           send(parent, {ref, message})
         end)
 
       assert :ok = SSL.controlling_process(socket, other_process)
+      assert {:ok, [active: false]} = SSL.getopts(socket, [:active])
+      :ok = SSL.setopts(socket, active: :once)
 
       assert_receive {^ref, {:ssl, ^socket, "some data"}}, 500
 
