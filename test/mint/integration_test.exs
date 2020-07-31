@@ -1,5 +1,5 @@
 defmodule Mint.IntegrationTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Mint.HTTP1.TestHelpers
 
@@ -8,30 +8,6 @@ defmodule Mint.IntegrationTest do
   @port_http1_http 8101
   @port_http1_https 8102
   @port_http2_https 8202
-
-  setup_all do
-    start_supervised(%{
-      id: __MODULE__.HTTP1,
-      start:
-        {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
-    })
-
-    start_supervised(%{
-      id: __MODULE__.HTTP1.HTTPS,
-      start:
-        {Mint.CowboyTestServer, :start_https,
-         [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
-    })
-
-    start_supervised(%{
-      id: __MODULE__.HTTP2,
-      start:
-        {Mint.CowboyTestServer, :start_https,
-         [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
-    })
-
-    :ok
-  end
 
   describe "https with HTTP1" do
     @describetag :integration

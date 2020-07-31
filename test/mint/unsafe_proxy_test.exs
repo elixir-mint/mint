@@ -1,5 +1,5 @@
 defmodule Mint.UnsafeProxyTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Mint.HTTP1.TestHelpers
   alias Mint.UnsafeProxy
@@ -8,15 +8,6 @@ defmodule Mint.UnsafeProxyTest do
   @moduletag :proxy
 
   @port 8101
-
-  setup_all do
-    start_supervised(%{
-      id: __MODULE__.HTTP1,
-      start: {Mint.CowboyTestServer, :start_http, [:http1, @port, [ref: __MODULE__.HTTP1]]}
-    })
-
-    :ok
-  end
 
   test "200 response" do
     assert {:ok, conn} =
