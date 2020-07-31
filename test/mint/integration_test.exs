@@ -143,7 +143,6 @@ defmodule Mint.IntegrationTest do
       assert {:ok, conn} =
                HTTP.connect(:https, "httpstat.us", 443, proxy: {:http, "localhost", 8888, []})
 
-      assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
