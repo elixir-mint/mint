@@ -10,27 +10,25 @@ defmodule Mint.IntegrationTest do
   @port_http2_https 8202
 
   setup_all do
+    start_supervised(%{
+      id: __MODULE__.HTTP1,
+      start:
+        {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
+    })
 
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP1,
-        start: {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP1.HTTPS,
+      start:
+        {Mint.CowboyTestServer, :start_https,
+         [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
+    })
 
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP1.HTTPS,
-        start: {Mint.CowboyTestServer, :start_https, [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
-      }
-    )
-
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP2,
-        start: {Mint.CowboyTestServer, :start_https, [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP2,
+      start:
+        {Mint.CowboyTestServer, :start_https,
+         [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
+    })
 
     :ok
   end
@@ -60,7 +58,6 @@ defmodule Mint.IntegrationTest do
              ] = responses
 
       assert data != nil
-
     end
 
     @tag :capture_log
@@ -71,7 +68,6 @@ defmodule Mint.IntegrationTest do
                  transport_opts: [reuse_sessions: false, verify: :verify_none]
                )
     end
-
   end
 
   describe "https with HTTP2" do
@@ -118,9 +114,7 @@ defmodule Mint.IntegrationTest do
                {:data, ^request, <<_>>},
                {:done, ^request}
              ] = responses
-
     end
-
   end
 
   describe "ssl certificate verification" do
@@ -176,7 +170,9 @@ defmodule Mint.IntegrationTest do
 
     test "200 response with tcp http1" do
       assert {:ok, conn} =
-               HTTP.connect(:http, local_addr(), @port_http1_http, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:http, local_addr(), @port_http1_http,
+                 proxy: {:http, "localhost", 8888, []}
+               )
 
       assert conn.__struct__ == Mint.UnsafeProxy
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -207,7 +203,6 @@ defmodule Mint.IntegrationTest do
       assert is_list(headers)
       assert merge_body(responses, request) =~ "Hello world!"
     end
-
   end
 
   describe "proxy http2" do
@@ -250,7 +245,5 @@ defmodule Mint.IntegrationTest do
       assert is_list(headers)
       assert merge_body(responses, request) =~ "Protocol: HTTP/2"
     end
-
   end
-
 end

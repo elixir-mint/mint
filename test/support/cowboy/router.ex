@@ -12,7 +12,7 @@ defmodule Mint.CowboyTestServer.PlugRouter do
     json_decoder: Jason
   )
 
-  plug Plug.Static, at: "/static", from: Path.absname("./static", __DIR__)
+  plug(Plug.Static, at: "/static", from: Path.absname("./static", __DIR__))
 
   plug(:dispatch)
 
@@ -44,11 +44,13 @@ defmodule Mint.CowboyTestServer.PlugRouter do
     |> :crypto.strong_rand_bytes()
     |> :binary.bin_to_list()
     |> Enum.chunk_every(chunk_size)
-    |> Enum.reduce_while(conn, fn (chunk, conn) ->
+    |> Enum.reduce_while(conn, fn chunk, conn ->
       chunk_bytes = :binary.list_to_bin(chunk)
+
       case Plug.Conn.chunk(conn, chunk_bytes) do
         {:ok, conn} ->
           {:cont, conn}
+
         {:error, :closed} ->
           {:halt, conn}
       end
@@ -56,16 +58,23 @@ defmodule Mint.CowboyTestServer.PlugRouter do
   end
 
   get "/reqinfo" do
-    body = "Method: #{conn.method}\nProtocol: #{get_http_protocol(conn)}\nRequestURI: #{conn.request_path}\n\nHeaders:\n#{inspect(conn.req_headers)}"
+    body =
+      "Method: #{conn.method}\nProtocol: #{get_http_protocol(conn)}\nRequestURI: #{
+        conn.request_path
+      }\n\nHeaders:\n#{inspect(conn.req_headers)}"
+
     send_resp(conn, 200, body)
   end
 
   get "/clockstream" do
     conn = send_chunked(conn, 200)
 
-    content = 
+    content =
       "# ~1KB of junk to force browsers to start rendering immediately: \n" <>
-        String.duplicate("# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", 13)
+        String.duplicate(
+          "# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n",
+          13
+        )
 
     {:ok, conn} = chunk(conn, content)
 
@@ -74,7 +83,7 @@ defmodule Mint.CowboyTestServer.PlugRouter do
 
   defp send_clock(conn) do
     Process.sleep(1_000)
-    now = NaiveDateTime.to_string(NaiveDateTime.utc_now)
+    now = NaiveDateTime.to_string(NaiveDateTime.utc_now())
     content = "#{now} +0000 UTC\n"
     {:ok, conn} = chunk(conn, content)
     send_clock(conn)
@@ -122,9 +131,11 @@ defmodule Mint.CowboyTestServer.PlugRouter do
 
   get "/feed" do
     if_modified_since_lable = "if-modified-since"
+
     case List.keyfind(conn.req_headers, if_modified_since_lable, 0) do
       {^if_modified_since_lable, "Wed, 26 May 2019 07:43:40 GMT"} ->
         send_resp(conn, 304, "")
+
       _ ->
         send_resp(conn, 200, "")
     end
@@ -133,5 +144,4 @@ defmodule Mint.CowboyTestServer.PlugRouter do
   match _ do
     send_resp(conn, 404, "oops")
   end
-
 end

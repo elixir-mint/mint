@@ -12,26 +12,25 @@ defmodule Mint.TunnelProxyTest do
   @port_http2_https 8202
 
   setup_all do
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP1,
-        start: {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP1,
+      start:
+        {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
+    })
 
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP1.HTTPS,
-        start: {Mint.CowboyTestServer, :start_https, [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP1.HTTPS,
+      start:
+        {Mint.CowboyTestServer, :start_https,
+         [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
+    })
 
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP2,
-        start: {Mint.CowboyTestServer, :start_https, [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP2,
+      start:
+        {Mint.CowboyTestServer, :start_https,
+         [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
+    })
 
     :ok
   end
@@ -77,10 +76,10 @@ defmodule Mint.TunnelProxyTest do
 
   test "407 response - proxy with missing authentication" do
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 407}}}} =
-            Mint.HTTP.connect(:https, local_addr(), @port_http2_https,
-              proxy: {:http, "localhost", 8889, []},
-              transport_opts: [verify: :verify_none]
-            )
+             Mint.HTTP.connect(:https, local_addr(), @port_http2_https,
+               proxy: {:http, "localhost", 8889, []},
+               transport_opts: [verify: :verify_none]
+             )
   end
 
   test "401 response - proxy with invalid authentication" do
@@ -118,10 +117,11 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, local_addr(), @port_http2_https, [
-                 protocols: [:http2],
-                 transport_opts: [verify: :verify_none]
-               ]}
+               {:https, local_addr(), @port_http2_https,
+                [
+                  protocols: [:http2],
+                  transport_opts: [verify: :verify_none]
+                ]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -139,7 +139,8 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, local_addr(), @port_http2_https, [protocols: [:http1, :http2], transport_opts: [verify: :verify_none]]}
+               {:https, local_addr(), @port_http2_https,
+                [protocols: [:http1, :http2], transport_opts: [verify: :verify_none]]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -158,9 +159,10 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:https, "localhost", 8888, []},
-               {:https, local_addr(), @port_http2_https, [
-                 transport_opts: [verify: :verify_none]
-               ]}
+               {:https, local_addr(), @port_http2_https,
+                [
+                  transport_opts: [verify: :verify_none]
+                ]}
              )
 
     assert conn.__struct__ == Mint.HTTP1

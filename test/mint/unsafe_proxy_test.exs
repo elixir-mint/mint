@@ -10,12 +10,10 @@ defmodule Mint.UnsafeProxyTest do
   @port 8101
 
   setup_all do
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP1,
-        start: {Mint.CowboyTestServer, :start_http, [:http1, @port, [ref: __MODULE__.HTTP1]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTP1,
+      start: {Mint.CowboyTestServer, :start_http, [:http1, @port, [ref: __MODULE__.HTTP1]]}
+    })
 
     :ok
   end

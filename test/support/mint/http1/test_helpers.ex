@@ -89,5 +89,4 @@ defmodule Mint.HTTP1.TestHelpers do
     local_addr = List.first(addrs) |> elem(0) |> :inet.ntoa()
     "#{local_addr}"
   end
-
 end

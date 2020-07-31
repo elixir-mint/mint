@@ -11,20 +11,15 @@ defmodule Mint.HTTP2.IntegrationTest do
   @port_https 8202
 
   setup_all do
+    start_supervised(%{
+      id: __MODULE__.HTTP,
+      start: {Mint.CowboyTestServer, :start_http, [:http2, @port_http, [ref: __MODULE__.HTTP]]}
+    })
 
-    start_supervised(
-      %{
-        id: __MODULE__.HTTP,
-        start: {Mint.CowboyTestServer, :start_http, [:http2, @port_http, [ref: __MODULE__.HTTP]]}
-      }
-    )
-
-    start_supervised(
-      %{
-        id: __MODULE__.HTTPS,
-        start: {Mint.CowboyTestServer, :start_https, [:http2, @port_https, [ref: __MODULE__.HTTPS]]}
-      }
-    )
+    start_supervised(%{
+      id: __MODULE__.HTTPS,
+      start: {Mint.CowboyTestServer, :start_https, [:http2, @port_https, [ref: __MODULE__.HTTPS]]}
+    })
 
     :ok
   end
@@ -47,9 +42,11 @@ defmodule Mint.HTTP2.IntegrationTest do
   end
 
   describe "SSL" do
-
     test "GET /reqinfo" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
 
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
 
@@ -70,7 +67,10 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /clockstream" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
 
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [], nil)
 
@@ -100,7 +100,10 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "PUT /echo" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
 
       assert {:ok, %HTTP2{} = conn, req_id} =
                HTTP2.request(conn, "PUT", "/echo", [], "hello world")
@@ -123,7 +126,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /file/gopher.png" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/file/gopher.png", [], nil)
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -146,7 +153,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "ping" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
       assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
@@ -154,7 +165,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /serverpush" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [], nil)
       assert {:ok, %HTTP2{} = _conn, responses} = receive_stream(conn)
 
@@ -168,7 +183,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
@@ -184,7 +203,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /301-redirect" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/301-redirect", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
@@ -200,7 +223,11 @@ defmodule Mint.HTTP2.IntegrationTest do
     end
 
     test "GET /feed/ - regression for #171" do
-      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", @port_https,
+                 transport_opts: [verify: :verify_none]
+               )
+
       # Using non-downcased header meant that HPACK wouldn't find it in the
       # static built-in headers table and so it wouldn't encode it correctly.
       headers = [{"If-Modified-Since", "Wed, 26 May 2019 07:43:40 GMT"}]
@@ -229,7 +256,6 @@ defmodule Mint.HTTP2.IntegrationTest do
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
     end
-
   end
 
   defp stream_messages_until_response(conn) do
