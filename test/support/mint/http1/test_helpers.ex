@@ -83,4 +83,11 @@ defmodule Mint.HTTP1.TestHelpers do
   def get_header(headers, name) do
     for {n, v} <- headers, n == name, do: v
   end
+
+  def local_addr() do
+    {:ok, addrs} = :inet.getif()
+    local_addr = List.first(addrs) |> elem(0) |> :inet.ntoa()
+    "#{local_addr}"
+  end
+
 end

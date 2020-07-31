@@ -1,14 +1,28 @@
 defmodule Mint.UnsafeProxyTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
   import Mint.HTTP1.TestHelpers
   alias Mint.UnsafeProxy
   alias Mint.HTTP
 
   @moduletag :proxy
 
-  test "200 response - http://httpbin.org" do
+  @port 8101
+
+  setup_all do
+    start_supervised(
+      %{
+        id: __MODULE__.HTTP1,
+        start: {Mint.CowboyTestServer, :start_http, [:http1, @port, [ref: __MODULE__.HTTP1]]}
+      }
+    )
+
+    :ok
+  end
+
+  test "200 response" do
     assert {:ok, conn} =
-             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, local_addr(), @port})
 
     assert {:ok, conn, request} = UnsafeProxy.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
@@ -17,12 +31,12 @@ defmodule Mint.UnsafeProxyTest do
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "httpbin"
+    assert merge_body(responses, request) =~ "Hello world!"
   end
 
   test "407 response - proxy with missing authentication" do
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8889, []})
+             HTTP.connect(:http, local_addr(), @port, proxy: {:http, "localhost", 8889, []})
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
@@ -34,7 +48,7 @@ defmodule Mint.UnsafeProxyTest do
     invalid_auth64 = Base.encode64("test:wrong_password")
 
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80,
+             HTTP.connect(:http, local_addr(), @port,
                proxy: {:http, "localhost", 8889, []},
                proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]
              )
@@ -49,7 +63,7 @@ defmodule Mint.UnsafeProxyTest do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80,
+             HTTP.connect(:http, local_addr(), @port,
                proxy: {:http, "localhost", 8889, []},
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
@@ -60,6 +74,6 @@ defmodule Mint.UnsafeProxyTest do
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "httpbin"
+    assert merge_body(responses, request) =~ "Hello world!"
   end
 end

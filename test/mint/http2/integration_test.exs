@@ -1,5 +1,5 @@
-defmodule HTTP2.IntegrationTest do
-  use ExUnit.Case, async: true
+defmodule Mint.HTTP2.IntegrationTest do
+  use ExUnit.Case, async: false
 
   import Mint.HTTP2.TestHelpers
 
@@ -7,21 +7,32 @@ defmodule HTTP2.IntegrationTest do
 
   @moduletag :integration
 
-  setup context do
-    case Map.fetch(context, :connect) do
-      {:ok, {host, port}} ->
-        assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, host, port)
-        [conn: conn]
+  @port_http 8201
+  @port_https 8202
 
-      :error ->
-        []
-    end
+  setup_all do
+
+    start_supervised(
+      %{
+        id: __MODULE__.HTTP,
+        start: {Mint.CowboyTestServer, :start_http, [:http2, @port_http, [ref: __MODULE__.HTTP]]}
+      }
+    )
+
+    start_supervised(
+      %{
+        id: __MODULE__.HTTPS,
+        start: {Mint.CowboyTestServer, :start_https, [:http2, @port_https, [ref: __MODULE__.HTTPS]]}
+      }
+    )
+
+    :ok
   end
 
-  test "TCP - nghttp2.org" do
-    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, "nghttp2.org", 80)
+  test "TCP" do
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, "localhost", @port_http)
 
-    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
+    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
 
     assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -35,10 +46,11 @@ defmodule HTTP2.IntegrationTest do
     assert HTTP2.open?(conn)
   end
 
-  describe "http2.golang.org" do
-    @describetag connect: {"http2.golang.org", 443}
+  describe "SSL" do
 
-    test "GET /reqinfo", %{conn: conn} do
+    test "GET /reqinfo" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
@@ -57,10 +69,13 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
-    test "GET /clockstream", %{conn: conn} do
+    test "GET /clockstream" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = stream_messages_until_response(conn)
+
       assert [{:status, ^req_id, 200}, {:headers, ^req_id, _headers} | rest] = responses
 
       conn =
@@ -84,9 +99,11 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
-    test "PUT /ECHO", %{conn: conn} do
+    test "PUT /echo" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+
       assert {:ok, %HTTP2{} = conn, req_id} =
-               HTTP2.request(conn, "PUT", "/ECHO", [], "hello world")
+               HTTP2.request(conn, "PUT", "/echo", [], "hello world")
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -105,7 +122,8 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
-    test "GET /file/gopher.png", %{conn: conn} do
+    test "GET /file/gopher.png" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/file/gopher.png", [], nil)
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -127,14 +145,16 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
-    test "ping", %{conn: conn} do
+    test "ping" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
       assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
     end
 
-    test "GET /serverpush", %{conn: conn} do
+    test "GET /serverpush" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [], nil)
       assert {:ok, %HTTP2{} = _conn, responses} = receive_stream(conn)
 
@@ -146,71 +166,10 @@ defmodule HTTP2.IntegrationTest do
                {:push_promise, ^req_id, _promised_req_id4, _headers4} | _
              ] = responses
     end
-  end
 
-  describe "twitter.com" do
-    @moduletag connect: {"twitter.com", 443}
-
-    test "ping", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
-      assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-
-    test "GET /", %{conn: conn} do
+    test "GET /" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
-
-      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
-
-      assert [{:status, ^ref, 200}, {:headers, ^ref, headers} | rest] = responses
-      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
-
-      assert is_list(headers)
-
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-  end
-
-  describe "facebook.com" do
-    @describetag connect: {"facebook.com", 443}
-
-    test "ping", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
-      assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-
-    test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
-
-      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
-
-      assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
-      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
-
-      assert status == 301
-      assert is_list(headers)
-
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-  end
-
-  describe "nghttp2.org/httpbin" do
-    @describetag connect: {"nghttp2.org", 443}
-
-    test "ping", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
-      assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-
-    test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -223,27 +182,54 @@ defmodule HTTP2.IntegrationTest do
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
     end
-  end
 
-  describe "robynthinks.wordpress.com" do
-    @describetag connect: {"robynthinks.wordpress.com", 443}
+    test "GET /301-redirect" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/301-redirect", [], nil)
 
-    test "GET /feed/ - regression for #171", %{conn: conn} do
+      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert status == 301
+      assert is_list(headers)
+
+      assert conn.buffer == ""
+      assert HTTP2.open?(conn)
+    end
+
+    test "GET /feed/ - regression for #171" do
+      assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", @port_https, transport_opts: [verify: :verify_none])
       # Using non-downcased header meant that HPACK wouldn't find it in the
       # static built-in headers table and so it wouldn't encode it correctly.
       headers = [{"If-Modified-Since", "Wed, 26 May 2019 07:43:40 GMT"}]
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed/", headers, nil)
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed", headers, nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [{:status, ^ref, status}, {:headers, ^ref, _headers} | rest] = responses
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
 
-      assert status in [200, 304]
+      assert status == 304
+
+      assert conn.buffer == ""
+      assert HTTP2.open?(conn)
+
+      headers = [{"If-Modified-Since", "Tue, 26 May 2020 07:43:40 GMT"}]
+      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/feed", headers, nil)
+
+      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+      assert [{:status, ^ref, status}, {:headers, ^ref, _headers} | rest] = responses
+      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
+
+      assert status == 200
 
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
     end
+
   end
 
   defp stream_messages_until_response(conn) do

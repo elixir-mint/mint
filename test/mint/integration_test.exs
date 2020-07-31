@@ -1,52 +1,94 @@
 defmodule Mint.IntegrationTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import Mint.HTTP1.TestHelpers
 
   alias Mint.{TransportError, HTTP}
 
-  describe "httpstat.us" do
+  @port_http1_http 8101
+  @port_http1_https 8102
+  @port_http2_https 8202
+
+  setup_all do
+
+    start_supervised(
+      %{
+        id: __MODULE__.HTTP1,
+        start: {Mint.CowboyTestServer, :start_http, [:http1, @port_http1_http, [ref: __MODULE__.HTTP1]]}
+      }
+    )
+
+    start_supervised(
+      %{
+        id: __MODULE__.HTTP1.HTTPS,
+        start: {Mint.CowboyTestServer, :start_https, [:http1, @port_http1_https, [ref: __MODULE__.HTTP1.HTTPS]]}
+      }
+    )
+
+    start_supervised(
+      %{
+        id: __MODULE__.HTTP2,
+        start: {Mint.CowboyTestServer, :start_https, [:http2, @port_http2_https, [ref: __MODULE__.HTTP2]]}
+      }
+    )
+
+    :ok
+  end
+
+  describe "https with HTTP1" do
     @describetag :integration
-    @describetag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
 
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(
                  :https,
-                 "httpstat.us",
-                 443
+                 "localhost",
+                 @port_http1_https,
+                 transport_opts: [verify: :verify_none]
                )
 
       assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/200", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
 
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^request, 200},
                {:headers, ^request, _},
+               {:data, ^request, data},
                {:done, ^request}
              ] = responses
+
+      assert data != nil
+
     end
 
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, %TransportError{reason: :protocol_not_negotiated}} =
-               HTTP.connect(:https, "httpstat.us", 443,
+               HTTP.connect(:https, "localhost", @port_http1_https,
                  protocols: [:http2],
-                 transport_opts: [reuse_sessions: false]
+                 transport_opts: [reuse_sessions: false, verify: :verify_none]
                )
     end
+
   end
 
-  describe "nghttp2.org" do
+  describe "https with HTTP2" do
     @describetag :integration
 
     test "SSL - select HTTP1" do
-      assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443, protocols: [:http1])
+      assert {:ok, conn} =
+               HTTP.connect(
+                 :https,
+                 "localhost",
+                 @port_http2_https,
+                 transport_opts: [verify: :verify_none],
+                 protocols: [:http1]
+               )
 
       assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
@@ -58,10 +100,16 @@ defmodule Mint.IntegrationTest do
     end
 
     test "SSL - select HTTP2" do
-      assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443)
+      assert {:ok, conn} =
+               HTTP.connect(
+                 :https,
+                 "localhost",
+                 @port_http2_https,
+                 transport_opts: [verify: :verify_none]
+               )
 
       assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
@@ -70,7 +118,9 @@ defmodule Mint.IntegrationTest do
                {:data, ^request, <<_>>},
                {:done, ^request}
              ] = responses
+
     end
+
   end
 
   describe "ssl certificate verification" do
@@ -82,7 +132,7 @@ defmodule Mint.IntegrationTest do
                  :https,
                  "untrusted-root.badssl.com",
                  443,
-                 transport_opts: [log_alert: false, reuse_sessions: false]
+                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
@@ -104,7 +154,7 @@ defmodule Mint.IntegrationTest do
                  :https,
                  "wrong.host.badssl.com",
                  443,
-                 transport_opts: [log_alert: false, reuse_sessions: false]
+                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
@@ -121,12 +171,12 @@ defmodule Mint.IntegrationTest do
     end
   end
 
-  describe "proxy" do
+  describe "proxy http1" do
     @describetag :proxy
 
-    test "200 response - http://httpbin.org" do
+    test "200 response with tcp http1" do
       assert {:ok, conn} =
-               HTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:http, local_addr(), @port_http1_http, proxy: {:http, "localhost", 8888, []})
 
       assert conn.__struct__ == Mint.UnsafeProxy
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -136,12 +186,16 @@ defmodule Mint.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "httpbin"
+
+      assert merge_body(responses, request) =~ "Hello world!"
     end
 
-    test "200 response - https://httpstat.us" do
+    test "200 response with ssl http1" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpstat.us", 443, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:https, local_addr(), @port_http1_https,
+                 proxy: {:http, "localhost", 8888, []},
+                 transport_opts: [verify: :verify_none]
+               )
 
       assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -151,43 +205,52 @@ defmodule Mint.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "httpstat.us"
+      assert merge_body(responses, request) =~ "Hello world!"
     end
 
-    test "200 response with explicit http2 - https://http2.golang.org" do
-      assert {:ok, conn} =
-               HTTP.connect(:https, "http2.golang.org", 443,
-                 proxy: {:http, "localhost", 8888, []},
-                 protocols: [:http2]
-               )
-
-      assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
-      assert {:ok, _conn, responses} = receive_stream(conn)
-
-      assert [status, headers | responses] = responses
-      assert {:status, ^request, 200} = status
-      assert {:headers, ^request, headers} = headers
-      assert is_list(headers)
-      assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
-    end
-
-    test "200 response without explicit http2 - https://http2.golang.org" do
-      assert {:ok, conn} =
-               HTTP.connect(:https, "http2.golang.org", 443,
-                 proxy: {:http, "localhost", 8888, []},
-                 protocols: [:http1, :http2]
-               )
-
-      assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
-      assert {:ok, _conn, responses} = receive_stream(conn)
-
-      assert [status, headers | responses] = responses
-      assert {:status, ^request, 200} = status
-      assert {:headers, ^request, headers} = headers
-      assert is_list(headers)
-      assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
-    end
   end
+
+  describe "proxy http2" do
+    @describetag :proxy
+
+    test "200 response with explicit http2" do
+      assert {:ok, conn} =
+               HTTP.connect(:https, local_addr(), @port_http2_https,
+                 proxy: {:http, "localhost", 8888, []},
+                 protocols: [:http2],
+                 transport_opts: [verify: :verify_none]
+               )
+
+      assert conn.__struct__ == Mint.HTTP2
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+      assert {:ok, _conn, responses} = receive_stream(conn)
+
+      assert [status, headers | responses] = responses
+      assert {:status, ^request, 200} = status
+      assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
+      assert merge_body(responses, request) =~ "Protocol: HTTP/2"
+    end
+
+    test "200 response without explicit http2" do
+      assert {:ok, conn} =
+               HTTP.connect(:https, local_addr(), @port_http2_https,
+                 proxy: {:http, "localhost", 8888, []},
+                 protocols: [:http1, :http2],
+                 transport_opts: [verify: :verify_none]
+               )
+
+      assert conn.__struct__ == Mint.HTTP2
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+      assert {:ok, _conn, responses} = receive_stream(conn)
+
+      assert [status, headers | responses] = responses
+      assert {:status, ^request, 200} = status
+      assert {:headers, ^request, headers} = headers
+      assert is_list(headers)
+      assert merge_body(responses, request) =~ "Protocol: HTTP/2"
+    end
+
+  end
+
 end
