@@ -107,19 +107,16 @@ defmodule Mint.CowboyTestServer.PlugRouter do
   get "/serverpush" do
     body = "<!DOCTYPE html>
     <html lang=\"en\">
-      <head>
-        <link rel=\"stylesheet\" href=\"/static/css/style.css\">
-      </head>
       <body>
-        test content
+        <img src=\"/static/image/gopher.png\">
       </body>
     </html>"
 
     conn
-    |> push("/static/css/style.css", [{"accept", "text/css"}])
-    |> push("/static/css/style.css", [{"accept", "text/css"}])
-    |> push("/static/css/style.css", [{"accept", "text/css"}])
-    |> push("/static/css/style.css", [{"accept", "text/css"}])
+    |> push("/static/image/gopher.png", [{"accept", "image/png"}])
+    |> push("/static/image/gopher.png", [{"accept", "image/png"}])
+    |> push("/static/image/gopher.png", [{"accept", "image/png"}])
+    |> push("/static/image/gopher.png", [{"accept", "image/png"}])
     |> send_resp(200, body)
   end
 
