@@ -169,7 +169,6 @@ defmodule Mint.IntegrationTest do
                  transport_opts: [verify: :verify_none]
                )
 
-      assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 

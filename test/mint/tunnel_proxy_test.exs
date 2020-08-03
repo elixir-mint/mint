@@ -39,7 +39,6 @@ defmodule Mint.TunnelProxyTest do
                {:https, local_addr(), @port_http1_https, [transport_opts: [verify: :verify_none]]}
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -78,7 +77,6 @@ defmodule Mint.TunnelProxyTest do
                transport_opts: [verify: :verify_none]
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
