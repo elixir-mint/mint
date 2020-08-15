@@ -314,19 +314,34 @@ defmodule Mint.Core.Transport.SSL do
   def connect(hostname, port, opts) do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    opts = ssl_opts(hostname, opts)
 
-    wrap_err(:ssl.connect(hostname, port, ssl_opts(hostname, opts), timeout))
+    # Attempt inet6 connection first. If this fails, fall back to inet.
+    case :ssl.connect(hostname, port, [:inet6 | opts], timeout) do
+      {:ok, sslsocket} ->
+        {:ok, sslsocket}
+
+      _error ->
+        wrap_err(:ssl.connect(hostname, port, opts, timeout))
+    end
   end
 
   @impl true
   def upgrade(socket, :http, hostname, _port, opts) do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    opts = ssl_opts(hostname, opts)
 
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
-    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
+    case :ssl.connect(socket, [:inet6 | opts], timeout) do
+      {:ok, sslsocket} ->
+        {:ok, sslsocket}
+
+      _error ->
+        wrap_err(:ssl.connect(socket, opts, timeout))
+    end
   end
 
   def upgrade(_socket, :https, _hostname, _port, _opts) do

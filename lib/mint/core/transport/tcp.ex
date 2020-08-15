@@ -21,7 +21,14 @@ defmodule Mint.Core.Transport.TCP do
       |> Keyword.merge(@transport_opts)
       |> Keyword.drop([:alpn_advertised_protocols, :timeout])
 
-    wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
+    # Attempt inet6 connection first. If this fails, fall back to inet.
+    case :gen_tcp.connect(hostname, port, [:inet6 | opts], timeout) do
+      {:ok, socket} ->
+        {:ok, socket}
+
+      _error ->
+        wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
+    end
   end
 
   @impl true
