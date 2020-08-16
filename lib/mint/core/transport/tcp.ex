@@ -15,18 +15,21 @@ defmodule Mint.Core.Transport.TCP do
   def connect(hostname, port, opts) do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    inet6? = Enum.member?(opts, :inet6)
 
     opts =
       opts
       |> Keyword.merge(@transport_opts)
       |> Keyword.drop([:alpn_advertised_protocols, :timeout])
+      |> Enum.reject(&(&1 == :inet6))
 
-    # Attempt inet6 connection first. If this fails, fall back to inet.
-    case :gen_tcp.connect(hostname, port, [:inet6 | opts], timeout) do
-      {:ok, socket} ->
-        {:ok, socket}
-
-      _error ->
+    with(
+      true <- inet6?,
+      {:ok, socket} <- :gen_tcp.connect(hostname, port, [:inet6 | opts], timeout)
+    ) do
+      {:ok, socket}
+    else
+      _inet4 ->
         wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
     end
   end
