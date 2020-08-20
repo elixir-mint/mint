@@ -89,4 +89,22 @@ defmodule Mint.HTTP1.TestHelpers do
     local_addr = List.first(addrs) |> elem(0) |> :inet.ntoa()
     "#{local_addr}"
   end
+
+  def unused_ip() do
+    {:ok, host} = :inet.gethostname()
+    {:ok, hent} = :inet.gethostbyname(host)
+    {:hostent, _, _, _, _, [{a, b, c, _d} | _]} = hent
+    unused_ip(a, b, c, 16)
+  end
+
+  defp unused_ip(255, b, c, d), do: unused_ip(1, b + 1, c, d)
+  defp unused_ip(a, 255, c, d), do: unused_ip(a, 1, c + 1, d)
+  defp unused_ip(a, b, 255, d), do: unused_ip(a, b, 1, d + 1)
+
+  defp unused_ip(a, b, c, d) do
+    case :inet.gethostbyaddr({a, b, c, d}) do
+      {:ok, _} -> unused_ip(a + 1, b, c, d)
+      {:error, _} -> "#{:inet.ntoa({a, b, c, d})}"
+    end
+  end
 end

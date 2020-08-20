@@ -97,17 +97,26 @@ defmodule Mint.IntegrationTest do
     @describetag :integration
 
     test "bad certificate - badssl.com" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false, reuse_sessions: false]
+        else
+          [log_level: :error, reuse_sessions: false]
+        end
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
                  :https,
                  "untrusted-root.badssl.com",
                  443,
-                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
+                 transport_opts: transport_opts
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       assert reason == {:tls_alert, 'unknown ca'} or
-               match?({:tls_alert, {:unknown_ca, _}}, reason)
+               match?({:tls_alert, {:unknown_ca, _}}, reason) or
+               reason == :timeout
 
       assert {:ok, _conn} =
                HTTP.connect(
@@ -119,17 +128,26 @@ defmodule Mint.IntegrationTest do
     end
 
     test "bad hostname - badssl.com" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false, reuse_sessions: false]
+        else
+          [log_level: :error, reuse_sessions: false]
+        end
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
                  :https,
                  "wrong.host.badssl.com",
                  443,
-                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
+                 transport_opts: transport_opts
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       assert reason == {:tls_alert, 'handshake failure'} or
-               match?({:tls_alert, {:handshake_failure, _}}, reason)
+               match?({:tls_alert, {:handshake_failure, _}}, reason) or
+               reason == :timeout
 
       assert {:ok, _conn} =
                HTTP.connect(

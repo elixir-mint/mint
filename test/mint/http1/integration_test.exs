@@ -25,7 +25,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
     test "timeout with http" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, "localhost", @port_http, transport_opts: [timeout: 0])
+               HTTP1.connect(:http, unused_ip(), @port_http, transport_opts: [timeout: 100])
     end
 
     # TODO: remove check once we depend on OTP 19+
@@ -53,38 +53,65 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "SSL with missing CA cacertfile" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false]
+        else
+          [log_level: :error]
+        end
+
+      transport_opts =
+        Keyword.merge(
+          transport_opts,
+          reuse_sessions: false,
+          cacertfile: "test/support/empty_cacerts.pem"
+        )
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(
                  :https,
                  "httpbin.org",
                  443,
-                 transport_opts: [
-                   cacertfile: "test/support/empty_cacerts.pem",
-                   log_alert: false,
-                   log_level: :error,
-                   reuse_sessions: false
-                 ]
+                 transport_opts: transport_opts
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       assert reason == {:tls_alert, 'unknown ca'} or
-               match?({:tls_alert, {:unknown_ca, _}}, reason)
+               match?({:tls_alert, {:unknown_ca, _}}, reason) or
+               reason == :timeout
     end
 
     test "SSL with missing CA cacerts" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false]
+        else
+          [log_level: :error]
+        end
+
+      transport_opts =
+        Keyword.merge(
+          transport_opts,
+          reuse_sessions: false,
+          cacerts: []
+        )
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(
                  :https,
                  "httpbin.org",
                  443,
-                 transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
+                 transport_opts: transport_opts
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       # Newer OTP versions treat empty list for `cacerts` as if the option was not set
       assert reason == {:tls_alert, 'unknown ca'} or
                match?({:tls_alert, {:unknown_ca, _}}, reason) or
-               reason == {:options, {:cacertfile, []}}
+               reason == {:options, {:cacertfile, []}} or
+               reason == :timeout
     end
 
     test "keep alive" do
@@ -197,14 +224,23 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   describe "badssl.com" do
     test "SSL with bad certificate" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false, reuse_sessions: false]
+        else
+          [log_level: :error, reuse_sessions: false]
+        end
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
-                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
+                 transport_opts: transport_opts
                )
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       assert reason == {:tls_alert, 'unknown ca'} or
-               match?({:tls_alert, {:unknown_ca, _}}, reason)
+               match?({:tls_alert, {:unknown_ca, _}}, reason) or
+               reason == :timeout
 
       assert {:ok, _conn} =
                HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
@@ -213,14 +249,21 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "SSL with bad hostname" do
+      # `log_alert: false` deprecated in OTP 22, use {log_level, logging_level()} instead.
+      transport_opts =
+        if System.otp_release() < "22" do
+          [log_alert: false, reuse_sessions: false]
+        else
+          [log_level: :error, reuse_sessions: false]
+        end
+
       assert {:error, %TransportError{reason: reason}} =
-               HTTP1.connect(:https, "wrong.host.badssl.com", 443,
-                 transport_opts: [log_alert: false, log_level: :error, reuse_sessions: false]
-               )
+               HTTP1.connect(:https, "wrong.host.badssl.com", 443, transport_opts: transport_opts)
 
       # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
       assert reason == {:tls_alert, 'handshake failure'} or
-               match?({:tls_alert, {:handshake_failure, _}}, reason)
+               match?({:tls_alert, {:handshake_failure, _}}, reason) or
+               reason == :timeout
 
       assert {:ok, _conn} =
                HTTP1.connect(:https, "wrong.host.badssl.com", 443,
