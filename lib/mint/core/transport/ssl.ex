@@ -314,17 +314,22 @@ defmodule Mint.Core.Transport.SSL do
   def connect(hostname, port, opts) do
     hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
-    inet6? = Enum.member?(opts, :inet6)
+    inet6? = Keyword.get(opts, :inet6, false)
     opts = ssl_opts(hostname, opts)
 
-    with(
-      true <- inet6?,
-      {:ok, sslsocket} <- :ssl.connect(hostname, port, [:inet6 | opts], timeout)
-    ) do
-      {:ok, sslsocket}
+    if inet6? do
+      # Try inet6 first, then fall back to the defaults provided by
+      # ssl/gen_tcp if connection fails.
+      case :ssl.connect(hostname, port, [:inet6 | opts], timeout) do
+        {:ok, sslsocket} ->
+          {:ok, sslsocket}
+
+        _error ->
+          wrap_err(:ssl.connect(hostname, port, opts, timeout))
+      end
     else
-      _inet4 ->
-        wrap_err(:ssl.connect(hostname, port, opts, timeout))
+      # Use the defaults provided by ssl/gen_tcp.
+      wrap_err(:ssl.connect(hostname, port, opts, timeout))
     end
   end
 
@@ -413,8 +418,7 @@ defmodule Mint.Core.Transport.SSL do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
-    |> Keyword.delete(:timeout)
-    |> Enum.reject(&(&1 == :inet6))
+    |> Keyword.drop([:timeout, :inet6])
     |> add_verify_opts(hostname)
   end
 
