@@ -655,7 +655,7 @@ defmodule Mint.HTTP do
 
     * `{:error, request_ref, reason}` - returned when there is an error that
       only affects the request and not the whole connection. For example, if the
-      server sends bad data on a given request, that request will be closed an an error
+      server sends bad data on a given request, that request will be closed and an error
       for that request will be returned among the responses, but the connection will
       remain alive and well.
 
