@@ -257,7 +257,7 @@ defmodule Mint.HTTP do
 
     * `:depth` - defaults to `4`. May be overridden by the caller.
 
-    * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
+    * `:partial_chain` - unless a custom `:partial_chain` function is specified,
       Mint will enable its own partial chain handler, which accepts server
       certificate chains containing a certificate that was issued by a
       CA certificate in the CA trust store, even if that certificate is not
