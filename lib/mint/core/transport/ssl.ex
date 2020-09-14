@@ -536,16 +536,30 @@ defmodule Mint.Core.Transport.SSL do
 
         :error ->
           path = Keyword.fetch!(opts, :cacertfile)
-          cacerts = decode_cacertfile(path)
+          cacerts = get_cacertfile(path)
           fun = &partial_chain(cacerts, &1)
           Keyword.put(opts, :partial_chain, fun)
       end
     end
   end
 
-  defp decode_cacertfile(path) do
-    # TODO: Cache this?
+  defp get_cacertfile(path) do
+    if Application.get_env(:mint, :persistent_term) do
+      case :persistent_term.get({:mint, {:cacertfile, path}}, :error) do
+        {:ok, cacerts} ->
+          cacerts
 
+        :error ->
+          cacerts = decode_cacertfile(path)
+          :persistent_term.put({:mint, {:cacertfile, path}}, {:ok, cacerts})
+          cacerts
+      end
+    else
+      decode_cacertfile(path)
+    end
+  end
+
+  defp decode_cacertfile(path) do
     path
     |> File.read!()
     |> :public_key.pem_decode()
@@ -554,8 +568,6 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp decode_cacerts(certs) do
-    # TODO: Cache this?
-
     Enum.map(certs, &:public_key.pkix_decode_cert(&1, :plain))
   end
 

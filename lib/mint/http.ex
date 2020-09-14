@@ -247,7 +247,8 @@ defmodule Mint.HTTP do
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
       [CAStore](https://github.com/elixir-mint/castore) package or raise an
-      exception if this package is not available.
+      exception if this package is not available. Due to caching the
+      `:cacertfile` is more efficient than `:cacerts`.
 
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
       filtered according to the blocklist in
