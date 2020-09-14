@@ -44,7 +44,7 @@ defmodule Mint.MixProject do
 
   defp package do
     [
-      licenses: ["Apache 2.0"],
+      licenses: ["Apache-2.0"],
       links: %{"GitHub" => @repo_url}
     ]
   end
