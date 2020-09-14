@@ -248,7 +248,7 @@ defmodule Mint.HTTP do
       option, Mint will attempt to use the trust store from the
       [CAStore](https://github.com/elixir-mint/castore) package or raise an
       exception if this package is not available. Due to caching the
-      `:cacertfile` is more efficient than `:cacerts`.
+      `:cacertfile` option is more efficient than `:cacerts`.
 
     * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
       filtered according to the blocklist in
