@@ -291,7 +291,7 @@ defmodule Mint.Core.Transport.SSL do
     active: false
   ]
 
-  @default_versions [:"tlsv1.2"]
+  @default_versions [:"tlsv1.3", :"tlsv1.2"]
   @default_timeout 30_000
 
   Record.defrecordp(
