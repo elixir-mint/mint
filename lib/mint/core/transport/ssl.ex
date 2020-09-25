@@ -507,12 +507,17 @@ defmodule Mint.Core.Transport.SSL do
     [
       ciphers: default_ciphers(),
       server_name_indication: hostname,
-      versions: @default_versions,
+      versions: ssl_versions(),
       verify: :verify_peer,
       depth: 4,
       secure_renegotiate: true,
       reuse_sessions: true
     ]
+  end
+
+  defp ssl_versions() do
+    available_versions = :ssl.versions()[:available]
+    Enum.filter(@default_versions, & &1 in available_versions)
   end
 
   defp add_cacerts(opts) do
