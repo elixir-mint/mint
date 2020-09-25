@@ -517,7 +517,7 @@ defmodule Mint.Core.Transport.SSL do
 
   defp ssl_versions() do
     available_versions = :ssl.versions()[:available]
-    Enum.filter(@default_versions, & &1 in available_versions)
+    Enum.filter(@default_versions, &(&1 in available_versions))
   end
 
   defp add_cacerts(opts) do
