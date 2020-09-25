@@ -436,7 +436,7 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp customize_hostname_check(opts, host_or_ip) do
-    if ssl_major_version() >= 9 do
+    if ssl_version() >= {9, 0} do
       # From OTP 20.0 use built-in support for custom hostname checks
       add_customize_hostname_check(opts)
     else
@@ -517,7 +517,14 @@ defmodule Mint.Core.Transport.SSL do
 
   defp ssl_versions() do
     available_versions = :ssl.versions()[:available]
-    Enum.filter(@default_versions, &(&1 in available_versions))
+    versions = Enum.filter(@default_versions, &(&1 in available_versions))
+
+    # Remove buggy TLS 1.3 for OTP 22.3 and older
+    if ssl_version() <= {9, 6} do
+      versions -- [:"tlsv1.3"]
+    else
+      versions
+    end
   end
 
   defp add_cacerts(opts) do
@@ -633,9 +640,11 @@ defmodule Mint.Core.Transport.SSL do
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
 
-  defp ssl_major_version do
+  defp ssl_version() do
     Application.spec(:ssl, :vsn)
-    |> :string.to_integer()
-    |> elem(0)
+    |> List.to_string()
+    |> String.split(".")
+    |> Enum.map(&String.to_integer/1)
+    |> List.to_tuple()
   end
 end
