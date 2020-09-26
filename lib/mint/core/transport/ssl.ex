@@ -645,6 +645,5 @@ defmodule Mint.Core.Transport.SSL do
     |> List.to_string()
     |> String.split(".")
     |> Enum.map(&String.to_integer/1)
-    |> List.to_tuple()
   end
 end
