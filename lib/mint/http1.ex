@@ -265,7 +265,7 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.stream_request_body/3`.
 
-  In HTTP/1, sending an empty chuunk is a no-op.
+  In HTTP/1, sending an empty chunk is a no-op.
 
   ## Transfer encoding and content length
 
