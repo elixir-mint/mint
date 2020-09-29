@@ -830,15 +830,17 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    data = maybe_concat(conn.buffer, data)
-    {conn, responses} = handle_new_data(conn, data, [])
+    case maybe_concat_and_handle_new_data(conn, data) do
+      {:ok, %{mode: mode, state: state} = conn, responses}
+      when mode == :active and state != :closed ->
+        case transport.setopts(socket, active: :once) do
+          :ok -> {:ok, conn, responses}
+          {:error, reason} -> {:error, put_in(conn.state, :closed), reason, responses}
+        end
 
-    if conn.mode == :active do
-      # TODO: handle errors
-      _ = transport.setopts(socket, active: :once)
+      other ->
+        other
     end
-
-    {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
   end
@@ -882,9 +884,7 @@ defmodule Mint.HTTP2 do
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} ->
-        data = maybe_concat(conn.buffer, data)
-        {conn, responses} = handle_new_data(conn, data, [])
-        {:ok, conn, Enum.reverse(responses)}
+        maybe_concat_and_handle_new_data(conn, data)
 
       {:error, %TransportError{reason: :closed}} ->
         handle_closed(conn)
@@ -1351,6 +1351,12 @@ defmodule Mint.HTTP2 do
   end
 
   ## Frame handling
+
+  defp maybe_concat_and_handle_new_data(conn, data) do
+    data = maybe_concat(conn.buffer, data)
+    {conn, responses} = handle_new_data(conn, data, [])
+    {:ok, conn, Enum.reverse(responses)}
+  end
 
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
