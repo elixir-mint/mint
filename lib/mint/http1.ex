@@ -265,7 +265,7 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.stream_request_body/3`.
 
-  In HTTP/1, sending an empty chuunk is a no-op.
+  In HTTP/1, sending an empty chunk is a no-op.
 
   ## Transfer encoding and content length
 
@@ -384,14 +384,17 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    result = handle_data(conn, data)
+    case handle_data(conn, data) do
+      {:ok, %{mode: mode, state: state} = conn, responses}
+      when mode == :active and state != :closed ->
+        case transport.setopts(socket, active: :once) do
+          :ok -> {:ok, conn, responses}
+          {:error, reason} -> {:error, put_in(conn.state, :closed), reason, responses}
+        end
 
-    if conn.mode == :active do
-      # TODO: handle errors here.
-      _ = transport.setopts(socket, active: :once)
+      other ->
+        other
     end
-
-    result
   end
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket})
