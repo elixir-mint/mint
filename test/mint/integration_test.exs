@@ -7,7 +7,7 @@ defmodule Mint.IntegrationTest do
 
   describe "httpstat.us" do
     @describetag :integration
-    @describetag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
+    @describetag skip: "Seems like httpstat.us is down"
 
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
@@ -139,9 +139,9 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    test "200 response - https://httpstat.us" do
+    test "200 response - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpstat.us", 443, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})
 
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
@@ -150,7 +150,7 @@ defmodule Mint.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "httpstat.us"
+      assert merge_body(responses, request) =~ "httpbin.org"
     end
 
     test "200 response with explicit http2 - https://http2.golang.org" do

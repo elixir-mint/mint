@@ -28,11 +28,11 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  test "200 response - https://httpstat.us" do
+  test "200 response - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "httpstat.us", 443, []}
+               {:https, "httpbin.org", 443, []}
              )
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -42,7 +42,7 @@ defmodule Mint.TunnelProxyTest do
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "httpstat.us"
+    assert merge_body(responses, request) =~ "httpbin"
   end
 
   test "407 response - proxy with missing authentication" do
@@ -64,7 +64,7 @@ defmodule Mint.TunnelProxyTest do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
-             Mint.HTTP.connect(:https, "httpstat.us", 443,
+             Mint.HTTP.connect(:https, "httpbin.org", 443,
                proxy: {:http, "localhost", 8889, []},
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
@@ -76,7 +76,7 @@ defmodule Mint.TunnelProxyTest do
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "httpstat.us"
+    assert merge_body(responses, request) =~ "httpbin"
   end
 
   test "200 response with explicit http2 - https://http2.golang.org" do
