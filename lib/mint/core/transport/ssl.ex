@@ -520,7 +520,7 @@ defmodule Mint.Core.Transport.SSL do
     versions = Enum.filter(@default_versions, &(&1 in available_versions))
 
     # Remove buggy TLS 1.3 versions
-    if ssl_version() <= [10, 0] do
+    if ssl_version() < [10, 0] do
       versions -- [:"tlsv1.3"]
     else
       versions
