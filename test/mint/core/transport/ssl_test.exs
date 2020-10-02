@@ -3,6 +3,19 @@ defmodule Mint.Core.Transport.SSLTest do
 
   alias Mint.Core.Transport.SSL
 
+  test "resolver blocks connections" do
+    block_localhost = fn hostname, _ip6 ->
+      if hostname == "localhost" do
+        {:error, :blocked}
+      else
+        {:ok, hostname}
+      end
+    end
+
+    assert {:error, %Mint.TransportError{reason: :blocked}} ==
+             SSL.connect("localhost", 443, dns_resolver: block_localhost)
+  end
+
   describe "default ciphers" do
     test "no RSA key exchange" do
       # E.g. TLS_RSA_WITH_AES_256_GCM_SHA384 (old and new OTP variants)

@@ -239,6 +239,20 @@ defmodule Mint.HTTP do
       seconds), and may be overridden by the caller. Set to `:infinity` to
       disable the connect timeout.
 
+    * `:dns_resolver` - a function used to resolve hostnames to ip addresses or `:default`.
+      `:default` does no resolution and passes the hostname to `:gen_tcp.connect` or
+      `:ssl.connect`. The function takes `(hostname::String.t(), ipv6::boolean())` and
+      should return `{:ok, String.t() | ip_address()}` or `{:error, reason::atom()}`.
+      `ip_address()` is defined in the `:gen_tcp` module and is either a 4-tuple or 8-tuple.
+      If `ipv6` is true the function should return an `ip6_address()` or a hostname otherwise
+      it should return an `ip4_address()` or a hostname.
+      Note: `:dns_resolver` is not useful for preventing SSRF when coupled with using a proxy
+      because in the case of a HTTP proxy the HTTP proxy resolves the host header and in the case
+      of a CONNECT proxy the host is passed to the proxy and the proxy resolves the domain.
+      Note: If using `:dns_resolver` to prevent SSRF be careful with pooling. All requests to a
+      pool need to be using `:dns_resolver` or SSRF filtering will not work as expected.
+
+
   Options for `:https` only:
 
     * `:alpn_advertised_protocols` - managed by Mint. Cannot be overridden.

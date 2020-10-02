@@ -5,6 +5,48 @@ defmodule Mint.IntegrationTest do
 
   alias Mint.{TransportError, HTTP}
 
+  describe "resolver" do
+    test "resolver should block http connections" do
+      block_all = fn _host, _ip6 ->
+        {:error, :blocked}
+      end
+
+      assert {:error, %Mint.TransportError{reason: :blocked}} ==
+               HTTP.connect(:http, "localhost", 80, transport_opts: [dns_resolver: block_all])
+    end
+
+    test "resolver should block https connections" do
+      block_all = fn _host, _ip6 ->
+        {:error, :blocked}
+      end
+
+      assert {:error, %Mint.TransportError{reason: :blocked}} ==
+               HTTP.connect(:https, "localhost", 443, transport_opts: [dns_resolver: block_all])
+    end
+
+    test "resolver can resolve ip addreses" do
+      resolve_normal = fn host, _ip6 ->
+        :inet.getaddr(String.to_charlist(host), :inet)
+      end
+
+      assert {:ok, _conn} =
+               HTTP.connect(:https, "httpbin.org", 443,
+                 transport_opts: [dns_resolver: resolve_normal]
+               )
+    end
+
+    test "resolver can pass through the host" do
+      resolve_normal = fn host, _ip6 ->
+        {:ok, host}
+      end
+
+      assert {:ok, _conn} =
+               HTTP.connect(:https, "httpbin.org", 443,
+                 transport_opts: [dns_resolver: resolve_normal]
+               )
+    end
+  end
+
   describe "httpstat.us" do
     @describetag :integration
     @describetag skip: "Seems like httpstat.us is down"

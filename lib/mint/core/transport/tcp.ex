@@ -1,6 +1,8 @@
 defmodule Mint.Core.Transport.TCP do
   @moduledoc false
 
+  alias Mint.Core.Transport.Resolver
+
   @behaviour Mint.Core.Transport
 
   @transport_opts [
@@ -13,7 +15,6 @@ defmodule Mint.Core.Transport.TCP do
 
   @impl true
   def connect(hostname, port, opts) do
-    hostname = String.to_charlist(hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
 
@@ -25,16 +26,16 @@ defmodule Mint.Core.Transport.TCP do
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
       # gen_tcp if connection fails.
-      case :gen_tcp.connect(hostname, port, [:inet6 | opts], timeout) do
+      case resolve_connect(hostname, port, [:inet6 | opts], timeout, true) do
         {:ok, socket} ->
           {:ok, socket}
 
         _error ->
-          wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
+          wrap_err(resolve_connect(hostname, port, opts, timeout, false))
       end
     else
       # Use the defaults provided by gen_tcp.
-      wrap_err(:gen_tcp.connect(hostname, port, opts, timeout))
+      wrap_err(resolve_connect(hostname, port, opts, timeout, false))
     end
   end
 
@@ -81,4 +82,10 @@ defmodule Mint.Core.Transport.TCP do
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
+
+  defp resolve_connect(hostname, port, opts, timeout, ipv6_resolution) do
+    with {:ok, host_or_ip_addr} <- Resolver.resolve(hostname, ipv6_resolution, opts) do
+      :gen_tcp.connect(host_or_ip_addr, port, Keyword.drop(opts, [:dns_resolver]), timeout)
+    end
+  end
 end
