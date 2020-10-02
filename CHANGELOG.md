@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.0
+
+### Bug fixes and improvements
+
+  * Fix a few bugs with passing the Mint connection around.
+  * Add IPv6 support with `inet6: true` in the transport options.
+  * Cache the `:cacertfile` option for faster certificate lookup and decoding.
+  * Add TLS 1.3 to default versions.
+
 ## v1.1.0
 
 ### Bug fixes and improvements
