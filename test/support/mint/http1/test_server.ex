@@ -1,5 +1,5 @@
 defmodule Mint.HTTP1.TestServer do
-  def start() do
+  def start do
     {:ok, listen_socket} = :gen_tcp.listen(0, mode: :binary, packet: :raw)
     server_ref = make_ref()
     parent = self()
@@ -11,7 +11,7 @@ defmodule Mint.HTTP1.TestServer do
     end
   end
 
-  defp loop(listen_socket, parent, server_ref) do
+  def loop(listen_socket, parent, server_ref) do
     case :gen_tcp.accept(listen_socket) do
       {:ok, socket} ->
         send(parent, {server_ref, socket})

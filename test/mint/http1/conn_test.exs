@@ -1,7 +1,8 @@
 defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
-  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
+  alias Mint.{HTTPError, HTTP1}
+  alias HTTP1.{TestServer, TestSocketServer}
 
   require Mint.HTTP
 
@@ -758,6 +759,21 @@ defmodule Mint.HTTP1Test do
                HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
+    end
+  end
+
+  if match?({:unix, _}, :os.type()) do
+    test "starting a connection to a unix domain socket works in passive mode" do
+      {:ok, address, server_ref} = TestSocketServer.start()
+      assert {:ok, conn} = HTTP1.connect(:http, address, 0, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+      assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+      assert responses == [{:status, ref, 200}]
     end
   end
 
