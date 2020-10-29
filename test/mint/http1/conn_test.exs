@@ -380,7 +380,7 @@ defmodule Mint.HTTP1Test do
 
   test "close/1 an already closed connection with socket inet_backend", %{port: port} do
     assert {:ok, conn} =
-              HTTP1.connect(:http, "localhost", port, transport_opts: [inet_backend: :socket])
+             HTTP1.connect(:http, "localhost", port, transport_opts: [inet_backend: :socket])
 
     assert HTTP1.open?(conn)
     # ignore the returned conn, otherwise transport.close/1 will not be called
