@@ -79,9 +79,9 @@ defmodule Mint.Core.Transport.TCP do
     %Mint.TransportError{reason: reason}
   end
 
+  def hostname_to_address("unix://" <> path), do: {:local, String.to_charlist(path)}
+  def hostname_to_address(hostname), do: String.to_charlist(hostname)
+
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
-
-  defp hostname_to_address("unix://" <> path), do: {:local, String.to_charlist(path)}
-  defp hostname_to_address(hostname), do: String.to_charlist(hostname)
 end

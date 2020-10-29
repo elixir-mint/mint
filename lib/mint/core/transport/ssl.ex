@@ -3,6 +3,7 @@ defmodule Mint.Core.Transport.SSL do
 
   require Logger
   require Record
+  import Mint.Core.Transport.TCP, only: [hostname_to_address: 1]
 
   @behaviour Mint.Core.Transport
 
@@ -312,24 +313,28 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def connect(hostname, port, opts) do
-    hostname = String.to_charlist(hostname)
+    address = hostname_to_address(hostname)
+    hostname = opts |> Keyword.get(:hostname, hostname) |> String.to_charlist()
+    opts = Keyword.delete(opts, :hostname)
+
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
+
     opts = ssl_opts(hostname, opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
       # ssl/gen_tcp if connection fails.
-      case :ssl.connect(hostname, port, [:inet6 | opts], timeout) do
+      case :ssl.connect(address, port, [:inet6 | opts], timeout) do
         {:ok, sslsocket} ->
           {:ok, sslsocket}
 
-        _error ->
-          wrap_err(:ssl.connect(hostname, port, opts, timeout))
+        error ->
+          wrap_err(:ssl.connect(address, port, opts, timeout))
       end
     else
       # Use the defaults provided by ssl/gen_tcp.
-      wrap_err(:ssl.connect(hostname, port, opts, timeout))
+      wrap_err(:ssl.connect(address, port, opts, timeout))
     end
   end
 
