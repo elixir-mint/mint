@@ -366,6 +366,29 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "close/1 an already closed connection with default inet_backend", %{conn: conn} do
+    assert HTTP1.open?(conn)
+    # ignore the returned conn, otherwise transport.close/1 will not be called
+    assert {:ok, _conn} = HTTP1.close(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
+
+  erlang_version = :erlang.system_info(:otp_release) |> List.to_integer()
+
+  if erlang_version >= 23 do
+    test "close/1 an already closed connection with socket inet_backend", %{port: port} do
+      assert {:ok, conn} =
+               HTTP1.connect(:http, "localhost", port, transport_opts: [inet_backend: :socket])
+
+      assert HTTP1.open?(conn)
+      # ignore the returned conn, otherwise transport.close/1 will not be called
+      assert {:ok, _conn} = HTTP1.close(conn)
+      assert {:ok, conn} = HTTP1.close(conn)
+      refute HTTP1.open?(conn)
+    end
+  end
+
   test "request/5 returns an error if the connection is closed", %{conn: conn} do
     assert {:ok, conn} = HTTP1.close(conn)
     assert {:error, _conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [], nil)
