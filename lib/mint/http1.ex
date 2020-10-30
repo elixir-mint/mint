@@ -834,7 +834,7 @@ defmodule Mint.HTTP1 do
       _ = Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
-    :ok = conn.transport.close(conn.socket)
+    _ = conn.transport.close(conn.socket)
     %{conn | state: :closed}
   end
 

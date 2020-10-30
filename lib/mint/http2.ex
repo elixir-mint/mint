@@ -391,14 +391,8 @@ defmodule Mint.HTTP2 do
   end
 
   def close(%__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn) do
-    case conn.transport.close(conn.socket) do
-      :ok ->
-        conn = put_in(conn.state, :closed)
-        {:ok, conn}
-
-      {:error, reason} ->
-        {:error, conn, reason}
-    end
+    _ = conn.transport.close(conn.socket)
+    {:ok, put_in(conn.state, :closed)}
   end
 
   def close(%__MODULE__{state: :closed} = conn) do
@@ -1963,7 +1957,7 @@ defmodule Mint.HTTP2 do
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
     conn = send!(conn, Frame.encode(frame))
-    :ok = conn.transport.close(conn.socket)
+    _ = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
     throw({:mint, conn, wrap_error({error_code, debug_data})})
   end

@@ -277,6 +277,16 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
+    test "close/1 an already closed connection with default inet_backend does not cause error", %{
+      conn: conn
+    } do
+      assert HTTP2.open?(conn)
+      # ignore the returned conn, otherwise transport.close/1 will not be called
+      assert {:ok, _conn} = HTTP2.close(conn)
+      assert {:ok, conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+    end
+
     test "request/5 returns error if the connection is closed",
          %{conn: conn} do
       assert {:error, %HTTP2{} = conn, _error, []} =
