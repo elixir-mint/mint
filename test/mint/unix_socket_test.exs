@@ -47,5 +47,5 @@ defmodule Mint.UnitSocketTest do
   defp is_unix?, do: match?({:unix, _}, :os.type())
 
   # NOTE: elixir >= 1.6.0 requires OTP >= 19
-  defp otp_19?, do: Version.compare(System.version(), "1.6.0") != :lt
+  defp otp_19?, do: Version.compare(System.version(), "1.6.0") == :gt
 end
