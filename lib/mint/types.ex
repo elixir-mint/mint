@@ -4,6 +4,12 @@ defmodule Mint.Types do
   """
 
   @typedoc """
+  A hostname, ip address, unix domain socket path, :loopback, or any
+  other term representing an internet address.
+  """
+  @type address :: :inet.socket_address() | :inet.hostname()
+
+  @typedoc """
   A request reference that uniquely identifies a request.
 
   Responses for a request are always tagged with a request reference so that you

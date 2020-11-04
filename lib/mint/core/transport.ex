@@ -5,7 +5,7 @@ defmodule Mint.Core.Transport do
 
   alias Mint.Types
 
-  @callback connect(host :: String.t(), port :: :inet.port_number(), opts :: keyword()) ::
+  @callback connect(address :: Types.address(), port :: :inet.port_number(), opts :: keyword()) ::
               {:ok, Types.socket()} | error()
 
   @callback upgrade(

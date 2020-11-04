@@ -331,15 +331,18 @@ defmodule Mint.HTTP2 do
   @doc """
   Same as `Mint.HTTP.connect/4`, but forces a HTTP/2 connection.
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
+    hostname = Mint.Core.Util.hostname(opts, address)
+
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
+      |> Keyword.merge(hostname: hostname)
 
-    case negotiate(hostname, port, scheme, transport_opts) do
+    case negotiate(address, port, scheme, transport_opts) do
       {:ok, socket} ->
         initiate(scheme, socket, hostname, port, opts)
 
@@ -973,7 +976,7 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec initiate(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -1045,22 +1048,22 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp negotiate(hostname, port, :http, transport_opts) do
+  defp negotiate(address, port, :http, transport_opts) do
     # We don't support protocol negotiation for TCP connections
     # so currently we just assume the HTTP/2 protocol
 
     transport = scheme_to_transport(:http)
 
-    case transport.connect(hostname, port, transport_opts) do
+    case transport.connect(address, port, transport_opts) do
       {:ok, socket} -> {:ok, socket}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp negotiate(hostname, port, :https, transport_opts) do
+  defp negotiate(address, port, :https, transport_opts) do
     transport = scheme_to_transport(:https)
 
-    with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
+    with {:ok, socket} <- transport.connect(address, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(socket) do
       if protocol == "h2" do
         {:ok, socket}

@@ -12,8 +12,12 @@ defmodule Mint.Core.Transport.TCP do
   @default_timeout 30_000
 
   @impl true
-  def connect(hostname, port, opts) do
-    address = hostname_to_address(hostname)
+  def connect(address, port, opts) when is_binary(address),
+    do: connect(String.to_charlist(address), port, opts)
+
+  def connect(address, port, opts) do
+    opts = Keyword.delete(opts, :hostname)
+
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
 
@@ -78,9 +82,6 @@ defmodule Mint.Core.Transport.TCP do
   def wrap_error(reason) do
     %Mint.TransportError{reason: reason}
   end
-
-  def hostname_to_address("unix://" <> path), do: {:local, String.to_charlist(path)}
-  def hostname_to_address(hostname), do: String.to_charlist(hostname)
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other

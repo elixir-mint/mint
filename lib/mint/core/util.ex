@@ -80,6 +80,17 @@ defmodule Mint.Core.Util do
     end
   end
 
+  def hostname(opts, address) when is_binary(address) do
+    Keyword.get(opts, :hostname, address)
+  end
+
+  def hostname(opts, _address) do
+    case Keyword.fetch(opts, :hostname) do
+      {:ok, h} -> h
+      :error -> raise "the :hostname option is required when address is not a binary"
+    end
+  end
+
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),

@@ -33,7 +33,7 @@ defmodule Mint.TestSocketServer do
       :ok = Process.sleep(:infinity)
     end)
 
-    {:ok, "unix://#{@socket_path}", server_ref}
+    {:ok, {:local, @socket_path}, server_ref}
   end
 
   defp do_start(ssl: false), do: :gen_tcp.listen(0, @opts)

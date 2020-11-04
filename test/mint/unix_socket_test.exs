@@ -27,8 +27,8 @@ defmodule Mint.UnitSocketTest do
       assert {:ok, conn} =
                HTTP.connect(:https, address, 0,
                  mode: :passive,
+                 hostname: "localhost",
                  transport_opts: [
-                   hostname: "localhost",
                    verify: :verify_none
                  ]
                )

@@ -3,7 +3,6 @@ defmodule Mint.Core.Transport.SSL do
 
   require Logger
   require Record
-  import Mint.Core.Transport.TCP, only: [hostname_to_address: 1]
 
   @behaviour Mint.Core.Transport
 
@@ -312,15 +311,21 @@ defmodule Mint.Core.Transport.SSL do
   #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
 
   @impl true
-  def connect(hostname, port, opts) do
-    address = hostname_to_address(hostname)
-    hostname = opts |> Keyword.get(:hostname, hostname) |> String.to_charlist()
+  def connect(address, port, opts) do
+    hostname = opts |> Mint.Core.Util.hostname(address)
     opts = Keyword.delete(opts, :hostname)
 
+    connect(address, hostname, port, opts)
+  end
+
+  defp connect(address, hostname, port, opts) when is_binary(address),
+    do: connect(String.to_charlist(address), hostname, port, opts)
+
+  defp connect(address, hostname, port, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
 
-    opts = ssl_opts(hostname, opts)
+    opts = ssl_opts(String.to_charlist(hostname), opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
