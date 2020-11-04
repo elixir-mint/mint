@@ -104,8 +104,6 @@ defmodule Mint.HTTP1 do
     # TODO: Also ALPN negotiate HTTP1?
 
     hostname = Mint.Core.Util.hostname(opts, address)
-    opts = Keyword.delete(opts, :hostname)
-
     transport = scheme_to_transport(scheme)
 
     transport_opts =
