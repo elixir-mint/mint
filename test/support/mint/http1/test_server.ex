@@ -11,7 +11,7 @@ defmodule Mint.HTTP1.TestServer do
     end
   end
 
-  def loop(listen_socket, parent, server_ref) do
+  defp loop(listen_socket, parent, server_ref) do
     case :gen_tcp.accept(listen_socket) do
       {:ok, socket} ->
         send(parent, {server_ref, socket})
