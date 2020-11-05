@@ -312,7 +312,7 @@ defmodule Mint.Core.Transport.SSL do
 
   @impl true
   def connect(address, port, opts) do
-    hostname = Mint.Core.Util.hostname(address, opts)
+    hostname = Mint.Core.Util.hostname(opts, address)
     opts = Keyword.delete(opts, :hostname)
 
     connect(address, hostname, port, opts)
