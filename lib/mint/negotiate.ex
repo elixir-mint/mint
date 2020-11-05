@@ -56,14 +56,16 @@ defmodule Mint.Negotiate do
 
   defp connect_negotiate(scheme, address, port, opts) do
     transport = scheme_to_transport(scheme)
+    hostname = Mint.Core.Util.hostname(opts, address)
 
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
+      |> Keyword.merge(hostname: hostname)
 
     with {:ok, transport_state} <- transport.connect(address, port, transport_opts) do
-      alpn_negotiate(scheme, transport_state, address, port, opts)
+      alpn_negotiate(scheme, transport_state, hostname, port, opts)
     end
   end
 
