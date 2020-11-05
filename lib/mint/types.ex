@@ -7,7 +7,7 @@ defmodule Mint.Types do
   A hostname, ip address, unix domain socket path, :loopback, or any
   other term representing an internet address.
   """
-  @type address :: :inet.socket_address() | :inet.hostname()
+  @type address() :: :inet.socket_address() | :inet.hostname()
 
   @typedoc """
   A request reference that uniquely identifies a request.
