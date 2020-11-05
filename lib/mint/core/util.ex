@@ -80,14 +80,11 @@ defmodule Mint.Core.Util do
     end
   end
 
-  def hostname(opts, address) when is_binary(address) do
-    Keyword.get(opts, :hostname, address)
-  end
-
-  def hostname(opts, _address) do
+  def hostname(opts, address) do
     case Keyword.fetch(opts, :hostname) do
-      {:ok, h} -> h
-      :error -> raise "the :hostname option is required when address is not a binary"
+      {:ok, hostname} -> hostname
+      :error when is_binary(address) -> address
+      :error -> raise ArgumentError, "the :hostname option is required when address is not a binary"
     end
   end
 
