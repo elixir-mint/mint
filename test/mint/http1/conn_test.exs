@@ -1,8 +1,7 @@
 defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
-  alias Mint.{HTTPError, HTTP1}
-  alias HTTP1.TestServer
+  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
   require Mint.HTTP
 
