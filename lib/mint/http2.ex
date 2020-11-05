@@ -340,7 +340,7 @@ defmodule Mint.HTTP2 do
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
-      |> Keyword.merge(hostname: hostname)
+      |> Keyword.put(:hostname, hostname)
 
     case negotiate(address, port, scheme, transport_opts) do
       {:ok, socket} ->

@@ -62,7 +62,7 @@ defmodule Mint.Negotiate do
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
-      |> Keyword.merge(hostname: hostname)
+      |> Keyword.put(:hostname, hostname)
 
     with {:ok, transport_state} <- transport.connect(address, port, transport_opts) do
       alpn_negotiate(scheme, transport_state, hostname, port, opts)

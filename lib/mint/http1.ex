@@ -108,7 +108,7 @@ defmodule Mint.HTTP1 do
 
     transport_opts =
       Keyword.get(opts, :transport_opts, [])
-      |> Keyword.merge(hostname: hostname)
+      |> Keyword.put(:hostname, hostname)
 
     with {:ok, socket} <- transport.connect(address, port, transport_opts) do
       initiate(scheme, socket, hostname, port, opts)
@@ -131,7 +131,7 @@ defmodule Mint.HTTP1 do
 
     transport_opts =
       Keyword.get(opts, :transport_opts, [])
-      |> Keyword.merge(hostname: hostname)
+      |> Keyword.put(:hostname, hostname)
 
     with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
       initiate(new_scheme, socket, hostname, port, opts)

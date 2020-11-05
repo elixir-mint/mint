@@ -155,8 +155,8 @@ defmodule Mint.HTTP do
 
   ## Options
 
-    * `:hostname` - (string) explicitly provide the hostname used for the Host header,
-      hostname verification, SNI, etc. **Required when address is not a string.**
+    * `:hostname` - (string) explicitly provide the hostname used for the `Host` header,
+      hostname verification, SNI, and so on. **Required when `address` is not a string.**
 
     * `:transport_opts` - (keyword) options to be given to the transport being used.
       These options will be merged with some default options that cannot be overridden.
