@@ -5,47 +5,42 @@ defmodule Mint.UnitSocketTest do
 
   require HTTP
 
+  @tag :unix_socket
   test "starting an http connection to a unix domain socket works" do
-    unless is_unix?() && otp_19?() do
-      {:ok, address, server_ref} = TestSocketServer.start()
-      assert {:ok, conn} = HTTP.connect(:http, address, 0, mode: :passive)
-      assert_receive {^server_ref, server_socket}
+    {:ok, address, server_ref} = TestSocketServer.start()
 
-      {:ok, conn, ref} = HTTP.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn} = HTTP.connect(:http, address, 0, mode: :passive, hostname: "localhost")
 
-      :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+    assert_receive {^server_ref, server_socket}
 
-      assert {:ok, _conn, responses} = HTTP.recv(conn, 0, 100)
-      assert responses == [{:status, ref, 200}]
-    end
+    {:ok, conn, ref} = HTTP.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+    assert {:ok, _conn, responses} = HTTP.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}]
   end
 
+  @tag :unix_socket
   test "starting an https connection to a unix domain socket works" do
-    unless is_unix?() && otp_19?() do
-      {:ok, address, server_ref} = TestSocketServer.start(ssl: true)
+    {:ok, address, server_ref} = TestSocketServer.start(ssl: true)
 
-      assert {:ok, conn} =
-               HTTP.connect(:https, address, 0,
-                 mode: :passive,
-                 hostname: "localhost",
-                 transport_opts: [
-                   verify: :verify_none
-                 ]
-               )
+    assert {:ok, conn} =
+             HTTP.connect(:https, address, 0,
+               mode: :passive,
+               hostname: "localhost",
+               transport_opts: [
+                 verify: :verify_none
+               ]
+             )
 
-      assert_receive {^server_ref, server_socket}
+    assert_receive {^server_ref, server_socket}
 
-      {:ok, conn, ref} = HTTP.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref} = HTTP.request(conn, "GET", "/", [], nil)
 
-      :ok = :ssl.send(server_socket, "HTTP/1.1 200 OK\r\n")
+    :ok = :ssl.send(server_socket, "HTTP/1.1 200 OK\r\n")
 
-      assert {:ok, _conn, responses} = HTTP.recv(conn, 0, 100)
-      assert responses == [{:status, ref, 200}]
-    end
+    assert {:ok, _conn, responses} = HTTP.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}]
   end
-
-  defp is_unix?, do: match?({:unix, _}, :os.type())
-
-  # NOTE: elixir >= 1.6.0 requires OTP >= 19
-  defp otp_19?, do: Version.compare(System.version(), "1.6.0") == :gt
 end
