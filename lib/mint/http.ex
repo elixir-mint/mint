@@ -275,7 +275,7 @@ defmodule Mint.HTTP do
     * `:secure_renegotiate` - defaults to `true`. May be overridden by the
       caller.
 
-    * `:server_name_indication` - defaults to specified destination address.
+    * `:server_name_indication` - defaults to specified destination hostname.
       May be overridden by the caller.
 
     * `:verify` - defaults to `:verify_peer`. May be overridden by the caller.
