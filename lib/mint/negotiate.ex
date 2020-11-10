@@ -123,6 +123,9 @@ defmodule Mint.Negotiate do
 
       {:ok, protocol} ->
         {:error, %TransportError{reason: {:bad_alpn_protocol, protocol}}}
+
+      {:error, %TransportError{} = error} ->
+        {:error, error}
     end
   end
 end
