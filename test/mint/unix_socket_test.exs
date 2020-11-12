@@ -2,13 +2,15 @@ defmodule Mint.UnitSocketTest do
   use ExUnit.Case, async: true
 
   alias Mint.{HTTP, TestSocketServer}
-  alias Mint.UnixSocketTestTagHelper, as: Helper
 
   require HTTP
 
-  @tag Helper.tag()
-  test "starting an http connection to a unix domain socket works" do
-    {:ok, address, server_ref} = TestSocketServer.start()
+  unix? = match?({:unix, _}, :os.type())
+  otp_19? = System.otp_release() >= "19"
+  @moduletag skip: not (unix? and otp_19?)
+
+  test "starting an HTTP connection to a Unix domain socket works" do
+    {:ok, address, server_ref} = TestSocketServer.start(ssl: false)
 
     assert {:ok, conn} = HTTP.connect(:http, address, 0, mode: :passive, hostname: "localhost")
 
@@ -22,7 +24,6 @@ defmodule Mint.UnitSocketTest do
     assert responses == [{:status, ref, 200}]
   end
 
-  @tag Helper.tag()
   test "starting an https connection to a unix domain socket works" do
     {:ok, address, server_ref} = TestSocketServer.start(ssl: true)
 

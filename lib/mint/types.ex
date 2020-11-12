@@ -4,7 +4,7 @@ defmodule Mint.Types do
   """
 
   @typedoc """
-  A hostname, ip address, unix domain socket path, :loopback, or any
+  A hostname, IP address, Unix domain socket path, `:loopback`, or any
   other term representing an internet address.
   """
   @type address() :: :inet.socket_address() | String.t()
