@@ -2,7 +2,6 @@ defmodule Mint.UnitSocketTest do
   use ExUnit.Case, async: true
 
   alias Mint.{HTTP, TestSocketServer}
-  alias Mint.UnixSocketTestHelpers
 
   require HTTP
 
