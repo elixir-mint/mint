@@ -1,5 +1,5 @@
 defmodule Mint.HTTP1.TestServer do
-  def start() do
+  def start do
     {:ok, listen_socket} = :gen_tcp.listen(0, mode: :binary, packet: :raw)
     server_ref = make_ref()
     parent = self()

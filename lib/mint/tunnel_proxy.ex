@@ -12,11 +12,13 @@ defmodule Mint.TunnelProxy do
   end
 
   defp establish_proxy(proxy, host) do
-    {proxy_scheme, proxy_hostname, proxy_port, proxy_opts} = proxy
-    {_scheme, hostname, port, opts} = host
+    {proxy_scheme, proxy_address, proxy_port, proxy_opts} = proxy
+    {_scheme, address, port, opts} = host
+    hostname = Mint.Core.Util.hostname(opts, address)
+
     path = "#{hostname}:#{port}"
 
-    with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_hostname, proxy_port, proxy_opts),
+    with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_address, proxy_port, proxy_opts),
          timeout_deadline = timeout_deadline(proxy_opts),
          headers = Keyword.get(opts, :proxy_headers, []),
          {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, headers, nil),
@@ -33,7 +35,7 @@ defmodule Mint.TunnelProxy do
   end
 
   defp upgrade_connection(conn, proxy, {scheme, hostname, port, opts}) do
-    {proxy_scheme, _proxy_hostname, _proxy_port, _proxy_opts} = proxy
+    {proxy_scheme, _proxy_address, _proxy_port, _proxy_opts} = proxy
     socket = HTTP1.get_socket(conn)
 
     # Note that we may leak messages if the server sent data after the CONNECT response

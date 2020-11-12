@@ -155,6 +155,9 @@ defmodule Mint.HTTP do
 
   ## Options
 
+    * `:hostname` - (string) explicitly provide the hostname used for the `Host` header,
+      hostname verification, SNI, and so on. **Required when `address` is not a string.**
+
     * `:transport_opts` - (keyword) options to be given to the transport being used.
       These options will be merged with some default options that cannot be overridden.
       For more details, refer to the "Transport options" section below.
@@ -176,7 +179,7 @@ defmodule Mint.HTTP do
   The following options are HTTP/1-specific and will force the connection
   to be an HTTP/1 connection.
 
-    * `:proxy` - a `{scheme, hostname, port, opts}` tuple that identifies a proxy to
+    * `:proxy` - a `{scheme, address, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.
 
   The following options are HTTP/2-specific and will only be used on HTTP/2 connections.
@@ -201,7 +204,7 @@ defmodule Mint.HTTP do
   ## Proxying
 
   You can set up proxying through the `:proxy` option, which is a tuple
-  `{scheme, hostname, port, opts}` that identifies the proxy to connect to.
+  `{scheme, address, port, opts}` that identifies the proxy to connect to.
   Once a proxied connection is returned, the proxy is transparent to you and you
   can use the connection like a normal HTTP/1 connection.
 
@@ -334,26 +337,26 @@ defmodule Mint.HTTP do
       {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, opts)
 
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
     case Keyword.fetch(opts, :proxy) do
-      {:ok, {proxy_scheme, proxy_hostname, proxy_port, proxy_opts}} ->
+      {:ok, {proxy_scheme, proxy_address, proxy_port, proxy_opts}} ->
         case scheme_to_transport(scheme) do
           Transport.TCP ->
-            proxy = {proxy_scheme, proxy_hostname, proxy_port}
-            host = {scheme, hostname, port}
+            proxy = {proxy_scheme, proxy_address, proxy_port}
+            host = {scheme, address, port}
             opts = Keyword.merge(opts, proxy_opts)
             UnsafeProxy.connect(proxy, host, opts)
 
           Transport.SSL ->
-            proxy = {proxy_scheme, proxy_hostname, proxy_port, proxy_opts}
-            host = {scheme, hostname, port, opts}
+            proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}
+            host = {scheme, address, port, opts}
             TunnelProxy.connect(proxy, host)
         end
 
       :error ->
-        Mint.Negotiate.connect(scheme, hostname, port, opts)
+        Mint.Negotiate.connect(scheme, address, port, opts)
     end
   end
 
@@ -373,7 +376,7 @@ defmodule Mint.HTTP do
   @impl true
   @spec initiate(
           module(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()

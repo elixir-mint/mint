@@ -98,15 +98,19 @@ defmodule Mint.HTTP1 do
 
   This function doesn't support proxying.
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
     # TODO: Also ALPN negotiate HTTP1?
 
+    hostname = Mint.Core.Util.hostname(opts, address)
     transport = scheme_to_transport(scheme)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
+    transport_opts =
+      Keyword.get(opts, :transport_opts, [])
+      |> Keyword.put(:hostname, hostname)
+
+    with {:ok, socket} <- transport.connect(address, port, transport_opts) do
       initiate(scheme, socket, hostname, port, opts)
     end
   end
@@ -114,7 +118,7 @@ defmodule Mint.HTTP1 do
   @doc false
   @spec upgrade(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           Types.scheme(),
           String.t(),
           :inet.port_number(),
@@ -124,7 +128,10 @@ defmodule Mint.HTTP1 do
     # TODO: Also ALPN negotiate HTTP1?
 
     transport = scheme_to_transport(new_scheme)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
+
+    transport_opts =
+      Keyword.get(opts, :transport_opts, [])
+      |> Keyword.put(:hostname, hostname)
 
     with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
       initiate(new_scheme, socket, hostname, port, opts)
@@ -135,7 +142,7 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec initiate(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()

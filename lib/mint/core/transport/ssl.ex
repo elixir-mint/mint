@@ -311,25 +311,35 @@ defmodule Mint.Core.Transport.SSL do
   #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
 
   @impl true
-  def connect(hostname, port, opts) do
-    hostname = String.to_charlist(hostname)
+  def connect(address, port, opts) do
+    hostname = Mint.Core.Util.hostname(opts, address)
+    opts = Keyword.delete(opts, :hostname)
+
+    connect(address, hostname, port, opts)
+  end
+
+  defp connect(address, hostname, port, opts) when is_binary(address),
+    do: connect(String.to_charlist(address), hostname, port, opts)
+
+  defp connect(address, hostname, port, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
-    opts = ssl_opts(hostname, opts)
+
+    opts = ssl_opts(String.to_charlist(hostname), opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
       # ssl/gen_tcp if connection fails.
-      case :ssl.connect(hostname, port, [:inet6 | opts], timeout) do
+      case :ssl.connect(address, port, [:inet6 | opts], timeout) do
         {:ok, sslsocket} ->
           {:ok, sslsocket}
 
         _error ->
-          wrap_err(:ssl.connect(hostname, port, opts, timeout))
+          wrap_err(:ssl.connect(address, port, opts, timeout))
       end
     else
       # Use the defaults provided by ssl/gen_tcp.
-      wrap_err(:ssl.connect(hostname, port, opts, timeout))
+      wrap_err(:ssl.connect(address, port, opts, timeout))
     end
   end
 
