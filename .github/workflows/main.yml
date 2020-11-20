@@ -4,16 +4,16 @@ on: [push, pull_request]
 
 jobs:
   format:
-    name: Format
+    name: Format and compile with warnings as errors
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
 
       - name: Install OTP and Elixir
-        uses: ericmj/setup-elixir@patch-2
+        uses: actions/setup-elixir@1
         with:
           otp-version: "23.0"
-          elixir-version: "1.10.3"
+          elixir-version: "1.11.2"
 
       - name: Install dependencies
         run: mix deps.get
@@ -21,13 +21,18 @@ jobs:
       - name: Check mix format
         run: mix format --check-formatted
 
+      - name: Compile with warnings as errors
+        run: mix compile --warnings-as-errors
+
   test:
     name: Test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        pair:
+        include:
+          - erlang: "23.0"
+            elixir: "1.11.2"
           - erlang: "23.0"
             elixir: "1.10.3"
           - erlang: "22.3"
@@ -44,10 +49,10 @@ jobs:
       - uses: actions/checkout@v1
 
       - name: Install OTP and Elixir
-        uses: ericmj/setup-elixir@patch-2
+        uses: actions/setup-elixir@1
         with:
-          otp-version: ${{matrix.pair.erlang}}
-          elixir-version: ${{matrix.pair.elixir}}
+          otp-version: ${{matrix.erlang}}
+          elixir-version: ${{matrix.elixir}}
 
       - name: Install dependencies
         run: mix deps.get
