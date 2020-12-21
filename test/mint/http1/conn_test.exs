@@ -451,6 +451,24 @@ defmodule Mint.HTTP1Test do
     assert responses == [{:status, ref, 200}]
   end
 
+  test "receive response until connection is closed using recv/3",
+       %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert_receive {^server_ref, server_socket}
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.0 200 OK\r\n\r\nfoo")
+
+    assert {:ok, conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}, {:headers, ref, []}, {:data, ref, "foo"}]
+
+    :ok = :gen_tcp.close(server_socket)
+
+    assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:done, ref}]
+  end
+
   test "controlling_process/2", %{conn: conn, server_socket: server_socket} do
     parent = self()
     ref = make_ref()

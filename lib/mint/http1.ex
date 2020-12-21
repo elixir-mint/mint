@@ -470,6 +470,7 @@ defmodule Mint.HTTP1 do
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} -> handle_data(conn, data)
+      {:error, %Mint.TransportError{reason: :closed}} -> handle_close(conn)
       {:error, error} -> handle_error(conn, error)
     end
   end
