@@ -150,6 +150,7 @@ defmodule HTTP2.IntegrationTest do
 
   describe "twitter.com" do
     @moduletag connect: {"twitter.com", 443}
+    @browser_user_agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_0_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 
     test "ping", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
@@ -159,7 +160,8 @@ defmodule HTTP2.IntegrationTest do
     end
 
     test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
+      assert {:ok, %HTTP2{} = conn, ref} =
+               HTTP2.request(conn, "GET", "/", [{"user-agent", @browser_user_agent}], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
