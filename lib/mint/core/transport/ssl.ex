@@ -623,22 +623,18 @@ defmodule Mint.Core.Transport.SSL do
 
   # NOTE: Should this be private and moved to a different module?
   @doc false
-  def default_ciphers(), do: get_valid_suites(:ssl.cipher_suites(), [])
-
-  @dialyzer {:no_match, get_valid_suites: 2}
-
-  for {kex, cipher, mac} <- @blacklisted_ciphers do
-    defp get_valid_suites([{unquote(kex), unquote(cipher), _mac, unquote(mac)} | rest], valid) do
-      get_valid_suites(rest, valid)
-    end
-
-    defp get_valid_suites([{unquote(kex), unquote(cipher), unquote(mac)} | rest], valid) do
-      get_valid_suites(rest, valid)
+  def default_ciphers() do
+    if function_exported?(:ssl, :cipher_suites, 0) do
+      :ssl
+      |> apply(:cipher_suites, [])
+      |> Enum.reject(& &1 in @blacklisted_ciphers)
+    else
+      protocol_version = :tls_record.highest_protocol_version([])
+      :ssl
+      |> apply(:cipher_suites, [:default, protocol_version])
+      |> Enum.reject(&(:ssl_cipher_format.suite_legacy(&1) in @blacklisted_ciphers))
     end
   end
-
-  defp get_valid_suites([suit | rest], valid), do: get_valid_suites(rest, [suit | valid])
-  defp get_valid_suites([], valid), do: valid
 
   defp raise_on_missing_castore! do
     Code.ensure_loaded?(CAStore) ||
