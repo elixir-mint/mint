@@ -626,7 +626,7 @@ defmodule Mint.Core.Transport.SSL do
   @doc false
   def default_ciphers() do
     if ssl_version() >= [9, 0] do
-      [protocol_version | _] = :ssl.versions()[:supported]
+      [protocol_version | _] = ssl_versions()
 
       :ssl
       |> apply(:cipher_suites, [:default, protocol_version])
