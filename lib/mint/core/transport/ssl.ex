@@ -513,7 +513,6 @@ defmodule Mint.Core.Transport.SSL do
 
   defp default_ssl_opts(hostname) do
     # TODO: Add revocation check
-    Code.ensure_loaded?(:ssl) || raise ":ssl not available"
 
     [
       ciphers: default_ciphers(),
