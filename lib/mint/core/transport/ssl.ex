@@ -525,7 +525,7 @@ defmodule Mint.Core.Transport.SSL do
     ]
   end
 
-  def ssl_versions() do
+  defp ssl_versions() do
     available_versions = :ssl.versions()[:available]
     versions = Enum.filter(@default_versions, &(&1 in available_versions))
 
