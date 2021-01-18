@@ -513,6 +513,7 @@ defmodule Mint.Core.Transport.SSL do
 
   defp default_ssl_opts(hostname) do
     # TODO: Add revocation check
+    Code.ensure_loaded?(:ssl) || raise ":ssl not available"
 
     [
       ciphers: default_ciphers(),
@@ -525,7 +526,7 @@ defmodule Mint.Core.Transport.SSL do
     ]
   end
 
-  defp ssl_versions() do
+  def ssl_versions() do
     available_versions = :ssl.versions()[:available]
     versions = Enum.filter(@default_versions, &(&1 in available_versions))
 
@@ -624,17 +625,24 @@ defmodule Mint.Core.Transport.SSL do
   # NOTE: Should this be private and moved to a different module?
   @doc false
   def default_ciphers() do
-    if function_exported?(:ssl, :cipher_suites, 0) do
-      :ssl
-      |> apply(:cipher_suites, [])
-      |> Enum.reject(& &1 in @blacklisted_ciphers)
-    else
-      protocol_version = :tls_record.highest_protocol_version([])
+    if ssl_version() >= [9, 0] do
+      [protocol_version | _] = :ssl.versions()[:supported]
+
       :ssl
       |> apply(:cipher_suites, [:default, protocol_version])
-      |> Enum.reject(&(:ssl_cipher_format.suite_legacy(&1) in @blacklisted_ciphers))
+      |> Enum.reject(&blacklisted?/1)
+    else
+      :ssl
+      |> apply(:cipher_suites, [])
+      |> Enum.reject(&blacklisted?/1)
     end
   end
+
+  defp blacklisted?(%{cipher: cipher, key_exchange: kex, prf: prf}),
+    do: blacklisted?({kex, cipher, prf})
+
+  defp blacklisted?({kex, cipher, _mac, prf}), do: blacklisted?({kex, cipher, prf})
+  defp blacklisted?({_kex, _cipher, _prf} = suite), do: suite in @blacklisted_ciphers
 
   defp raise_on_missing_castore! do
     Code.ensure_loaded?(CAStore) ||
