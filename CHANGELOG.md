@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.1
+
+### Bug fixes and improvements
+
+  * Fix a bug where we were not ignoring the return value of `:ssl.close/1` and `:gen_tcp.close/1`.
+  * Fix a bug where we were not properly handling transport errors when doing ALPN protocol negotiation.
+  * Fix a bug where we were not handling connection closed errors in a few places.
+
 ## v1.2.0
 
 ### Bug fixes and improvements
