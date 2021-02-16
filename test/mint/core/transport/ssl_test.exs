@@ -3,6 +3,11 @@ defmodule Mint.Core.Transport.SSLTest do
 
   alias Mint.Core.Transport.SSL
 
+  setup_all do
+    {:module, :ssl} = Code.ensure_loaded(:ssl)
+    :ok
+  end
+
   describe "default ciphers" do
     test "no RSA key exchange" do
       # E.g. TLS_RSA_WITH_AES_256_GCM_SHA384 (old and new OTP variants)
@@ -160,7 +165,12 @@ defmodule Mint.Core.Transport.SSLTest do
         send(parent, {ref, port})
 
         {:ok, socket} = :ssl.transport_accept(listen_socket)
-        :ok = :ssl.ssl_accept(socket)
+
+        if function_exported?(:ssl, :handshake, 1) do
+          {:ok, _} = apply(:ssl, :handshake, [socket])
+        else
+          :ok = apply(:ssl, :ssl_accept, [socket])
+        end
 
         send(parent, {ref, socket})
 
