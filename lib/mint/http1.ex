@@ -261,7 +261,7 @@ defmodule Mint.HTTP1 do
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
 
-      {:error, %HTTPError{} = error} ->
+      {:error, %error_module{} = error} when error_module in [HTTPError, TransportError] ->
         {:error, conn, error}
 
       {:error, reason} ->
