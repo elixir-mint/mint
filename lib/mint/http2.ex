@@ -1045,13 +1045,8 @@ defmodule Mint.HTTP2 do
   defp negotiate(address, port, :http, transport_opts) do
     # We don't support protocol negotiation for TCP connections
     # so currently we just assume the HTTP/2 protocol
-
     transport = scheme_to_transport(:http)
-
-    case transport.connect(address, port, transport_opts) do
-      {:ok, socket} -> {:ok, socket}
-      {:error, reason} -> {:error, reason}
-    end
+    transport.connect(address, port, transport_opts)
   end
 
   defp negotiate(address, port, :https, transport_opts) do
