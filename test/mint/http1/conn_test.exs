@@ -804,6 +804,40 @@ defmodule Mint.HTTP1Test do
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
     end
+
+    test "pipeline", %{conn: conn} do
+      {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref1, "hello")
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref1, :eof)
+      {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref2, :eof)
+      {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref3, :eof)
+      {:ok, conn, ref4} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref4, "goodbye")
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref4, :eof)
+      response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:data, ^ref1, "XXXXX"}, {:done, ^ref1}] =
+               responses
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:data, ^ref2, "XXXXX"}, {:done, ^ref2}] =
+               responses
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref3, _}, {:headers, ^ref3, _}, {:data, ^ref3, "XXXXX"}, {:done, ^ref3}] =
+               responses
+
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:data, ^ref4, "XXXXX"}, {:done, ^ref4}] =
+               responses
+    end
   end
 
   defp request_string(string) do

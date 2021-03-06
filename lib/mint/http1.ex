@@ -83,6 +83,7 @@ defmodule Mint.HTTP1 do
     :host,
     :port,
     :request,
+    :streaming_request,
     :socket,
     :transport,
     :mode,
@@ -225,13 +226,7 @@ defmodule Mint.HTTP1 do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def request(
-        %__MODULE__{request: %{state: {:stream_request, _}}} = conn,
-        _method,
-        _path,
-        _headers,
-        _body
-      ) do
+  def request(%__MODULE__{streaming_request: %{}} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:request_body_is_streaming)}
   end
 
@@ -249,13 +244,14 @@ defmodule Mint.HTTP1 do
       request_ref = make_ref()
       request = new_request(request_ref, method, body, encoding)
 
-      if conn.request == nil do
-        conn = %__MODULE__{conn | request: request}
-        {:ok, conn, request_ref}
-      else
-        requests = :queue.in(request, conn.requests)
-        conn = %__MODULE__{conn | requests: requests}
-        {:ok, conn, request_ref}
+      case request.state do
+        {:stream_request, _} ->
+          conn = %__MODULE__{conn | streaming_request: request}
+          {:ok, conn, request_ref}
+
+        _ ->
+          conn = enqueue_request(conn, request)
+          {:ok, conn, request_ref}
       end
     else
       {:error, %TransportError{reason: :closed} = error} ->
@@ -301,15 +297,17 @@ defmodule Mint.HTTP1 do
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         :eof
       ) do
-    {:ok, put_in(conn.request.state, :status)}
+    request = %{conn.streaming_request | state: :status}
+    conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+    {:ok, conn}
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         {:eof, _trailing_headers}
       ) do
@@ -317,7 +315,7 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         body
       ) do
@@ -334,16 +332,25 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
         ref,
         chunk
       ) do
     with {:ok, chunk} <- validate_chunk(chunk),
          :ok <- conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       case chunk do
-        :eof -> {:ok, put_in(conn.request.state, :status)}
-        {:eof, _trailing_headers} -> {:ok, put_in(conn.request.state, :status)}
-        _other -> {:ok, conn}
+        :eof ->
+          request = %{conn.streaming_request | state: :status}
+          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          {:ok, conn}
+
+        {:eof, _trailing_headers} ->
+          request = %{conn.streaming_request | state: :status}
+          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          {:ok, conn}
+
+        _other ->
+          {:ok, conn}
       end
     else
       :empty_chunk ->
@@ -527,10 +534,11 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec open_request_count(t()) :: non_neg_integer()
   def open_request_count(%__MODULE__{} = conn) do
-    if is_nil(conn.request) do
-      0
-    else
-      1 + :queue.len(conn.requests)
+    case conn do
+      %{request: nil, streaming_request: nil} -> 0
+      %{request: nil} -> 1
+      %{streaming_request: nil} -> 1 + :queue.len(conn.requests)
+      _ -> 2 + :queue.len(conn.requests)
     end
   end
 
@@ -835,6 +843,15 @@ defmodule Mint.HTTP1 do
       {:empty, requests} ->
         %{conn | request: nil, requests: requests}
     end
+  end
+
+  defp enqueue_request(%{request: nil} = conn, request) do
+    %__MODULE__{conn | request: request}
+  end
+
+  defp enqueue_request(conn, request) do
+    requests = :queue.in(request, conn.requests)
+    %__MODULE__{conn | requests: requests}
   end
 
   defp internal_close(conn) do
