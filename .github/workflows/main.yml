@@ -3,27 +3,6 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  format:
-    name: Format and compile with warnings as errors
-    runs-on: ubuntu-16.04
-    steps:
-      - uses: actions/checkout@v1
-
-      - name: Install OTP and Elixir
-        uses: erlef/setup-elixir@v1
-        with:
-          otp-version: "23.0"
-          elixir-version: "1.11.2"
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Check mix format
-        run: mix format --check-formatted
-
-      - name: Compile with warnings as errors
-        run: mix compile --warnings-as-errors
-
   test:
     name: Test
     runs-on: ubuntu-16.04
@@ -33,6 +12,7 @@ jobs:
         include:
           - erlang: "23.0"
             elixir: "1.11.2"
+            lint: true
           - erlang: "23.0"
             elixir: "1.10.3"
           - erlang: "22.3"
@@ -59,6 +39,18 @@ jobs:
 
       - name: Start docker
         run: docker-compose up --detach
+
+      - name: Check for unused dependencies
+        run: mix deps.unlock --check-unused
+        if: ${{matrix.lint}}
+
+      - name: Compile with --warnings-as-errors
+        run: mix compile --warnings-as-errors
+        if: ${{matrix.lint}}
+
+      - name: Check mix format
+        run: mix format --check-formatted
+        if: ${{matrix.lint}}
 
       - name: Run tests
         run: mix test --trace --include proxy
