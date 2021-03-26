@@ -1009,7 +1009,8 @@ defmodule Mint.HTTP1 do
   end
 
   def format_error({:invalid_header_value, name, value}) do
-    "invalid value for header #{inspect(name)}: #{inspect(value)}"
+    "invalid value for header (only printable ASCII characters are allowed) " <>
+      "#{inspect(name)}: #{inspect(value)}"
   end
 
   def format_error(:invalid_chunk_size) do
