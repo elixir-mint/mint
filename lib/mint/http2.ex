@@ -478,6 +478,7 @@ defmodule Mint.HTTP2 do
     headers =
       headers
       |> downcase_header_names()
+      |> convert_header_value_to_binary()
       |> add_default_headers(body)
 
     headers = [
@@ -1324,6 +1325,10 @@ defmodule Mint.HTTP2 do
 
   defp downcase_header_names(headers) do
     for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
+  end
+
+  defp convert_header_value_to_binary(headers) do
+    for {name, value} <- headers, do: {name, IO.iodata_to_binary(value)}
   end
 
   defp add_default_headers(headers, body) do

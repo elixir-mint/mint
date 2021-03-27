@@ -35,6 +35,21 @@ defmodule HTTP2.IntegrationTest do
     assert HTTP2.open?(conn)
   end
 
+  test "requests with iolist in header values" do
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, "nghttp2.org", 80)
+
+    assert {:ok, %HTTP2{} = conn, _ref} =
+             HTTP2.request(
+               conn,
+               "GET",
+               "/httpbin/",
+               [{"iolist-header", ["io", 'list', '-', "header"]}],
+               nil
+             )
+
+    assert {:ok, %HTTP2{} = _conn, _responses} = receive_stream(conn)
+  end
+
   describe "http2.golang.org" do
     @describetag connect: {"http2.golang.org", 443}
 
