@@ -55,7 +55,7 @@ defmodule Mint.Types do
   Headers are sent and received as lists of two-element tuples containing two strings,
   the header name and header value.
   """
-  @type headers() :: [{header_name :: String.t(), header_value :: String.t()}]
+  @type headers() :: [{header_name :: String.t(), header_value :: iodata()}]
 
   @typedoc """
   The scheme to use when connecting to an HTTP server.
