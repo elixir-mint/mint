@@ -22,7 +22,9 @@ defmodule Mint.HTTP1.Request do
   end
 
   defp encode_headers(headers) do
-    Enum.reduce(headers, "", fn {name, value}, acc ->
+    headers
+    |> Enum.map(fn {name, value} -> {name, IO.iodata_to_binary(value)} end)
+    |> Enum.reduce("", fn {name, value}, acc ->
       validate_header_name!(name)
       validate_header_value!(name, value)
       [acc, name, ": ", value, "\r\n"]

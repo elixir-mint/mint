@@ -133,6 +133,22 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert merge_body(responses, request) =~ ~s("BODY")
     end
 
+    test "requests with iolist in header values" do
+      headers = [{"content-length", ["1", '4']}]
+      assert {:ok, conn} = HTTP1.connect(:http, "httpbin.org", 80)
+      assert {:ok, conn, request} = HTTP1.request(conn, "POST", "/post", headers, :stream)
+      assert {:ok, conn} = HTTP1.stream_request_body(conn, request, "content")
+      assert {:ok, conn} = HTTP1.stream_request_body(conn, request, " length")
+      assert {:ok, conn} = HTTP1.stream_request_body(conn, request, :eof)
+      assert {:ok, conn, responses} = receive_stream(conn)
+
+      assert conn.buffer == ""
+      assert [status, headers | responses] = responses
+      assert {:status, ^request, 200} = status
+      assert {:headers, ^request, _} = headers
+      assert merge_body(responses, request) =~ ~s("content length")
+    end
+
     test "pipelining" do
       assert {:ok, conn} = HTTP1.connect(:http, "httpbin.org", 80)
       assert {:ok, conn, request1} = HTTP1.request(conn, "GET", "/", [], nil)
