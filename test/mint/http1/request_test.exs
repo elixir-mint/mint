@@ -69,6 +69,11 @@ defmodule Mint.HTTP1.RequestTest do
       assert IO.iodata_to_binary(Request.encode_chunk(:eof)) == "0\r\n\r\n"
     end
 
+    test "{:eof, trailing_headers_with_io_lists}" do
+      assert IO.iodata_to_binary(Request.encode_chunk({:eof, [{"trailing", ["header", 's']}]})) ==
+               "0\r\ntrailing: headers\r\n\r\n"
+    end
+
     test "iodata" do
       iodata = "foo"
       assert IO.iodata_to_binary(Request.encode_chunk(iodata)) == "3\r\nfoo\r\n"
