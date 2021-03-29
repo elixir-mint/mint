@@ -25,7 +25,8 @@ defmodule Mint.Types do
   """
   @type http2_response() ::
           {:pong, request_ref()}
-          | {:push_promise, request_ref(), promised_request_ref :: request_ref(), headers()}
+          | {:push_promise, request_ref(), promised_request_ref :: request_ref(),
+             response_headers()}
 
   @typedoc """
   A response to a request.
@@ -35,7 +36,7 @@ defmodule Mint.Types do
   """
   @type response() ::
           {:status, request_ref(), status()}
-          | {:headers, request_ref(), headers()}
+          | {:headers, request_ref(), response_headers()}
           | {:data, request_ref(), body_chunk :: binary()}
           | {:done, request_ref()}
           | {:error, request_ref(), reason :: term()}
@@ -50,10 +51,18 @@ defmodule Mint.Types do
   @type status() :: non_neg_integer()
 
   @typedoc """
+  HTTP response_headers.
+
+  Mint supports sending iolist in header values, but would only return String.t() as header_value in responses.
+  response_headers are lists of two-element tuples containing two strings,
+  the header name and header value.
+  """
+  @type response_headers() :: [{header_name :: String.t(), header_value :: String.t()}]
+
+  @typedoc """
   HTTP headers.
 
-  Headers are sent and received as lists of two-element tuples containing two strings,
-  the header name and header value.
+  Headers are sent as lists of two-element tuples containing the header name and header value.
   """
   @type headers() :: [{header_name :: String.t(), header_value :: iodata()}]
 
