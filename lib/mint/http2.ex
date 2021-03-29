@@ -477,8 +477,7 @@ defmodule Mint.HTTP2 do
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers =
       headers
-      |> downcase_header_names()
-      |> convert_header_value_to_binary()
+      |> normalize_headers()
       |> add_default_headers(body)
 
     headers = [
@@ -547,10 +546,7 @@ defmodule Mint.HTTP2 do
               encode_data(conn, stream_id, "", [:end_stream])
 
             {:eof, trailing_headers} ->
-              headers =
-                trailing_headers
-                |> downcase_header_names()
-                |> convert_header_value_to_binary()
+              headers = normalize_headers(trailing_headers)
 
               if unallowed_trailing_header = Util.find_unallowed_trailing_header(headers) do
                 error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
@@ -1326,12 +1322,8 @@ defmodule Mint.HTTP2 do
     end)
   end
 
-  defp downcase_header_names(headers) do
-    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
-  end
-
-  defp convert_header_value_to_binary(headers) do
-    for {name, value} <- headers, do: {name, IO.iodata_to_binary(value)}
+  defp normalize_headers(headers) do
+    for {name, value} <- headers, do: {Util.downcase_ascii(name), IO.iodata_to_binary(value)}
   end
 
   defp add_default_headers(headers, body) do
