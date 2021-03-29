@@ -33,6 +33,16 @@ defmodule Mint.HTTP1.RequestTest do
                """)
     end
 
+    test "with iolist in header values" do
+      assert encode_request("POST", "/some-url", [{"foo", ["b", 'a', "r"]}], "hello!") ==
+               request_string("""
+               POST /some-url HTTP/1.1
+               foo: bar
+
+               hello!\
+               """)
+    end
+
     test "validates request target" do
       for invalid_target <- ["/ /", "/%foo", "/foo%x"] do
         assert Request.encode("GET", invalid_target, [], nil) ==
