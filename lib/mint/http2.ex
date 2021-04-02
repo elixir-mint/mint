@@ -7,10 +7,10 @@ defmodule Mint.HTTP2 do
   The connection is a data structure and is not backed by a process, and all the
   connection handling happens in the process that creates the struct.
 
-  This module and data structure work exactly like the ones described in the `Mint`
+  This module and data structure work exactly like the ones described in the `Mint.HTTP`
   module, with the exception that `Mint.HTTP2` specifically deals with HTTP/2 while
-  `Mint` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
-  how to use the data structure and client architecture, see `Mint`.
+  `Mint.HTTP` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
+  how to use the data structure and client architecture, see `Mint.HTTP`.
 
   ## HTTP/2 streams and requests
 
@@ -73,7 +73,7 @@ defmodule Mint.HTTP2 do
   send us a push promise for `"/style.css"`.
 
       {:ok, conn} = Mint.HTTP2.connect(:https, "example.com", 443)
-      {:ok, conn, request_ref} = Mint.HTTP2.request(conn, "GET", "/index.html", _headers = [])
+      {:ok, conn, request_ref} = Mint.HTTP2.request(conn, "GET", "/index.html", _headers = [], _body = "")
 
       next_message =
         receive do
