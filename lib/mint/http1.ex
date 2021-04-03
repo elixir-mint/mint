@@ -460,11 +460,6 @@ defmodule Mint.HTTP1 do
   @spec recv(t(), non_neg_integer(), timeout()) ::
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   def recv(conn, byte_count, timeout)
 
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
@@ -484,11 +479,6 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.set_mode/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
   def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
@@ -506,11 +496,6 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.controlling_process/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
   def controlling_process(%__MODULE__{} = conn, new_pid) when is_pid(new_pid) do
