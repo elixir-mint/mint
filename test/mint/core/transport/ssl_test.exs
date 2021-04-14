@@ -145,46 +145,7 @@ defmodule Mint.Core.Transport.SSLTest do
   end
 
   describe "controlling_process/2" do
-    setup do
-      parent = self()
-      ref = make_ref()
-
-      ssl_opts = [
-        mode: :binary,
-        packet: :raw,
-        active: false,
-        reuseaddr: true,
-        nodelay: true,
-        certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
-        keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
-      ]
-
-      spawn_link(fn ->
-        {:ok, listen_socket} = :ssl.listen(0, ssl_opts)
-        {:ok, {_address, port}} = :ssl.sockname(listen_socket)
-        send(parent, {ref, port})
-
-        {:ok, socket} = :ssl.transport_accept(listen_socket)
-
-        if function_exported?(:ssl, :handshake, 1) do
-          {:ok, _} = apply(:ssl, :handshake, [socket])
-        else
-          :ok = apply(:ssl, :ssl_accept, [socket])
-        end
-
-        send(parent, {ref, socket})
-
-        # Keep the server alive forever.
-        :ok = Process.sleep(:infinity)
-      end)
-
-      assert_receive {^ref, port} when is_integer(port), 500
-
-      {:ok, socket} = SSL.connect("localhost", port, verify: :verify_none)
-      assert_receive {^ref, server_socket}, 200
-
-      {:ok, server_port: port, socket: socket, server_socket: server_socket}
-    end
+    setup :setup_tls_server
 
     test "changing the controlling process of a active: :once socket",
          %{socket: socket, server_socket: server_socket} do
@@ -246,6 +207,71 @@ defmodule Mint.Core.Transport.SSLTest do
 
       assert {:error, _error} = SSL.controlling_process(socket, other_process)
     end
+  end
+
+  describe "connection_information" do
+    setup :setup_tls_server
+
+    test "getting all connection information from an open socket", %{socket: socket} do
+      assert {:ok, info_items} = SSL.connection_information(socket)
+      assert is_list(info_items)
+      assert length(info_items) > 0
+    end
+
+    test "getting TLS keylog information from an open socket", %{socket: socket} do
+      assert {:ok, info_items} = SSL.connection_information(socket, [:keylog])
+      assert is_list(info_items)
+      assert length(info_items) > 0
+    end
+  end
+
+  defp setup_tls_server(_) do
+    parent = self()
+    ref = make_ref()
+
+    tls_server_opts = [
+      mode: :binary,
+      packet: :raw,
+      active: false,
+      reuseaddr: true,
+      nodelay: true,
+      keep_secrets: true,
+      versions: [:"tlsv1.2", :"tlsv1.3"],
+      certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
+      keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
+    ]
+
+    spawn_link(fn ->
+      {:ok, listen_socket} = :ssl.listen(0, tls_server_opts)
+      {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+      send(parent, {ref, port})
+
+      {:ok, socket} = :ssl.transport_accept(listen_socket)
+
+      if function_exported?(:ssl, :handshake, 1) do
+        {:ok, _} = apply(:ssl, :handshake, [socket])
+      else
+        :ok = apply(:ssl, :ssl_accept, [socket])
+      end
+
+      send(parent, {ref, socket})
+
+      # Keep the server alive forever.
+      :ok = Process.sleep(:infinity)
+    end)
+
+    assert_receive {^ref, port} when is_integer(port), 500
+
+    tls_client_opts = [
+      verify: :verify_none,
+      keep_secrets: true,
+      versions: [:"tlsv1.2", :"tlsv1.3"],
+    ]
+
+    {:ok, socket} = SSL.connect("localhost", port, tls_client_opts)
+    assert_receive {^ref, server_socket}, 200
+
+    {:ok, server_port: port, socket: socket, server_socket: server_socket}
   end
 
   defp cn_cert(_context) do

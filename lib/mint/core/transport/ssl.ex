@@ -424,6 +424,14 @@ defmodule Mint.Core.Transport.SSL do
     %Mint.TransportError{reason: reason}
   end
 
+  def connection_information(socket) do
+    wrap_err(:ssl.connection_information(socket))
+  end
+
+  def connection_information(socket, opts) do
+    wrap_err(:ssl.connection_information(socket, opts))
+  end
+
   defp ssl_opts(hostname, opts) do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)
