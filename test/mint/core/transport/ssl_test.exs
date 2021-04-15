@@ -218,16 +218,25 @@ defmodule Mint.Core.Transport.SSLTest do
       assert length(info_items) > 0
     end
 
-    test "getting TLS keylog information from an open socket", %{socket: socket} do
+    test "getting TLS keylog information from an open socket", %{
+      socket: socket,
+      ssl_version: ssl_version
+    } do
       assert {:ok, info_items} = SSL.connection_information(socket, [:keylog])
       assert is_list(info_items)
-      assert length(info_items) > 0
+
+      if ssl_version >= [10, 2] do
+        assert length(info_items) > 0
+      else
+        :ok
+      end
     end
   end
 
   defp setup_tls_server(_) do
     parent = self()
     ref = make_ref()
+    ssl_version = SSL.ssl_version()
 
     tls_server_opts = [
       mode: :binary,
@@ -235,11 +244,16 @@ defmodule Mint.Core.Transport.SSLTest do
       active: false,
       reuseaddr: true,
       nodelay: true,
-      keep_secrets: true,
-      versions: [:"tlsv1.2", :"tlsv1.3"],
       certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
       keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
     ]
+
+    tls_server_opts =
+      if ssl_version >= [10, 2] do
+        [{:versions, [:"tlsv1.2", :"tlsv1.3"]} | tls_server_opts]
+      else
+        tls_server_opts
+      end
 
     spawn_link(fn ->
       {:ok, listen_socket} = :ssl.listen(0, tls_server_opts)
@@ -263,15 +277,22 @@ defmodule Mint.Core.Transport.SSLTest do
     assert_receive {^ref, port} when is_integer(port), 500
 
     tls_client_opts = [
-      verify: :verify_none,
-      keep_secrets: true,
-      versions: [:"tlsv1.2", :"tlsv1.3"],
+      verify: :verify_none
     ]
+
+    tls_client_opts =
+      if ssl_version >= [10, 2] do
+        tmp_opts = [{:versions, [:"tlsv1.2", :"tlsv1.3"]} | tls_client_opts]
+        [{:keep_secrets, true} | tmp_opts]
+      else
+        tls_client_opts
+      end
 
     {:ok, socket} = SSL.connect("localhost", port, tls_client_opts)
     assert_receive {^ref, server_socket}, 200
 
-    {:ok, server_port: port, socket: socket, server_socket: server_socket}
+    {:ok,
+     server_port: port, socket: socket, server_socket: server_socket, ssl_version: ssl_version}
   end
 
   defp cn_cert(_context) do
