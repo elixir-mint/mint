@@ -10,6 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - erlang: "23.3.1"
+            elixir: "1.11.4"
           - erlang: "23.0"
             elixir: "1.11.2"
             lint: true
