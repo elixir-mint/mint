@@ -2,15 +2,25 @@ defmodule HTTP2.IntegrationTest do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.TestHelpers
+  import Mint.Core.Util, only: [ssl_version: 0]
 
   alias Mint.HTTP2
 
   @moduletag :integration
 
   setup context do
+    transport_opts =
+      if ssl_version() >= [10, 2] do
+        [{:versions, [:"tlsv1.2", :"tlsv1.3"]}]
+      else
+        []
+      end
+
     case Map.fetch(context, :connect) do
       {:ok, {host, port}} ->
-        assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, host, port)
+        assert {:ok, %HTTP2{} = conn} =
+                 HTTP2.connect(:https, host, port, transport_opts: transport_opts)
+
         [conn: conn]
 
       :error ->
