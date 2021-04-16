@@ -898,8 +898,9 @@ defmodule Mint.HTTP do
   @doc """
   Gets the socket associated with the connection.
 
-  Do not use this socket to change its state. Only read information from the socket. For instance,
-  use `:ssl.connection_information/2` to retrieve TLS-specific information from the socket.
+  Do not the returned socket to change its internal state. Only read information from the socket.
+  For instance, use `:ssl.connection_information/2` to retrieve TLS-specific information from the
+  socket.
   """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
