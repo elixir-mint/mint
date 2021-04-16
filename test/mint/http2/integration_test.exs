@@ -11,7 +11,11 @@ defmodule HTTP2.IntegrationTest do
   setup context do
     transport_opts =
       if ssl_version() >= [10, 2] do
-        [{:versions, [:"tlsv1.2", :"tlsv1.3"]}]
+        ciphers =
+          :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.2"), []) ++
+            :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
+
+        [{:versions, [:"tlsv1.2", :"tlsv1.3"]}, {:ciphers, ciphers}]
       else
         []
       end
