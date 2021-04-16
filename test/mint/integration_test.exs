@@ -201,8 +201,9 @@ defmodule Mint.IntegrationTest do
                  1012
                )
 
+      assert socket = Mint.HTTP.get_socket(conn)
       assert {:ok, [{:keylog, _keylog_items}]} =
-               :ssl.connection_information(conn.socket, [:keylog])
+               :ssl.connection_information(socket, [:keylog])
     end
   end
 end
