@@ -894,11 +894,10 @@ defmodule Mint.HTTP do
   @spec delete_private(t(), atom()) :: t()
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
-  # Made public to be used with proxying and retrieving information from the socket.
   @doc """
   Gets the socket associated with the connection.
 
-  Do not the returned socket to change its internal state. Only read information from the socket.
+  Do not use the returned socket to change its internal state. Only read information from the socket.
   For instance, use `:ssl.connection_information/2` to retrieve TLS-specific information from the
   socket.
   """

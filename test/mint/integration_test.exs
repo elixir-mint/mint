@@ -2,7 +2,6 @@ defmodule Mint.IntegrationTest do
   use ExUnit.Case, async: true
 
   import Mint.HTTP1.TestHelpers
-  import Mint.Core.Util, only: [ssl_version: 0]
 
   alias Mint.{TransportError, HTTP}
 
@@ -204,7 +203,7 @@ defmodule Mint.IntegrationTest do
 
       assert socket = Mint.HTTP.get_socket(conn)
 
-      if ssl_version() >= [10, 2] do
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
         assert {:ok, [{:keylog, _keylog_items}]} = :ssl.connection_information(socket, [:keylog])
       else
         assert {:ok, [{:protocol, _protocol}]} = :ssl.connection_information(socket, [:protocol])

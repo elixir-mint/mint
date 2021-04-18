@@ -2,7 +2,6 @@ defmodule HTTP2.IntegrationTest do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.TestHelpers
-  import Mint.Core.Util, only: [ssl_version: 0]
 
   alias Mint.HTTP2
 
@@ -10,7 +9,7 @@ defmodule HTTP2.IntegrationTest do
 
   setup context do
     transport_opts =
-      if ssl_version() >= [10, 2] do
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
         ciphers =
           :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.2"), []) ++
             :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])

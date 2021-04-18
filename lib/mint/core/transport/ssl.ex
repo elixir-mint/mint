@@ -4,7 +4,6 @@ defmodule Mint.Core.Transport.SSL do
   require Logger
   require Record
 
-  import Mint.Core.Util, only: [ssl_version: 0]
   @behaviour Mint.Core.Transport
 
   # From RFC7540 appendix A
@@ -653,4 +652,12 @@ defmodule Mint.Core.Transport.SSL do
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
+
+  @doc false
+  def ssl_version() do
+    Application.spec(:ssl, :vsn)
+    |> List.to_string()
+    |> String.split(".")
+    |> Enum.map(&String.to_integer/1)
+  end
 end

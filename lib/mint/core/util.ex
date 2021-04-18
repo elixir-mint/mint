@@ -155,11 +155,4 @@ defmodule Mint.Core.Util do
   def remove_unallowed_trailing_headers(headers) do
     Enum.reject(headers, fn {name, _value} -> name in @unallowed_trailing_headers end)
   end
-
-  def ssl_version() do
-    Application.spec(:ssl, :vsn)
-    |> List.to_string()
-    |> String.split(".")
-    |> Enum.map(&String.to_integer/1)
-  end
 end

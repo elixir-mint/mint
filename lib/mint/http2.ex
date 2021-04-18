@@ -1002,8 +1002,13 @@ defmodule Mint.HTTP2 do
       {:error, error}
   end
 
-  # Made public to be used with proxying.
-  @doc false
+  @doc """
+  Gets the socket associated with the connection.
+
+  Do not use the returned socket to change its internal state. Only read information from the socket.
+  For instance, use `:ssl.connection_information/2` to retrieve TLS-specific information from the
+  socket.
+  """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%Mint.HTTP2{socket: socket} = _conn) do
