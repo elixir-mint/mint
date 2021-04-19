@@ -189,4 +189,25 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
     end
   end
+
+  describe "information from connection's socket" do
+    @describetag :integration
+
+    test "TLSv1.2 - badssl.com" do
+      assert {:ok, conn} =
+               HTTP.connect(
+                 :https,
+                 "tls-v1-2.badssl.com",
+                 1012
+               )
+
+      assert socket = Mint.HTTP.get_socket(conn)
+
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        assert {:ok, [{:keylog, _keylog_items}]} = :ssl.connection_information(socket, [:keylog])
+      else
+        assert {:ok, [{:protocol, _protocol}]} = :ssl.connection_information(socket, [:protocol])
+      end
+    end
+  end
 end

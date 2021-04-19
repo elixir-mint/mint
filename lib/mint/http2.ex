@@ -1002,8 +1002,9 @@ defmodule Mint.HTTP2 do
       {:error, error}
   end
 
-  # Made public to be used with proxying.
-  @doc false
+  @doc """
+  See `Mint.HTTP.get_socket/1`.
+  """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%Mint.HTTP2{socket: socket} = _conn) do

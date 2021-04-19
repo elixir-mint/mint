@@ -653,7 +653,8 @@ defmodule Mint.Core.Transport.SSL do
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
   defp wrap_err(other), do: other
 
-  defp ssl_version() do
+  @doc false
+  def ssl_version() do
     Application.spec(:ssl, :vsn)
     |> List.to_string()
     |> String.split(".")
