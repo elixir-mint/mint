@@ -221,7 +221,7 @@ defmodule Mint.HTTP2 do
   HTTP/2 setting with its value.
 
   This type represents both server settings as well as client settings. To retrieve
-  server settings use `get_server_settings/2` and to retrieve client settings use
+  server settings use `get_server_setting/2` and to retrieve client settings use
   `get_client_setting/2`. To send client settings to the server, see `put_settings/2`.
 
   The supported settings are the following:
