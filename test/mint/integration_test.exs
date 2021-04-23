@@ -216,10 +216,12 @@ defmodule Mint.IntegrationTest do
 
     test "rabbitmq.com" do
       if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        ciphers = :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
+
         opts = [
           transport_opts: [
             versions: [:"tlsv1.3"],
-            ciphers: :ssl.cipher_suites(:default, :"tlsv1.3")
+            ciphers: ciphers
           ]
         ]
 
