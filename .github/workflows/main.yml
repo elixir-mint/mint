@@ -5,9 +5,9 @@ on: [push, pull_request]
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-16.04
+    runs-on: ubuntu-18.04
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - erlang: "23.3.1"
