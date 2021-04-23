@@ -556,6 +556,11 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "ignores ssl options on http", %{port: port} do
+    opts = [transport_opts: [verify: :verify_none]]
+    assert {:ok, _conn} = HTTP1.connect(:http, "localhost", port, opts)
+  end
+
   describe "non-streaming requests" do
     test "content-length header is added if not present",
          %{conn: conn, server_socket: server_socket, port: port} do

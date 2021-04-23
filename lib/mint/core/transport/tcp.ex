@@ -8,6 +8,11 @@ defmodule Mint.Core.Transport.TCP do
     mode: :binary,
     active: false
   ]
+  @ssl_opts [
+    :cacertfile, :ciphers, :depth, :partial_chain, :reuse_sessions,
+    :secure_renegotiate, :server_name_indication, :verify, :verify_fun,
+    :versions
+  ]
 
   @default_timeout 30_000
 
@@ -25,6 +30,7 @@ defmodule Mint.Core.Transport.TCP do
       opts
       |> Keyword.merge(@transport_opts)
       |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet6])
+      |> Keyword.drop(@ssl_opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
