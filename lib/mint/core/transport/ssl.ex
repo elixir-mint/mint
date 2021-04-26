@@ -452,14 +452,19 @@ defmodule Mint.Core.Transport.SSL do
     # :secure_renegotiate will be removed from transport_opts
     tls_compatible_set = MapSet.new([:tlsv1, :"tlsv1.1", :"tlsv1.2"])
 
-    with tls_versions_opt when not is_nil(tls_versions_opt) <- Keyword.get(opts, :versions),
-         tls_versions_set <- MapSet.new(tls_versions_opt),
-         0 <- MapSet.size(MapSet.intersection(tls_compatible_set, tls_versions_set)) do
-      opts
-      |> Keyword.delete(:reuse_sessions)
-      |> Keyword.delete(:secure_renegotiate)
+    tls_versions_opt = Keyword.get(opts, :versions, [])
+
+    if :"tlsv1.3" in tls_versions_opt do
+      with tls_versions_set <- MapSet.new(tls_versions_opt),
+           0 <- MapSet.size(MapSet.intersection(tls_compatible_set, tls_versions_set)) do
+        opts
+        |> Keyword.delete(:reuse_sessions)
+        |> Keyword.delete(:secure_renegotiate)
+      else
+        _ -> opts
+      end
     else
-      _ -> opts
+      opts
     end
   end
 
