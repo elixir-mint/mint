@@ -677,17 +677,18 @@ defmodule Mint.Core.Transport.SSL do
 
   @doc false
   def get_ciphers_for_tls_versions(tls_versions) do
-    if ssl_version() >= [8, 2, 4] do
+    sslver = ssl_version()
+
+    if sslver >= [8, 2, 4] do
       # Note: :ssl.filter_cipher_suites/2 is available
       tls_versions
       |> List.foldl([], fn v, acc ->
         [:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, v), []) | acc]
       end)
+      |> List.flatten()
     else
-      tls_versions
-      |> List.foldl([], fn v, acc -> [:ssl.cipher_suites(:all, v) | acc] end)
+      :ssl.cipher_suites(:all)
     end
-    |> List.flatten()
     |> Enum.reject(&blocked_cipher?/1)
   end
 end
