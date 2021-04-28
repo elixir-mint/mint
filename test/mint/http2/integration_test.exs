@@ -10,11 +10,7 @@ defmodule HTTP2.IntegrationTest do
   setup context do
     transport_opts =
       if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
-        ciphers =
-          :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.2"), []) ++
-            :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
-
-        [{:versions, [:"tlsv1.2", :"tlsv1.3"]}, {:ciphers, ciphers}]
+        [{:versions, [:"tlsv1.2", :"tlsv1.3"]}]
       else
         []
       end
