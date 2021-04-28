@@ -253,8 +253,10 @@ defmodule Mint.HTTP do
       exception if this package is not available. Due to caching the
       `:cacertfile` option is more efficient than `:cacerts`.
 
-    * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
-      filtered according to the blocklist in
+    * `:ciphers` - defaults to the lists returned by
+      `:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, tls_version), [])`
+      where `tls_version` is each value in the `:versions` setting. This list is
+      then filtered according to the blocklist in
       [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
       May be overridden by the caller. See the "Supporting older cipher suites"
       section below for some examples.

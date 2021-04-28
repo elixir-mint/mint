@@ -7,7 +7,7 @@ defmodule Mint.Core.Transport.SSL do
   @behaviour Mint.Core.Transport
 
   # From RFC7540 appendix A
-  @blacklisted_ciphers [
+  @blocked_ciphers [
     {:null, :null, :null},
     {:rsa, :null, :md5},
     {:rsa, :null, :sha},
@@ -291,7 +291,7 @@ defmodule Mint.Core.Transport.SSL do
     active: false
   ]
 
-  @default_versions [:"tlsv1.3", :"tlsv1.2"]
+  @default_tls_versions [:"tlsv1.3", :"tlsv1.2"]
   @default_timeout 30_000
 
   Record.defrecordp(
@@ -325,7 +325,7 @@ defmodule Mint.Core.Transport.SSL do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
 
-    opts = ssl_opts(String.to_charlist(hostname), opts)
+    opts = tls_opts(String.to_charlist(hostname), opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
@@ -351,7 +351,7 @@ defmodule Mint.Core.Transport.SSL do
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
-    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
+    wrap_err(:ssl.connect(socket, tls_opts(hostname, opts), timeout))
   end
 
   def upgrade(_socket, :https, _hostname, _port, _opts) do
@@ -424,13 +424,14 @@ defmodule Mint.Core.Transport.SSL do
     %Mint.TransportError{reason: reason}
   end
 
-  defp ssl_opts(hostname, opts) do
-    default_ssl_opts(hostname)
+  defp tls_opts(hostname, opts) do
+    default_tls_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
     |> Keyword.drop([:timeout, :inet6])
     |> add_verify_opts(hostname)
     |> remove_incompatible_ssl_opts()
+    |> add_ciphers_opt()
   end
 
   defp add_verify_opts(opts, hostname) do
@@ -528,13 +529,24 @@ defmodule Mint.Core.Transport.SSL do
   defp domain_without_host([?. | domain]), do: domain
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
-  defp default_ssl_opts(hostname) do
+  defp add_ciphers_opt(opts) do
+    if Keyword.has_key?(opts, :ciphers) do
+      opts
+    else
+      tls_versions = opts[:versions]
+      ciphers = get_ciphers_for_tls_versions(tls_versions)
+      Keyword.put(opts, :ciphers, ciphers)
+    end
+  end
+
+  defp default_tls_opts(hostname) do
     # TODO: Add revocation check
 
+    # Note: the :ciphers option is added once the :versions option
+    # has been merged with the user-specified value
     [
-      ciphers: default_ciphers(),
       server_name_indication: hostname,
-      versions: ssl_versions(),
+      versions: default_tls_versions(),
       verify: :verify_peer,
       depth: 4,
       secure_renegotiate: true,
@@ -542,9 +554,10 @@ defmodule Mint.Core.Transport.SSL do
     ]
   end
 
-  defp ssl_versions() do
+  @doc false
+  def default_tls_versions() do
     available_versions = :ssl.versions()[:available]
-    versions = Enum.filter(@default_versions, &(&1 in available_versions))
+    versions = Enum.filter(@default_tls_versions, &(&1 in available_versions))
 
     # Remove buggy TLS 1.3 versions
     if ssl_version() < [10, 0] do
@@ -638,27 +651,11 @@ defmodule Mint.Core.Transport.SSL do
     |> tbs_certificate(:subjectPublicKeyInfo)
   end
 
-  # NOTE: Should this be private and moved to a different module?
-  @doc false
-  def default_ciphers() do
-    if ssl_version() >= [9, 0] do
-      [protocol_version | _] = ssl_versions()
+  defp blocked_cipher?(%{cipher: cipher, key_exchange: kex, prf: prf}),
+    do: blocked_cipher?({kex, cipher, prf})
 
-      :ssl
-      |> apply(:cipher_suites, [:default, protocol_version])
-      |> Enum.reject(&blacklisted?/1)
-    else
-      :ssl
-      |> apply(:cipher_suites, [])
-      |> Enum.reject(&blacklisted?/1)
-    end
-  end
-
-  defp blacklisted?(%{cipher: cipher, key_exchange: kex, prf: prf}),
-    do: blacklisted?({kex, cipher, prf})
-
-  defp blacklisted?({kex, cipher, _mac, prf}), do: blacklisted?({kex, cipher, prf})
-  defp blacklisted?({_kex, _cipher, _prf} = suite), do: suite in @blacklisted_ciphers
+  defp blocked_cipher?({kex, cipher, _mac, prf}), do: blocked_cipher?({kex, cipher, prf})
+  defp blocked_cipher?({_kex, _cipher, _prf} = suite), do: suite in @blocked_ciphers
 
   defp raise_on_missing_castore! do
     Code.ensure_loaded?(CAStore) ||
@@ -676,5 +673,21 @@ defmodule Mint.Core.Transport.SSL do
     |> List.to_string()
     |> String.split(".")
     |> Enum.map(&String.to_integer/1)
+  end
+
+  @doc false
+  def get_ciphers_for_tls_versions(tls_versions) do
+    if ssl_version() >= [8, 2, 4] do
+      # Note: :ssl.filter_cipher_suites/2 is available
+      tls_versions
+      |> List.foldl([], fn v, acc ->
+        [:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, v), []) | acc]
+      end)
+    else
+      tls_versions
+      |> List.foldl([], fn v, acc -> [:ssl.cipher_suites(:all, v) | acc] end)
+    end
+    |> List.flatten()
+    |> Enum.reject(&blocked_cipher?/1)
   end
 end
