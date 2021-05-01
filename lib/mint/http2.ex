@@ -145,6 +145,8 @@ defmodule Mint.HTTP2 do
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @transport_opts [alpn_advertised_protocols: ["h2"]]
 
+  @default_max_concurrent_streams 100
+
   @default_window_size 65_535
   @max_window_size 2_147_483_647
 
@@ -190,7 +192,7 @@ defmodule Mint.HTTP2 do
     # Settings that the server communicates to the client.
     server_settings: %{
       enable_push: true,
-      max_concurrent_streams: 100,
+      max_concurrent_streams: @default_max_concurrent_streams,
       initial_window_size: @default_window_size,
       max_frame_size: @default_max_frame_size,
       max_header_list_size: :infinity,
@@ -200,7 +202,7 @@ defmodule Mint.HTTP2 do
 
     # Settings that the client communicates to the server.
     client_settings: %{
-      max_concurrent_streams: 100,
+      max_concurrent_streams: @default_max_concurrent_streams,
       max_frame_size: @default_max_frame_size,
       enable_push: true
     },
@@ -951,12 +953,16 @@ defmodule Mint.HTTP2 do
          preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
+
+         # LRB TODO elixir-mint/mint#311
          {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
          server_settings_ack =
            settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
+
+         # LRB TODO elixir-mint/mint#311
          conn = apply_server_settings(conn, settings(server_settings, :params)),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
@@ -1024,6 +1030,7 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # LRB TODO elixir-mint/mint#311
   defp receive_server_settings(transport, socket) do
     case recv_next_frame(transport, socket, _buffer = "") do
       {:ok, settings(), _buffer, _socket} = result ->
