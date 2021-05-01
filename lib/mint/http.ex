@@ -272,11 +272,11 @@ defmodule Mint.HTTP do
 
     * `:reuse_sessions` - defaults to `true`. May be overridden by the caller. If
       `:"tlsv1.3"` is the only TLS version specified, `:reuse_sessions` will be
-      removed from options.
+      removed from the options.
 
     * `:secure_renegotiate` - defaults to `true`. May be overridden by the
       caller. If `:"tlsv1.3"` is the only TLS version specified, `:secure_renegotiate`
-      will be removed from options.
+      will be removed from the options.
 
     * `:server_name_indication` - defaults to specified destination hostname.
       May be overridden by the caller.

@@ -16,13 +16,10 @@ defmodule Mint.HTTP1.TestServer do
       {:ok, socket} ->
         send(parent, {server_ref, socket})
 
+        # :einval started showing up with Erlang 23 and Ubuntu 18.
         case :gen_tcp.controlling_process(socket, parent) do
-          :ok ->
-            :ok
-
-          {:error, :einval} ->
-            # Note: :einval started showing up with Erlang 23 and Ubuntu 18
-            :ok
+          :ok -> :ok
+          {:error, :einval} -> :ok
         end
 
         loop(listen_socket, parent, server_ref)

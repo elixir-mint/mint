@@ -447,19 +447,18 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp remove_incompatible_ssl_opts(opts) do
-    # Note: these are the TLS versions that are compatible with :reuse_sessions and :secure_renegotiate
-    # If none of the compatible TLS versions are present in transport_opts, then :reuse_sessions and
-    # :secure_renegotiate will be removed from transport_opts
+    # These are the TLS versions that are compatible with :reuse_sessions and :secure_renegotiate
+    # If none of the compatible TLS versions are present in the transport options, then
+    # :reuse_sessions and :secure_renegotiate will be removed from the transport options.
     tls_compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
-
     tls_versions_opt = Keyword.get(opts, :versions, [])
 
-    unless Enum.any?(tls_compatible_versions, &(&1 in tls_versions_opt)) do
+    if Enum.any?(tls_compatible_versions, &(&1 in tls_versions_opt)) do
+      opts
+    else
       opts
       |> Keyword.delete(:reuse_sessions)
       |> Keyword.delete(:secure_renegotiate)
-    else
-      opts
     end
   end
 
