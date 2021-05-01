@@ -430,6 +430,7 @@ defmodule Mint.Core.Transport.SSL do
     |> Keyword.merge(@transport_opts)
     |> Keyword.drop([:timeout, :inet6])
     |> add_verify_opts(hostname)
+    |> remove_incompatible_ssl_opts()
   end
 
   defp add_verify_opts(opts, hostname) do
@@ -440,6 +441,23 @@ defmodule Mint.Core.Transport.SSL do
       |> add_cacerts()
       |> add_partial_chain_fun()
       |> customize_hostname_check(hostname)
+    else
+      opts
+    end
+  end
+
+  defp remove_incompatible_ssl_opts(opts) do
+    # Note: these are the TLS versions that are compatible with :reuse_sessions and :secure_renegotiate
+    # If none of the compatible TLS versions are present in transport_opts, then :reuse_sessions and
+    # :secure_renegotiate will be removed from transport_opts
+    tls_compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
+
+    tls_versions_opt = Keyword.get(opts, :versions, [])
+
+    unless Enum.any?(tls_compatible_versions, &(&1 in tls_versions_opt)) do
+      opts
+      |> Keyword.delete(:reuse_sessions)
+      |> Keyword.delete(:secure_renegotiate)
     else
       opts
     end

@@ -210,4 +210,25 @@ defmodule Mint.IntegrationTest do
       end
     end
   end
+
+  describe "force TLS v1.3 only" do
+    @describetag :integration
+
+    test "rabbitmq.com" do
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        ciphers = :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
+
+        opts = [
+          transport_opts: [
+            versions: [:"tlsv1.3"],
+            ciphers: ciphers
+          ]
+        ]
+
+        assert {:ok, _conn} = HTTP.connect(:https, "rabbitmq.com", 443, opts)
+      else
+        :ok
+      end
+    end
+  end
 end
