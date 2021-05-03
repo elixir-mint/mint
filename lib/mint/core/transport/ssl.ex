@@ -291,7 +291,7 @@ defmodule Mint.Core.Transport.SSL do
     active: false
   ]
 
-  @default_tls_versions [:"tlsv1.3", :"tlsv1.2"]
+  @default_versions [:"tlsv1.3", :"tlsv1.2"]
   @default_timeout 30_000
 
   Record.defrecordp(
@@ -325,7 +325,7 @@ defmodule Mint.Core.Transport.SSL do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet6? = Keyword.get(opts, :inet6, false)
 
-    opts = tls_opts(String.to_charlist(hostname), opts)
+    opts = ssl_opts(String.to_charlist(hostname), opts)
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
@@ -351,7 +351,7 @@ defmodule Mint.Core.Transport.SSL do
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
     Mint.Core.Transport.TCP.setopts(socket, active: false)
 
-    wrap_err(:ssl.connect(socket, tls_opts(hostname, opts), timeout))
+    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
   end
 
   def upgrade(_socket, :https, _hostname, _port, _opts) do
@@ -424,8 +424,8 @@ defmodule Mint.Core.Transport.SSL do
     %Mint.TransportError{reason: reason}
   end
 
-  defp tls_opts(hostname, opts) do
-    default_tls_opts(hostname)
+  defp ssl_opts(hostname, opts) do
+    default_ssl_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
     |> Keyword.drop([:timeout, :inet6])
@@ -451,10 +451,10 @@ defmodule Mint.Core.Transport.SSL do
     # These are the TLS versions that are compatible with :reuse_sessions and :secure_renegotiate
     # If none of the compatible TLS versions are present in the transport options, then
     # :reuse_sessions and :secure_renegotiate will be removed from the transport options.
-    tls_compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
-    tls_versions_opt = Keyword.get(opts, :versions, [])
+    compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
+    versions_opt = Keyword.get(opts, :versions, [])
 
-    if Enum.any?(tls_compatible_versions, &(&1 in tls_versions_opt)) do
+    if Enum.any?(compatible_versions, &(&1 in versions_opt)) do
       opts
     else
       opts
@@ -533,20 +533,23 @@ defmodule Mint.Core.Transport.SSL do
     if Keyword.has_key?(opts, :ciphers) do
       opts
     else
-      tls_versions = opts[:versions]
-      ciphers = get_ciphers_for_tls_versions(tls_versions)
-      Keyword.put(opts, :ciphers, ciphers)
+      ciphers_fun = fn ->
+        versions = opts[:versions]
+        get_ciphers_for_versions(versions)
+      end
+
+      Keyword.put_new_lazy(opts, :ciphers, ciphers_fun)
     end
   end
 
-  defp default_tls_opts(hostname) do
+  defp default_ssl_opts(hostname) do
     # TODO: Add revocation check
 
     # Note: the :ciphers option is added once the :versions option
     # has been merged with the user-specified value
     [
       server_name_indication: hostname,
-      versions: default_tls_versions(),
+      versions: ssl_versions(),
       verify: :verify_peer,
       depth: 4,
       secure_renegotiate: true,
@@ -555,9 +558,9 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @doc false
-  def default_tls_versions() do
+  def ssl_versions() do
     available_versions = :ssl.versions()[:available]
-    versions = Enum.filter(@default_tls_versions, &(&1 in available_versions))
+    versions = Enum.filter(@default_versions, &(&1 in available_versions))
 
     # Remove buggy TLS 1.3 versions
     if ssl_version() < [10, 0] do
@@ -676,16 +679,13 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @doc false
-  def get_ciphers_for_tls_versions(tls_versions) do
+  def get_ciphers_for_versions(versions) do
     sslver = ssl_version()
 
     if sslver >= [8, 2, 4] do
       # Note: :ssl.filter_cipher_suites/2 is available
-      tls_versions
-      |> List.foldl([], fn v, acc ->
-        [:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, v), []) | acc]
-      end)
-      |> List.flatten()
+      Enum.flat_map(versions, &:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, &1), []))
+      |> Enum.uniq()
     else
       :ssl.cipher_suites(:all)
     end

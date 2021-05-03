@@ -10,8 +10,8 @@ defmodule Mint.Core.Transport.SSLTest do
 
   describe "default ciphers" do
     setup do
-      tls_versions = SSL.default_tls_versions()
-      default_ciphers = SSL.get_ciphers_for_tls_versions(tls_versions)
+      versions = SSL.ssl_versions()
+      default_ciphers = SSL.get_ciphers_for_versions(versions)
       {:ok, %{default_ciphers: default_ciphers}}
     end
 

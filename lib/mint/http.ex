@@ -254,8 +254,8 @@ defmodule Mint.HTTP do
       `:cacertfile` option is more efficient than `:cacerts`.
 
     * `:ciphers` - defaults to the lists returned by
-      `:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, tls_version), [])`
-      where `tls_version` is each value in the `:versions` setting. This list is
+      `:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, version), [])`
+      where `version` is each value in the `:versions` setting. This list is
       then filtered according to the blocklist in
       [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
       May be overridden by the caller. See the "Supporting older cipher suites"
