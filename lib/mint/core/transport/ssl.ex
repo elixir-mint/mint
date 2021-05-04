@@ -7,7 +7,7 @@ defmodule Mint.Core.Transport.SSL do
   @behaviour Mint.Core.Transport
 
   # From RFC7540 appendix A
-  @blacklisted_ciphers [
+  @blocked_ciphers [
     {:null, :null, :null},
     {:rsa, :null, :md5},
     {:rsa, :null, :sha},
@@ -431,6 +431,7 @@ defmodule Mint.Core.Transport.SSL do
     |> Keyword.drop([:timeout, :inet6])
     |> add_verify_opts(hostname)
     |> remove_incompatible_ssl_opts()
+    |> add_ciphers_opt()
   end
 
   defp add_verify_opts(opts, hostname) do
@@ -450,10 +451,10 @@ defmodule Mint.Core.Transport.SSL do
     # These are the TLS versions that are compatible with :reuse_sessions and :secure_renegotiate
     # If none of the compatible TLS versions are present in the transport options, then
     # :reuse_sessions and :secure_renegotiate will be removed from the transport options.
-    tls_compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
-    tls_versions_opt = Keyword.get(opts, :versions, [])
+    compatible_versions = [:tlsv1, :"tlsv1.1", :"tlsv1.2"]
+    versions_opt = Keyword.get(opts, :versions, [])
 
-    if Enum.any?(tls_compatible_versions, &(&1 in tls_versions_opt)) do
+    if Enum.any?(compatible_versions, &(&1 in versions_opt)) do
       opts
     else
       opts
@@ -528,11 +529,25 @@ defmodule Mint.Core.Transport.SSL do
   defp domain_without_host([?. | domain]), do: domain
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
+  defp add_ciphers_opt(opts) do
+    if Keyword.has_key?(opts, :ciphers) do
+      opts
+    else
+      ciphers_fun = fn ->
+        versions = opts[:versions]
+        get_ciphers_for_versions(versions)
+      end
+
+      Keyword.put_new_lazy(opts, :ciphers, ciphers_fun)
+    end
+  end
+
   defp default_ssl_opts(hostname) do
     # TODO: Add revocation check
 
+    # Note: the :ciphers option is added once the :versions option
+    # has been merged with the user-specified value
     [
-      ciphers: default_ciphers(),
       server_name_indication: hostname,
       versions: ssl_versions(),
       verify: :verify_peer,
@@ -542,7 +557,8 @@ defmodule Mint.Core.Transport.SSL do
     ]
   end
 
-  defp ssl_versions() do
+  @doc false
+  def ssl_versions() do
     available_versions = :ssl.versions()[:available]
     versions = Enum.filter(@default_versions, &(&1 in available_versions))
 
@@ -638,27 +654,11 @@ defmodule Mint.Core.Transport.SSL do
     |> tbs_certificate(:subjectPublicKeyInfo)
   end
 
-  # NOTE: Should this be private and moved to a different module?
-  @doc false
-  def default_ciphers() do
-    if ssl_version() >= [9, 0] do
-      [protocol_version | _] = ssl_versions()
+  defp blocked_cipher?(%{cipher: cipher, key_exchange: kex, prf: prf}),
+    do: blocked_cipher?({kex, cipher, prf})
 
-      :ssl
-      |> apply(:cipher_suites, [:default, protocol_version])
-      |> Enum.reject(&blacklisted?/1)
-    else
-      :ssl
-      |> apply(:cipher_suites, [])
-      |> Enum.reject(&blacklisted?/1)
-    end
-  end
-
-  defp blacklisted?(%{cipher: cipher, key_exchange: kex, prf: prf}),
-    do: blacklisted?({kex, cipher, prf})
-
-  defp blacklisted?({kex, cipher, _mac, prf}), do: blacklisted?({kex, cipher, prf})
-  defp blacklisted?({_kex, _cipher, _prf} = suite), do: suite in @blacklisted_ciphers
+  defp blocked_cipher?({kex, cipher, _mac, prf}), do: blocked_cipher?({kex, cipher, prf})
+  defp blocked_cipher?({_kex, _cipher, _prf} = suite), do: suite in @blocked_ciphers
 
   defp raise_on_missing_castore! do
     Code.ensure_loaded?(CAStore) ||
@@ -676,5 +676,19 @@ defmodule Mint.Core.Transport.SSL do
     |> List.to_string()
     |> String.split(".")
     |> Enum.map(&String.to_integer/1)
+  end
+
+  @doc false
+  def get_ciphers_for_versions(versions) do
+    sslver = ssl_version()
+
+    if sslver >= [8, 2, 4] do
+      # Note: :ssl.filter_cipher_suites/2 is available
+      Enum.flat_map(versions, &:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, &1), []))
+      |> Enum.uniq()
+    else
+      :ssl.cipher_suites(:all)
+    end
+    |> Enum.reject(&blocked_cipher?/1)
   end
 end
