@@ -16,7 +16,8 @@ defmodule Mint.MixProject do
       # Xref
       xref: [
         exclude: [
-          :persistent_term
+          :persistent_term,
+          {:ssl, :cipher_suites, 1}
         ]
       ],
 

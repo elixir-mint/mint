@@ -7,7 +7,7 @@ defmodule Mint.Core.Transport.SSL do
   @behaviour Mint.Core.Transport
 
   # From RFC7540 appendix A
-  @blocked_ciphers [
+  @blocked_ciphers MapSet.new([
     {:null, :null, :null},
     {:rsa, :null, :md5},
     {:rsa, :null, :sha},
@@ -283,7 +283,7 @@ defmodule Mint.Core.Transport.SSL do
     {:psk, :aes_256, :ccm},
     {:psk, :aes_128, :ccm_8},
     {:psk, :aes_256, :ccm_8}
-  ]
+  ])
 
   @transport_opts [
     packet: :raw,
@@ -530,16 +530,10 @@ defmodule Mint.Core.Transport.SSL do
   defp domain_without_host([_ | more]), do: domain_without_host(more)
 
   defp add_ciphers_opt(opts) do
-    if Keyword.has_key?(opts, :ciphers) do
-      opts
-    else
-      ciphers_fun = fn ->
-        versions = opts[:versions]
-        get_ciphers_for_versions(versions)
-      end
-
-      Keyword.put_new_lazy(opts, :ciphers, ciphers_fun)
-    end
+    Keyword.put_new_lazy(opts, :ciphers, fn ->
+      versions = opts[:versions]
+      get_ciphers_for_versions(versions)
+    end)
   end
 
   defp default_ssl_opts(hostname) do
@@ -680,11 +674,10 @@ defmodule Mint.Core.Transport.SSL do
 
   @doc false
   def get_ciphers_for_versions(versions) do
-    sslver = ssl_version()
-
-    if sslver >= [8, 2, 4] do
-      # Note: :ssl.filter_cipher_suites/2 is available
-      Enum.flat_map(versions, &:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, &1), []))
+    if ssl_version() >= [8, 2, 4] do
+      # :ssl.filter_cipher_suites/2 is available in ssl v8.2.4+
+      versions
+      |> Enum.flat_map(&:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, &1), []))
       |> Enum.uniq()
     else
       :ssl.cipher_suites(:all)
