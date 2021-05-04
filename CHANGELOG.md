@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0
+
+### Bug fixes and improvements
+
+  * Improve compatability with OTP 24.
+  * Support HTTP/1 pipelining when streaming requests.
+  * Add `Mint.HTTP.get_socket/1` for returning the connection socket.
+  * Improve compatability with TLS 1.3.
+
 ## v1.2.1
 
 ### Bug fixes and improvements
