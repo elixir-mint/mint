@@ -67,6 +67,8 @@ defmodule Mint.Types do
   """
   @type error() :: Mint.TransportError.t() | Mint.HTTPError.t()
 
-  @typedoc false
+  @typedoc """
+  The connection socket.
+  """
   @type socket() :: term()
 end

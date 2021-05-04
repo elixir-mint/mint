@@ -23,10 +23,10 @@ defmodule Mint.TransportError do
         * `{:bad_alpn_protocol, protocol}` - when the ALPN protocol is not
           one of the supported protocols, which are `http/1.1` and `h2`.
 
-        * the `:inet.posix/0` type - if there's any other error with the socket,
+        * `t::inet.posix/0` - if there's any other error with the socket,
           such as `:econnrefused` or `:nxdomain`.
 
-        * the `:ssl.error_alert/0` type - if there's an SSL error.
+        * `t::ssl.error_alert/0` - if there's an SSL error.
 
   ## Message representation
 

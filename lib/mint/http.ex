@@ -636,9 +636,9 @@ defmodule Mint.HTTP do
 
   Each possible response returned by this function is a tuple with two or more elements.
   The first element is always an atom that identifies the kind of response. The second
-  element is a unique reference `t:request_ref/0` that identifies the request that the response
-  belongs to. This is the term returned by `request/5`. After these two elements, there can be
-  response-specific terms as well, documented below.
+  element is a unique reference `t:Mint.Types.request_ref/0` that identifies the request
+  that the response belongs to. This is the term returned by `request/5`. After these
+  two elements, there can be response-specific terms as well, documented below.
 
   These are the possible responses that can be returned.
 
