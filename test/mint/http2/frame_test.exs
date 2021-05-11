@@ -155,14 +155,16 @@ defmodule Mint.HTTP2.FrameTest do
                 max_concurrent_streams <- non_negative_integer(),
                 initial_window_size <- positive_integer(),
                 max_frame_size <- positive_integer(),
-                max_header_list_size <- positive_integer() do
+                max_header_list_size <- positive_integer(),
+                enable_connect_protocol <- boolean() do
         params = [
           header_table_size: header_table_size,
           enable_push: enable_push,
           max_concurrent_streams: max_concurrent_streams,
           initial_window_size: initial_window_size,
           max_frame_size: max_frame_size,
-          max_header_list_size: max_header_list_size
+          max_header_list_size: max_header_list_size,
+          enable_connect_protocol: enable_connect_protocol
         ]
 
         assert_round_trip settings(stream_id: 0, flags: 0x01, params: params)

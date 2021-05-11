@@ -197,7 +197,8 @@ defmodule Mint.HTTP2 do
       max_concurrent_streams: 100,
       initial_window_size: @default_window_size,
       max_frame_size: @default_max_frame_size,
-      max_header_list_size: :infinity
+      max_header_list_size: :infinity,
+      enable_connect_protocol: false
     },
 
     # Settings that the client communicates to the server.
@@ -249,6 +250,10 @@ defmodule Mint.HTTP2 do
 
     * `:max_header_list_size` - (integer) corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
 
+    * `:enable_connect_protocol` - (boolean) corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
+      Sets whether the client may invoke the extended connect protocol which is used to
+      bootstrap WebSocket connections.
+
   """
   @type setting() ::
           {:enable_push, boolean()}
@@ -256,6 +261,7 @@ defmodule Mint.HTTP2 do
           | {:initial_window_size, 1..2_147_483_647}
           | {:max_frame_size, 16_384..16_777_215}
           | {:max_header_list_size, :infinity | pos_integer()}
+          | {:enable_connect_protocol, boolean()}
 
   @typedoc """
   HTTP/2 settings.
@@ -1317,6 +1323,12 @@ defmodule Mint.HTTP2 do
           raise ArgumentError, ":max_header_list_size must be an integer, got: #{inspect(value)}"
         end
 
+      {:enable_connect_protocol, value} ->
+        unless is_boolean(value) do
+          raise ArgumentError,
+                ":enable_connect_protocol must be a boolean, got: #{inspect(value)}"
+        end
+
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
     end)
@@ -1717,6 +1729,9 @@ defmodule Mint.HTTP2 do
 
       {:max_header_list_size, max_header_list_size}, conn ->
         put_in(conn.server_settings.max_header_list_size, max_header_list_size)
+
+      {:enable_connect_protocol, enable_connect_protocol?}, conn ->
+        put_in(conn.server_settings.enable_connect_protocol, enable_connect_protocol?)
     end)
   end
 
