@@ -478,15 +478,9 @@ defmodule Mint.HTTP2 do
     headers =
       headers
       |> downcase_header_names()
+      |> add_pseudo_headers(conn, method, path)
       |> add_default_headers(body)
-
-    headers = [
-      {":method", method},
-      {":path", path},
-      {":scheme", conn.scheme},
-      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
-      | headers
-    ]
+      |> sort_pseudo_headers_to_front()
 
     {conn, stream_id, ref} = open_stream(conn)
 
@@ -1321,6 +1315,30 @@ defmodule Mint.HTTP2 do
   defp add_default_content_length_header(headers, body) do
     Util.put_new_header_lazy(headers, "content-length", fn ->
       body |> IO.iodata_length() |> Integer.to_string()
+    end)
+  end
+
+  defp add_pseudo_headers(headers, conn, "CONNECT", _path) do
+    [
+      {":method", "CONNECT"},
+      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+      | headers
+    ]
+  end
+
+  defp add_pseudo_headers(headers, conn, method, path) do
+    [
+      {":method", method},
+      {":path", path},
+      {":scheme", conn.scheme},
+      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+      | headers
+    ]
+  end
+
+  defp sort_pseudo_headers_to_front(headers) do
+    Enum.sort_by(headers, fn {key, _value} ->
+      not String.starts_with?(key, ":")
     end)
   end
 
