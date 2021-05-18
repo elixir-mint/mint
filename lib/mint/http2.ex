@@ -1333,6 +1333,7 @@ defmodule Mint.HTTP2 do
         {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
         | headers
       ]
+    end
   end
 
   defp sort_pseudo_headers_to_front(headers) do
