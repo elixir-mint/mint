@@ -1251,6 +1251,7 @@ defmodule Mint.HTTP2Test do
     test "get_server_setting/2 can be used to read server settings", %{conn: conn} do
       assert HTTP2.get_server_setting(conn, :max_concurrent_streams) == 100
       assert HTTP2.get_server_setting(conn, :enable_push) == true
+      assert HTTP2.get_server_setting(conn, :enable_connect_protocol) == false
     end
 
     test "get_server_setting/2 fails with unknown settings", %{conn: conn} do

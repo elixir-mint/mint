@@ -286,6 +286,7 @@ defmodule Mint.HTTP2.Frame do
         0x04 -> [{:initial_window_size, value} | acc]
         0x05 -> [{:max_frame_size, value} | acc]
         0x06 -> [{:max_header_list_size, value} | acc]
+        0x08 -> [{:enable_connect_protocol, value == 1} | acc]
         _other -> acc
       end
 
@@ -374,6 +375,7 @@ defmodule Mint.HTTP2.Frame do
         {:initial_window_size, value} -> <<0x04::16, value::32>>
         {:max_frame_size, value} -> <<0x05::16, value::32>>
         {:max_header_list_size, value} -> <<0x06::16, value::32>>
+        {:enable_connect_protocol, value} -> <<0x08::16, if(value, do: 1, else: 0)::32>>
       end)
 
     encode_raw(@types[:settings], flags, stream_id, payload)
