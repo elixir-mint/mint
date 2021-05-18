@@ -198,6 +198,7 @@ defmodule Mint.HTTP2 do
       initial_window_size: @default_window_size,
       max_frame_size: @default_max_frame_size,
       max_header_list_size: :infinity,
+      # Only supported by the server: https://www.rfc-editor.org/rfc/rfc8441.html#section-3
       enable_connect_protocol: false
     },
 
