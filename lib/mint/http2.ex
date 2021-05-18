@@ -1318,22 +1318,21 @@ defmodule Mint.HTTP2 do
     end)
   end
 
-  defp add_pseudo_headers(headers, conn, "CONNECT", _path) do
-    [
-      {":method", "CONNECT"},
-      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
-      | headers
-    ]
-  end
-
   defp add_pseudo_headers(headers, conn, method, path) do
-    [
-      {":method", method},
-      {":path", path},
-      {":scheme", conn.scheme},
-      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
-      | headers
-    ]
+    if String.upcase(method) == "CONNECT" do
+      [
+        {":method", method},
+        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        | headers
+      ]
+    else
+      [
+        {":method", method},
+        {":path", path},
+        {":scheme", conn.scheme},
+        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        | headers
+      ]
   end
 
   defp sort_pseudo_headers_to_front(headers) do
