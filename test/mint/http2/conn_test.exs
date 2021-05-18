@@ -636,7 +636,7 @@ defmodule Mint.HTTP2Test do
                {":path", "/ws"},
                {":protocol", "websocket"},
                {"user-agent", _}
-             ] = hbf |> server_decode_headers()
+             ] = server_decode_headers(hbf)
 
       assert HTTP2.open?(conn)
     end
