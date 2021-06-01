@@ -599,6 +599,47 @@ defmodule Mint.HTTP2Test do
 
       assert cookie == "a=b; c=d; e=f; g=h"
     end
+
+    test "a CONNECT request omits :scheme and :path pseudo-headers", %{conn: conn} do
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", [], nil)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      refute hbf
+             |> server_decode_headers()
+             |> List.keymember?(":scheme", 0)
+
+      refute hbf
+             |> server_decode_headers()
+             |> List.keymember?(":path", 0)
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "explicitly passed pseudo-headers are sorted to the front of the headers list", %{
+      conn: conn
+    } do
+      headers = [
+        {":scheme", conn.scheme},
+        {":path", "/ws"},
+        {":protocol", "websocket"}
+      ]
+
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", headers, :stream)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      assert [
+               {":method", "CONNECT"},
+               {":authority", _},
+               {":scheme", _},
+               {":path", "/ws"},
+               {":protocol", "websocket"},
+               {"user-agent", _}
+             ] = server_decode_headers(hbf)
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "trailing headers" do
