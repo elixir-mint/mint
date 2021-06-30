@@ -60,7 +60,7 @@ defmodule Mint.Types do
   @typedoc """
   The scheme to use when connecting to an HTTP server.
   """
-  @type scheme() :: :http | :https
+  @type scheme() :: :http | :https | module()
 
   @typedoc """
   An error reason.
