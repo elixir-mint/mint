@@ -377,6 +377,17 @@ defmodule Mint.HTTP do
   def upgrade(old_transport, transport_state, scheme, hostname, port, opts),
     do: Mint.Negotiate.upgrade(old_transport, transport_state, scheme, hostname, port, opts)
 
+  @doc """
+  Returns an atom describing the current connection type
+
+  ## Examples
+
+      Mint.HTTP1 = Mint.HTTP.module(conn)
+  """
+  @spec module(t()) :: atom()
+  def module(%Mint.HTTP1{}), do: Mint.HTTP1
+  def module(%Mint.HTTP2{}), do: Mint.HTTP2
+
   @doc false
   @impl true
   @spec initiate(
