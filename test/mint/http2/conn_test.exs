@@ -301,11 +301,13 @@ defmodule Mint.HTTP2Test do
 
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :closed_for_writing
+      assert HTTP2.open_request_count(conn) == 0
 
       assert {:ok, conn} = HTTP2.close(conn)
 
       assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :closed
+      assert HTTP2.open_request_count(conn) == 0
     end
   end
 
@@ -313,10 +315,12 @@ defmodule Mint.HTTP2Test do
     @tag server_settings: [max_concurrent_streams: 1]
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
       {conn, _ref} = open_request(conn)
+      assert HTTP2.open_request_count(conn) == 1
 
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
       assert_http2_error error, :too_many_concurrent_requests
 
+      assert HTTP2.open_request_count(conn) == 1
       assert HTTP2.open?(conn)
     end
   end
@@ -488,6 +492,7 @@ defmodule Mint.HTTP2Test do
 
       assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
 
+      assert HTTP2.open_request_count(conn) == 0
       assert HTTP2.open?(conn)
     end
 
@@ -1132,6 +1137,7 @@ defmodule Mint.HTTP2Test do
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], "XX")
       assert_http2_error error, {:exceeds_window_size, :request, 1}
       assert HTTP2.open?(conn)
+      assert HTTP2.open_request_count(conn) == 0
       refute_receive {:ssl, _, _}
     end
 

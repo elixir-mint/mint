@@ -491,24 +491,16 @@ defmodule Mint.HTTP2 do
 
     {conn, stream_id, ref} = open_stream(conn)
 
-    conn =
-      case body do
-        :stream ->
-          {conn, payload} = encode_headers(conn, stream_id, headers, [:end_headers])
-          send!(conn, payload)
-
-        nil ->
-          {conn, payload} = encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
-          send!(conn, payload)
-
-        _iodata ->
-          {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
-          {conn, data_payload} = encode_data(conn, stream_id, body, [:end_stream])
-          conn = send!(conn, [headers_payload, data_payload])
-          conn
-      end
-
-    {:ok, conn, ref}
+    try do
+      {conn, payload} = encode_payload(conn, stream_id, headers, body)
+      conn = send!(conn, payload)
+      {:ok, conn, ref}
+    catch
+      :throw, {:mint, conn, reason} ->
+        stream = Map.fetch!(conn.streams, stream_id)
+        conn = delete_stream(conn, stream)
+        {:error, conn, reason}
+    end
   catch
     :throw, {:mint, conn, reason} -> {:error, conn, reason}
   end
@@ -1098,6 +1090,21 @@ defmodule Mint.HTTP2 do
     conn = put_in(conn.ref_to_stream_id[stream.ref], stream.id)
     conn = update_in(conn.next_stream_id, &(&1 + 2))
     {conn, stream.id, stream.ref}
+  end
+
+  defp encode_payload(conn, stream_id, headers, body) do
+    case body do
+      :stream ->
+        encode_headers(conn, stream_id, headers, [:end_headers])
+
+      nil ->
+        encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+
+      _iodata ->
+        {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
+        {conn, data_payload} = encode_data(conn, stream_id, body, [:end_stream])
+        {conn, [headers_payload, data_payload]}
+    end
   end
 
   defp encode_headers(conn, stream_id, headers, enabled_flags) do
