@@ -5,35 +5,34 @@ defmodule Mint.IntegrationTest do
 
   alias Mint.{TransportError, HTTP}
 
-  describe "httpbin.org" do
+  describe "httpstat.us" do
     @describetag :integration
+    @describetag skip: "Seems like httpstat.us is down"
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(
                  :https,
-                 "httpbin.org",
+                 "httpstat.us",
                  443
                )
 
       assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/200", [], nil)
+
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
                {:status, ^request, 200},
                {:headers, ^request, _},
-               {:data, ^request, <<_>>},
                {:done, ^request}
              ] = responses
     end
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     @tag :capture_log
     test "SSL - fail to select HTTP2" do
       assert {:error, %TransportError{reason: :protocol_not_negotiated}} =
-               HTTP.connect(:https, "httpbin.org", 443,
+               HTTP.connect(:https, "httpstat.us", 443,
                  protocols: [:http2],
                  transport_opts: [reuse_sessions: false]
                )
@@ -140,12 +139,10 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
     test "200 response - https://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})
 
-      assert conn.__struct__ == Mint.HTTP1
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -153,7 +150,7 @@ defmodule Mint.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "httpbin"
+      assert merge_body(responses, request) =~ "httpbin.org"
     end
 
     test "200 response with explicit http2 - https://http2.golang.org" do
@@ -190,6 +187,48 @@ defmodule Mint.IntegrationTest do
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
       assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+    end
+  end
+
+  describe "information from connection's socket" do
+    @describetag :integration
+
+    test "TLSv1.2 - badssl.com" do
+      assert {:ok, conn} =
+               HTTP.connect(
+                 :https,
+                 "tls-v1-2.badssl.com",
+                 1012
+               )
+
+      assert socket = Mint.HTTP.get_socket(conn)
+
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        assert {:ok, [{:keylog, _keylog_items}]} = :ssl.connection_information(socket, [:keylog])
+      else
+        assert {:ok, [{:protocol, _protocol}]} = :ssl.connection_information(socket, [:protocol])
+      end
+    end
+  end
+
+  describe "force TLS v1.3 only" do
+    @describetag :integration
+
+    test "rabbitmq.com" do
+      if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        ciphers = :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
+
+        opts = [
+          transport_opts: [
+            versions: [:"tlsv1.3"],
+            ciphers: ciphers
+          ]
+        ]
+
+        assert {:ok, _conn} = HTTP.connect(:https, "rabbitmq.com", 443, opts)
+      else
+        :ok
+      end
     end
   end
 end

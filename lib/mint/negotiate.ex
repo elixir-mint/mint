@@ -12,18 +12,18 @@ defmodule Mint.Negotiate do
   @default_protocols [:http1, :http2]
   @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
 
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
     {protocols, opts} = Keyword.pop(opts, :protocols, @default_protocols)
 
     case Enum.sort(protocols) do
       [:http1] ->
-        HTTP1.connect(scheme, hostname, port, opts)
+        HTTP1.connect(scheme, address, port, opts)
 
       [:http2] ->
-        HTTP2.connect(scheme, hostname, port, opts)
+        HTTP2.connect(scheme, address, port, opts)
 
       [:http1, :http2] ->
-        transport_connect(scheme, hostname, port, opts)
+        transport_connect(scheme, address, port, opts)
     end
   end
 
@@ -45,24 +45,26 @@ defmodule Mint.Negotiate do
   def initiate(transport, transport_state, hostname, port, opts),
     do: alpn_negotiate(transport, transport_state, hostname, port, opts)
 
-  defp transport_connect(:http, hostname, port, opts) do
+  defp transport_connect(:http, address, port, opts) do
     # HTTP1 upgrade is not supported
-    HTTP1.connect(:http, hostname, port, opts)
+    HTTP1.connect(:http, address, port, opts)
   end
 
-  defp transport_connect(:https, hostname, port, opts) do
-    connect_negotiate(:https, hostname, port, opts)
+  defp transport_connect(:https, address, port, opts) do
+    connect_negotiate(:https, address, port, opts)
   end
 
-  defp connect_negotiate(scheme, hostname, port, opts) do
+  defp connect_negotiate(scheme, address, port, opts) do
     transport = scheme_to_transport(scheme)
+    hostname = Mint.Core.Util.hostname(opts, address)
 
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
+      |> Keyword.put(:hostname, hostname)
 
-    with {:ok, transport_state} <- transport.connect(hostname, port, transport_opts) do
+    with {:ok, transport_state} <- transport.connect(address, port, transport_opts) do
       alpn_negotiate(scheme, transport_state, hostname, port, opts)
     end
   end
@@ -123,6 +125,9 @@ defmodule Mint.Negotiate do
 
       {:ok, protocol} ->
         {:error, %TransportError{reason: {:bad_alpn_protocol, protocol}}}
+
+      {:error, %TransportError{} = error} ->
+        {:error, error}
     end
   end
 end

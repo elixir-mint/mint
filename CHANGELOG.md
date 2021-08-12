@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.3.0
+
+### Bug fixes and improvements
+
+  * Improve compatability with OTP 24.
+  * Support HTTP/1 pipelining when streaming requests.
+  * Add `Mint.HTTP.get_socket/1` for returning the connection socket.
+  * Improve compatability with TLS 1.3.
+
+## v1.2.1
+
+### Bug fixes and improvements
+
+  * Fix a bug where we were not ignoring the return value of `:ssl.close/1` and `:gen_tcp.close/1`.
+  * Fix a bug where we were not properly handling transport errors when doing ALPN protocol negotiation.
+  * Fix a bug where we were not handling connection closed errors in a few places.
+
+## v1.2.0
+
+### Bug fixes and improvements
+
+  * Fix a few bugs with passing the Mint connection around.
+  * Add IPv6 support with `inet6: true` in the transport options.
+  * Cache the `:cacertfile` option for faster certificate lookup and decoding.
+  * Add TLS 1.3 to default versions.
+
+## v1.1.0
+
+### Bug fixes and improvements
+
+  * Concatenate values in one `cookie` header if the `cookie` header is provided more than once in HTTP/2.
+  * Fix headers merging in `Mint.UnsafeProxy`.
+  * Remove some `Logger.debug/1` calls from the codebase.
+  * Assume the HTTP/2 protocol on TCP connections if using `Mint.HTTP2`.
+  * Fix a bug where we would send `WINDOW_UPDATE` frames with an increment of `0` in HTTP/2.
+  * Make the empty body chunk a no-op for `Mint.HTTP.stream_request_body/3` (only for HTTP/1).
+  * Add the `Mint.HTTP.is_connection_message/2` guard.
+  * Fix wildcard certifcate verification in OTP 23.
+
 ## v1.0.0
 
 ### Breaking changes

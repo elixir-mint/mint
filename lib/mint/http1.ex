@@ -83,6 +83,7 @@ defmodule Mint.HTTP1 do
     :host,
     :port,
     :request,
+    :streaming_request,
     :socket,
     :transport,
     :mode,
@@ -98,15 +99,19 @@ defmodule Mint.HTTP1 do
 
   This function doesn't support proxying.
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
     # TODO: Also ALPN negotiate HTTP1?
 
+    hostname = Mint.Core.Util.hostname(opts, address)
     transport = scheme_to_transport(scheme)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    with {:ok, socket} <- transport.connect(hostname, port, transport_opts) do
+    transport_opts =
+      Keyword.get(opts, :transport_opts, [])
+      |> Keyword.put(:hostname, hostname)
+
+    with {:ok, socket} <- transport.connect(address, port, transport_opts) do
       initiate(scheme, socket, hostname, port, opts)
     end
   end
@@ -114,7 +119,7 @@ defmodule Mint.HTTP1 do
   @doc false
   @spec upgrade(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           Types.scheme(),
           String.t(),
           :inet.port_number(),
@@ -124,7 +129,10 @@ defmodule Mint.HTTP1 do
     # TODO: Also ALPN negotiate HTTP1?
 
     transport = scheme_to_transport(new_scheme)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
+
+    transport_opts =
+      Keyword.get(opts, :transport_opts, [])
+      |> Keyword.put(:hostname, hostname)
 
     with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
       initiate(new_scheme, socket, hostname, port, opts)
@@ -135,7 +143,7 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec initiate(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -218,13 +226,7 @@ defmodule Mint.HTTP1 do
     {:error, conn, wrap_error(:closed)}
   end
 
-  def request(
-        %__MODULE__{request: %{state: {:stream_request, _}}} = conn,
-        _method,
-        _path,
-        _headers,
-        _body
-      ) do
+  def request(%__MODULE__{streaming_request: %{}} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:request_body_is_streaming)}
   end
 
@@ -241,19 +243,20 @@ defmodule Mint.HTTP1 do
       request_ref = make_ref()
       request = new_request(request_ref, method, body, encoding)
 
-      if conn.request == nil do
-        conn = %__MODULE__{conn | request: request}
-        {:ok, conn, request_ref}
-      else
-        requests = :queue.in(request, conn.requests)
-        conn = %__MODULE__{conn | requests: requests}
-        {:ok, conn, request_ref}
+      case request.state do
+        {:stream_request, _} ->
+          conn = %__MODULE__{conn | streaming_request: request}
+          {:ok, conn, request_ref}
+
+        _ ->
+          conn = enqueue_request(conn, request)
+          {:ok, conn, request_ref}
       end
     else
       {:error, %TransportError{reason: :closed} = error} ->
         {:error, %{conn | state: :closed}, error}
 
-      {:error, %HTTPError{} = error} ->
+      {:error, %error_module{} = error} when error_module in [HTTPError, TransportError] ->
         {:error, conn, error}
 
       {:error, reason} ->
@@ -264,7 +267,7 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.stream_request_body/3`.
 
-  In HTTP/1, sending an empty chuunk is a no-op.
+  In HTTP/1, sending an empty chunk is a no-op.
 
   ## Transfer encoding and content length
 
@@ -293,15 +296,17 @@ defmodule Mint.HTTP1 do
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         :eof
       ) do
-    {:ok, put_in(conn.request.state, :status)}
+    request = %{conn.streaming_request | state: :status}
+    conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+    {:ok, conn}
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         {:eof, _trailing_headers}
       ) do
@@ -309,7 +314,7 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
         body
       ) do
@@ -326,16 +331,25 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
         ref,
         chunk
       ) do
     with {:ok, chunk} <- validate_chunk(chunk),
          :ok <- conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       case chunk do
-        :eof -> {:ok, put_in(conn.request.state, :status)}
-        {:eof, _trailing_headers} -> {:ok, put_in(conn.request.state, :status)}
-        _other -> {:ok, conn}
+        :eof ->
+          request = %{conn.streaming_request | state: :status}
+          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          {:ok, conn}
+
+        {:eof, _trailing_headers} ->
+          request = %{conn.streaming_request | state: :status}
+          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          {:ok, conn}
+
+        _other ->
+          {:ok, conn}
       end
     else
       :empty_chunk ->
@@ -383,14 +397,17 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    result = handle_data(conn, data)
+    case handle_data(conn, data) do
+      {:ok, %{mode: mode, state: state} = conn, responses}
+      when mode == :active and state != :closed ->
+        case transport.setopts(socket, active: :once) do
+          :ok -> {:ok, conn, responses}
+          {:error, reason} -> {:error, put_in(conn.state, :closed), reason, responses}
+        end
 
-    if conn.mode == :active do
-      # TODO: handle errors here.
-      _ = transport.setopts(socket, active: :once)
+      other ->
+        other
     end
-
-    result
   end
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket})
@@ -449,16 +466,12 @@ defmodule Mint.HTTP1 do
   @spec recv(t(), non_neg_integer(), timeout()) ::
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   def recv(conn, byte_count, timeout)
 
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} -> handle_data(conn, data)
+      {:error, %Mint.TransportError{reason: :closed}} -> handle_close(conn)
       {:error, error} -> handle_error(conn, error)
     end
   end
@@ -472,11 +485,6 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.set_mode/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
   def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
@@ -494,11 +502,6 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.controlling_process/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
   def controlling_process(%__MODULE__{} = conn, new_pid) when is_pid(new_pid) do
@@ -515,10 +518,11 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec open_request_count(t()) :: non_neg_integer()
   def open_request_count(%__MODULE__{} = conn) do
-    if is_nil(conn.request) do
-      0
-    else
-      1 + :queue.len(conn.requests)
+    case conn do
+      %{request: nil, streaming_request: nil} -> 0
+      %{request: nil} -> 1
+      %{streaming_request: nil} -> 1 + :queue.len(conn.requests)
+      _ -> 2 + :queue.len(conn.requests)
     end
   end
 
@@ -549,8 +553,9 @@ defmodule Mint.HTTP1 do
     %{conn | private: Map.delete(private, key)}
   end
 
-  # Made public to be used with proxying.
-  @doc false
+  @doc """
+  See `Mint.HTTP.get_socket/1`.
+  """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%__MODULE__{socket: socket} = _conn) do
@@ -825,12 +830,21 @@ defmodule Mint.HTTP1 do
     end
   end
 
+  defp enqueue_request(%{request: nil} = conn, request) do
+    %__MODULE__{conn | request: request}
+  end
+
+  defp enqueue_request(conn, request) do
+    requests = :queue.in(request, conn.requests)
+    %__MODULE__{conn | requests: requests}
+  end
+
   defp internal_close(conn) do
     if conn.buffer != "" do
       _ = Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
-    :ok = conn.transport.close(conn.socket)
+    _ = conn.transport.close(conn.socket)
     %{conn | state: :closed}
   end
 
@@ -980,7 +994,8 @@ defmodule Mint.HTTP1 do
   end
 
   def format_error({:invalid_header_value, name, value}) do
-    "invalid value for header #{inspect(name)}: #{inspect(value)}"
+    "invalid value for header (only printable ASCII characters are allowed) " <>
+      "#{inspect(name)}: #{inspect(value)}"
   end
 
   def format_error(:invalid_chunk_size) do

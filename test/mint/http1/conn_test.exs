@@ -3,6 +3,8 @@ defmodule Mint.HTTP1Test do
 
   alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
 
+  require Mint.HTTP
+
   setup do
     {:ok, port, server_ref} = TestServer.start()
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
@@ -14,6 +16,26 @@ defmodule Mint.HTTP1Test do
   test "unknown message", %{conn: conn} do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     assert HTTP1.stream(conn, :unknown_message) == :unknown
+  end
+
+  # TODO: Remove check once we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
+    test "Mint.HTTP.is_connection_message/2 guard works with HTTP1 connections", %{conn: conn} do
+      import Mint.HTTP, only: [is_connection_message: 2]
+
+      assert is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
+      assert is_connection_message(conn, {:tcp_closed, conn.socket}) == true
+      assert is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+
+      assert is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+      assert is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
+
+      assert is_connection_message(_conn = %HTTP1{}, {:tcp, conn.socket, "foo"}) == false
+
+      # If the first argument is not a connection struct, we return false.
+      assert is_connection_message(%{socket: conn.socket}, {:tcp, conn.socket, "foo"}) == false
+      assert is_connection_message(%URI{}, {:tcp, conn.socket, "foo"}) == false
+    end
   end
 
   test "status", %{conn: conn} do
@@ -344,6 +366,33 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "close/1 an already closed connection with default inet_backend does not cause error", %{
+    conn: conn
+  } do
+    assert HTTP1.open?(conn)
+    # ignore the returned conn, otherwise transport.close/1 will not be called
+    assert {:ok, _conn} = HTTP1.close(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
+
+  if List.to_integer(:erlang.system_info(:otp_release)) < 23 do
+    @tag :skip
+  end
+
+  test "close/1 an already closed connection with socket inet_backend does not cause error", %{
+    port: port
+  } do
+    assert {:ok, conn} =
+             HTTP1.connect(:http, "localhost", port, transport_opts: [inet_backend: :socket])
+
+    assert HTTP1.open?(conn)
+    # ignore the returned conn, otherwise transport.close/1 will not be called
+    assert {:ok, _conn} = HTTP1.close(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
+
   test "request/5 returns an error if the connection is closed", %{conn: conn} do
     assert {:ok, conn} = HTTP1.close(conn)
     assert {:error, _conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -402,6 +451,24 @@ defmodule Mint.HTTP1Test do
     assert responses == [{:status, ref, 200}]
   end
 
+  test "receive response until connection is closed using recv/3",
+       %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert_receive {^server_ref, server_socket}
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.0 200 OK\r\n\r\nfoo")
+
+    assert {:ok, conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:status, ref, 200}, {:headers, ref, []}, {:data, ref, "foo"}]
+
+    :ok = :gen_tcp.close(server_socket)
+
+    assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert responses == [{:done, ref}]
+  end
+
   test "controlling_process/2", %{conn: conn, server_socket: server_socket} do
     parent = self()
     ref = make_ref()
@@ -409,7 +476,9 @@ defmodule Mint.HTTP1Test do
     new_pid =
       spawn_link(fn ->
         receive do
-          message -> send(parent, {ref, message})
+          message ->
+            send(parent, {ref, message})
+            Process.sleep(:infinity)
         end
       end)
 
@@ -421,6 +490,29 @@ defmodule Mint.HTTP1Test do
 
     assert_receive {^ref, message}, 500
     assert {:ok, _conn, responses} = HTTP1.stream(conn, message)
+    assert responses == [{:status, request_ref, 200}]
+  end
+
+  test "error after stream", %{conn: conn, server_socket: server_socket} do
+    parent = self()
+    ref = make_ref()
+
+    {controlling_pid, controlling_ref} =
+      spawn_monitor(fn ->
+        receive do
+          message -> send(parent, {ref, message})
+        end
+      end)
+
+    {:ok, conn, request_ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn} = HTTP1.controlling_process(conn, controlling_pid)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+
+    assert_receive {^ref, message}, 500
+    assert_receive {:DOWN, ^controlling_ref, _, _, _}
+    assert {:error, _conn, %{reason: :einval}, responses} = HTTP1.stream(conn, message)
     assert responses == [{:status, request_ref, 200}]
   end
 
@@ -711,6 +803,40 @@ defmodule Mint.HTTP1Test do
                HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
+    end
+
+    test "pipeline", %{conn: conn} do
+      {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref1, "hello")
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref1, :eof)
+      {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref2, :eof)
+      {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref3, :eof)
+      {:ok, conn, ref4} = HTTP1.request(conn, "GET", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref4, "goodbye")
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref4, :eof)
+      response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:data, ^ref1, "XXXXX"}, {:done, ^ref1}] =
+               responses
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:data, ^ref2, "XXXXX"}, {:done, ^ref2}] =
+               responses
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref3, _}, {:headers, ^ref3, _}, {:data, ^ref3, "XXXXX"}, {:done, ^ref3}] =
+               responses
+
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:data, ^ref4, "XXXXX"}, {:done, ^ref4}] =
+               responses
     end
   end
 

@@ -28,7 +28,6 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
   test "200 response - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
@@ -36,7 +35,6 @@ defmodule Mint.TunnelProxyTest do
                {:https, "httpbin.org", 443, []}
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -62,7 +60,6 @@ defmodule Mint.TunnelProxyTest do
              )
   end
 
-  @tag skip: "Seems like httpbin.org added support for HTTP/2 (issue #240)"
   test "200 response - proxy with valid authentication" do
     auth64 = Base.encode64("test:password")
 
@@ -72,7 +69,6 @@ defmodule Mint.TunnelProxyTest do
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
 
-    assert conn.__struct__ == Mint.HTTP1
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 

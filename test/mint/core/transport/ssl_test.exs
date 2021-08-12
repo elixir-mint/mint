@@ -3,21 +3,32 @@ defmodule Mint.Core.Transport.SSLTest do
 
   alias Mint.Core.Transport.SSL
 
+  setup_all do
+    {:module, :ssl} = Code.ensure_loaded(:ssl)
+    :ok
+  end
+
   describe "default ciphers" do
-    test "no RSA key exchange" do
+    setup do
+      versions = SSL.ssl_versions()
+      default_ciphers = SSL.get_ciphers_for_versions(versions)
+      {:ok, %{default_ciphers: default_ciphers}}
+    end
+
+    test "no RSA key exchange", %{default_ciphers: default_ciphers} do
       # E.g. TLS_RSA_WITH_AES_256_GCM_SHA384 (old and new OTP variants)
-      refute {:rsa, :aes_256_gcm, :aead, :sha384} in SSL.default_ciphers()
-      refute {:rsa, :aes_256_gcm, :null, :sha384} in SSL.default_ciphers()
+      refute {:rsa, :aes_256_gcm, :aead, :sha384} in default_ciphers
+      refute {:rsa, :aes_256_gcm, :null, :sha384} in default_ciphers
     end
 
-    test "no AES CBC" do
+    test "no AES CBC", %{default_ciphers: default_ciphers} do
       # E.g. TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
-      refute {:ecdhe_rsa, :aes_256_cbc, :sha} in SSL.default_ciphers()
+      refute {:ecdhe_rsa, :aes_256_cbc, :sha} in default_ciphers
     end
 
-    test "no 3DES" do
+    test "no 3DES", %{default_ciphers: default_ciphers} do
       # E.g. TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA
-      refute {:ecdhe_rsa, :"3des_ede_cbc", :sha} in SSL.default_ciphers()
+      refute {:ecdhe_rsa, :"3des_ede_cbc", :sha} in default_ciphers
     end
   end
 
@@ -160,7 +171,12 @@ defmodule Mint.Core.Transport.SSLTest do
         send(parent, {ref, port})
 
         {:ok, socket} = :ssl.transport_accept(listen_socket)
-        :ok = :ssl.ssl_accept(socket)
+
+        if function_exported?(:ssl, :handshake, 1) do
+          {:ok, _} = apply(:ssl, :handshake, [socket])
+        else
+          :ok = apply(:ssl, :ssl_accept, [socket])
+        end
 
         send(parent, {ref, socket})
 
@@ -215,13 +231,13 @@ defmodule Mint.Core.Transport.SSLTest do
 
       other_process =
         spawn_link(fn ->
-          assert {:ok, [active: false]} = SSL.getopts(socket, [:active])
-          :ok = SSL.setopts(socket, active: :once)
           assert_receive message, 500
           send(parent, {ref, message})
         end)
 
       assert :ok = SSL.controlling_process(socket, other_process)
+      assert {:ok, [active: false]} = SSL.getopts(socket, [:active])
+      :ok = SSL.setopts(socket, active: :once)
 
       assert_receive {^ref, {:ssl, ^socket, "some data"}}, 500
 

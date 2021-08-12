@@ -51,15 +51,15 @@ defp decompress_data(data, algorithms) do
 end
 
 defp decompress_with_algorithm(gzip, data) when gzip in ["gzip", "x-gzip"],
-  do: :zlip.gunzip(data)
+  do: :zlib.gunzip(data)
 
 defp decompress_with_algorithm("deflate", data),
   do: :zlib.unzip(data)
 
-defp decompress_data("identity", data),
+defp decompress_with_algorithm("identity", data),
   do: data
 
-defp decompress_data(algorithm, data),
+defp decompress_with_algorithm(algorithm, data),
   do: raise "unsupported decompression algorithm: #{inspect(algorithm)}"
 ```
 

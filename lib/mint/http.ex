@@ -10,7 +10,7 @@ defmodule Mint.HTTP do
   To establish a connection with a given server, use `connect/4`. This will
   return an opaque data structure that represents the connection
   to the server. To send a request, you can use `request/5`. Sending a request
-  does not take care of the response to that request, instead we use `Mint.stream/2`
+  does not take care of the response to that request, instead we use `Mint.HTTP.stream/2`
   to process the response, which we will look at in just a bit. The connection is a
   wrapper around a TCP (`:gen_tcp` module) or SSL (`:ssl` module) socket that is
   set in **active mode** (with `active: :once`). This means that TCP/SSL messages
@@ -108,6 +108,35 @@ defmodule Mint.HTTP do
   @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
 
   @doc """
+  Macro to check that a given received `message` is intended for the given connection `conn`.
+
+  This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
+  `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
+  `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+
+  This macro can be used in guards.
+
+  **Note**: this macro is only available if you compile Mint with Elixir 1.10.0 or greater (and
+  OTP 21+, which is required by Elixir 1.10.0 and on).
+
+  ## Examples
+
+      require Mint.HTTP
+
+      {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, "")
+
+      receive do
+        message when Mint.HTTP.is_connection_message(conn, message) ->
+          Mint.HTTP.stream(conn, message)
+
+        other ->
+          # This message is related to something else or to some other connection
+      end
+
+  """
+  define_is_connection_message_guard()
+
+  @doc """
   Creates a new connection to a given server.
 
   Creates a new connection struct and establishes the connection to the given server,
@@ -119,12 +148,15 @@ defmodule Mint.HTTP do
   socket and the `:gen_tcp` module is used to create that socket. If HTTPS is used, then
   the created socket is an SSL socket and the `:ssl` module is used to create that socket.
   The socket is created in active mode (with `active: :once`), which is why it is important
-  to know the type of the socket: messages from the socket (of type `t:socket_message/0`
-  will be delivered directly to the process that creates the connection and tagged
-  appropriately by the socket module (see the `:gen_tcp` and `:ssl` modules). See `stream/2`
-  for more information on the messages and how to process them and on the socket mode.
+  to know the type of the socket: messages from the socket will be delivered directly to the
+  process that creates the connection and tagged appropriately by the socket module (see the
+  `:gen_tcp` and `:ssl` modules). See `stream/2` for more information on the messages and
+  how to process them and on the socket mode.
 
   ## Options
+
+    * `:hostname` - (string) explicitly provide the hostname used for the `Host` header,
+      hostname verification, SNI, and so on. **Required when `address` is not a string.**
 
     * `:transport_opts` - (keyword) options to be given to the transport being used.
       These options will be merged with some default options that cannot be overridden.
@@ -147,7 +179,7 @@ defmodule Mint.HTTP do
   The following options are HTTP/1-specific and will force the connection
   to be an HTTP/1 connection.
 
-    * `:proxy` - a `{scheme, hostname, port, opts}` tuple that identifies a proxy to
+    * `:proxy` - a `{scheme, address, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.
 
   The following options are HTTP/2-specific and will only be used on HTTP/2 connections.
@@ -172,7 +204,7 @@ defmodule Mint.HTTP do
   ## Proxying
 
   You can set up proxying through the `:proxy` option, which is a tuple
-  `{scheme, hostname, port, opts}` that identifies the proxy to connect to.
+  `{scheme, address, port, opts}` that identifies the proxy to connect to.
   Once a proxied connection is returned, the proxy is transparent to you and you
   can use the connection like a normal HTTP/1 connection.
 
@@ -218,17 +250,20 @@ defmodule Mint.HTTP do
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
       [CAStore](https://github.com/elixir-mint/castore) package or raise an
-      exception if this package is not available.
+      exception if this package is not available. Due to caching the
+      `:cacertfile` option is more efficient than `:cacerts`.
 
-    * `:ciphers` - defaults to the list returned by `:ssl.cipher_suites/0`
-      filtered according to the blocklist in
+    * `:ciphers` - defaults to the lists returned by
+      `:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, version), [])`
+      where `version` is each value in the `:versions` setting. This list is
+      then filtered according to the blocklist in
       [RFC7540 appendix A](https://tools.ietf.org/html/rfc7540#appendix-A);
       May be overridden by the caller. See the "Supporting older cipher suites"
       section below for some examples.
 
     * `:depth` - defaults to `4`. May be overridden by the caller.
 
-    * `:partial_chain_fun` - unless a custom `:partial_chain_fun` is specified,
+    * `:partial_chain` - unless a custom `:partial_chain` function is specified,
       Mint will enable its own partial chain handler, which accepts server
       certificate chains containing a certificate that was issued by a
       CA certificate in the CA trust store, even if that certificate is not
@@ -237,10 +272,13 @@ defmodule Mint.HTTP do
       but is a less strict interpretation of the TLS specification than the
       Erlang/OTP default behaviour.
 
-    * `:reuse_sessions` - defaults to `true`. May be overridden by the caller.
+    * `:reuse_sessions` - defaults to `true`. May be overridden by the caller. If
+      `:"tlsv1.3"` is the only TLS version specified, `:reuse_sessions` will be
+      removed from the options.
 
     * `:secure_renegotiate` - defaults to `true`. May be overridden by the
-      caller.
+      caller. If `:"tlsv1.3"` is the only TLS version specified, `:secure_renegotiate`
+      will be removed from the options.
 
     * `:server_name_indication` - defaults to specified destination hostname.
       May be overridden by the caller.
@@ -304,26 +342,26 @@ defmodule Mint.HTTP do
       {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, opts)
 
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
     case Keyword.fetch(opts, :proxy) do
-      {:ok, {proxy_scheme, proxy_hostname, proxy_port, proxy_opts}} ->
+      {:ok, {proxy_scheme, proxy_address, proxy_port, proxy_opts}} ->
         case scheme_to_transport(scheme) do
           Transport.TCP ->
-            proxy = {proxy_scheme, proxy_hostname, proxy_port}
-            host = {scheme, hostname, port}
+            proxy = {proxy_scheme, proxy_address, proxy_port}
+            host = {scheme, address, port}
             opts = Keyword.merge(opts, proxy_opts)
             UnsafeProxy.connect(proxy, host, opts)
 
           Transport.SSL ->
-            proxy = {proxy_scheme, proxy_hostname, proxy_port, proxy_opts}
-            host = {scheme, hostname, port, opts}
+            proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}
+            host = {scheme, address, port, opts}
             TunnelProxy.connect(proxy, host)
         end
 
       :error ->
-        Mint.Negotiate.connect(scheme, hostname, port, opts)
+        Mint.Negotiate.connect(scheme, address, port, opts)
     end
   end
 
@@ -343,7 +381,7 @@ defmodule Mint.HTTP do
   @impl true
   @spec initiate(
           module(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -598,9 +636,9 @@ defmodule Mint.HTTP do
 
   Each possible response returned by this function is a tuple with two or more elements.
   The first element is always an atom that identifies the kind of response. The second
-  element is a unique reference `t:request_ref/0` that identifies the request that the response
-  belongs to. This is the term returned by `request/5`. After these two elements, there can be
-  response-specific terms as well, documented below.
+  element is a unique reference `t:Mint.Types.request_ref/0` that identifies the request
+  that the response belongs to. This is the term returned by `request/5`. After these
+  two elements, there can be response-specific terms as well, documented below.
 
   These are the possible responses that can be returned.
 
@@ -626,7 +664,7 @@ defmodule Mint.HTTP do
 
     * `{:error, request_ref, reason}` - returned when there is an error that
       only affects the request and not the whole connection. For example, if the
-      server sends bad data on a given request, that request will be closed an an error
+      server sends bad data on a given request, that request will be closed and an error
       for that request will be returned among the responses, but the connection will
       remain alive and well.
 
@@ -722,11 +760,6 @@ defmodule Mint.HTTP do
   @spec recv(t(), non_neg_integer(), timeout()) ::
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   def recv(conn, byte_count, timeout), do: conn_module(conn).recv(conn, byte_count, timeout)
 
   @doc """
@@ -753,11 +786,6 @@ defmodule Mint.HTTP do
   """
   @impl true
   @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   def set_mode(conn, mode), do: conn_module(conn).set_mode(conn, mode)
 
   @doc """
@@ -779,10 +807,8 @@ defmodule Mint.HTTP do
   new controlling process). If you do that, be careful of race conditions
   and be sure to retrieve the connection in the new controlling process
   before accepting connection messages in the new controlling process.
-
-  Note that changing controlling process means that you still need to be careful
-  about only calling `Mint` functions from a single process (ideally the new
-  controlling process) because the connection data structure is immutable.
+  In fact, this function is guaranteed to return the connection unchanged,
+  so you are free to ignore the connection entry returned in `{:ok, conn}`.
 
   ## Examples
 
@@ -796,11 +822,6 @@ defmodule Mint.HTTP do
       end
 
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
   def controlling_process(conn, new_pid), do: conn_module(conn).controlling_process(conn, new_pid)
@@ -878,8 +899,13 @@ defmodule Mint.HTTP do
   @spec delete_private(t(), atom()) :: t()
   def delete_private(conn, key), do: conn_module(conn).delete_private(conn, key)
 
-  # Made public to be used with proxying.
-  @doc false
+  @doc """
+  Gets the socket associated with the connection.
+
+  Do not use the returned socket to change its internal state. Only read information from the socket.
+  For instance, use `:ssl.connection_information/2` to retrieve TLS-specific information from the
+  socket.
+  """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(conn), do: conn_module(conn).get_socket(conn)

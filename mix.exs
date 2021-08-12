@@ -1,7 +1,7 @@
 defmodule Mint.MixProject do
   use Mix.Project
 
-  @version "1.0.0"
+  @version "1.3.0"
   @repo_url "https://github.com/elixir-mint/mint"
 
   def project do
@@ -12,6 +12,14 @@ defmodule Mint.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+
+      # Xref
+      xref: [
+        exclude: [
+          :persistent_term,
+          {:ssl, :cipher_suites, 1}
+        ]
+      ],
 
       # Dialyxir
       dialyzer: [
@@ -38,13 +46,14 @@ defmodule Mint.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :ssl]
+      extra_applications: [:logger, :ssl],
+      mod: {Mint.Application, []}
     ]
   end
 
   defp package do
     [
-      licenses: ["Apache 2.0"],
+      licenses: ["Apache-2.0"],
       links: %{"GitHub" => @repo_url}
     ]
   end
@@ -58,7 +67,7 @@ defmodule Mint.MixProject do
       {:castore, "~> 0.1.0", optional: true},
       {:ex_doc, "~> 0.20", only: :dev},
       {:hpack, ">= 0.0.0", hex: :hpack_erl, only: :test},
-      {:stream_data, "~> 0.4.3", only: [:dev, :test]},
+      {:stream_data, "~> 0.5.0", only: [:dev, :test]},
       {:dialyxir, "~> 1.0.0-rc.6", only: [:dev, :test], runtime: false}
     ]
   end

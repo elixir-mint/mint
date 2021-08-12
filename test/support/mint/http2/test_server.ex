@@ -137,7 +137,12 @@ defmodule Mint.HTTP2.TestServer do
 
     # Let's accept a new connection.
     {:ok, socket} = :ssl.transport_accept(listen_socket)
-    :ok = :ssl.ssl_accept(socket)
+
+    if function_exported?(:ssl, :handshake, 1) do
+      {:ok, _} = apply(:ssl, :handshake, [socket])
+    else
+      :ok = apply(:ssl, :ssl_accept, [socket])
+    end
 
     :ok = perform_http2_handshake(socket, server_settings)
 

@@ -7,10 +7,10 @@ defmodule Mint.HTTP2 do
   The connection is a data structure and is not backed by a process, and all the
   connection handling happens in the process that creates the struct.
 
-  This module and data structure work exactly like the ones described in the `Mint`
+  This module and data structure work exactly like the ones described in the `Mint.HTTP`
   module, with the exception that `Mint.HTTP2` specifically deals with HTTP/2 while
-  `Mint` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
-  how to use the data structure and client architecture, see `Mint`.
+  `Mint.HTTP` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
+  how to use the data structure and client architecture, see `Mint.HTTP`.
 
   ## HTTP/2 streams and requests
 
@@ -73,7 +73,7 @@ defmodule Mint.HTTP2 do
   send us a push promise for `"/style.css"`.
 
       {:ok, conn} = Mint.HTTP2.connect(:https, "example.com", 443)
-      {:ok, conn, request_ref} = Mint.HTTP2.request(conn, "GET", "/index.html", _headers = [])
+      {:ok, conn, request_ref} = Mint.HTTP2.request(conn, "GET", "/index.html", _headers = [], _body = "")
 
       next_message =
         receive do
@@ -197,7 +197,9 @@ defmodule Mint.HTTP2 do
       max_concurrent_streams: 100,
       initial_window_size: @default_window_size,
       max_frame_size: @default_max_frame_size,
-      max_header_list_size: :infinity
+      max_header_list_size: :infinity,
+      # Only supported by the server: https://www.rfc-editor.org/rfc/rfc8441.html#section-3
+      enable_connect_protocol: false
     },
 
     # Settings that the client communicates to the server.
@@ -221,7 +223,7 @@ defmodule Mint.HTTP2 do
   HTTP/2 setting with its value.
 
   This type represents both server settings as well as client settings. To retrieve
-  server settings use `get_server_settings/2` and to retrieve client settings use
+  server settings use `get_server_setting/2` and to retrieve client settings use
   `get_client_setting/2`. To send client settings to the server, see `put_settings/2`.
 
   The supported settings are the following:
@@ -249,6 +251,10 @@ defmodule Mint.HTTP2 do
 
     * `:max_header_list_size` - (integer) corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
 
+    * `:enable_connect_protocol` - (boolean) corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
+      Sets whether the client may invoke the extended connect protocol which is used to
+      bootstrap WebSocket connections.
+
   """
   @type setting() ::
           {:enable_push, boolean()}
@@ -256,6 +262,7 @@ defmodule Mint.HTTP2 do
           | {:initial_window_size, 1..2_147_483_647}
           | {:max_frame_size, 16_384..16_777_215}
           | {:max_header_list_size, :infinity | pos_integer()}
+          | {:enable_connect_protocol, boolean()}
 
   @typedoc """
   HTTP/2 settings.
@@ -331,15 +338,18 @@ defmodule Mint.HTTP2 do
   @doc """
   Same as `Mint.HTTP.connect/4`, but forces a HTTP/2 connection.
   """
-  @spec connect(Types.scheme(), String.t(), :inet.port_number(), keyword()) ::
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
-  def connect(scheme, hostname, port, opts \\ []) do
+  def connect(scheme, address, port, opts \\ []) do
+    hostname = Mint.Core.Util.hostname(opts, address)
+
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
+      |> Keyword.put(:hostname, hostname)
 
-    case negotiate(hostname, port, scheme, transport_opts) do
+    case negotiate(address, port, scheme, transport_opts) do
       {:ok, socket} ->
         initiate(scheme, socket, hostname, port, opts)
 
@@ -391,14 +401,8 @@ defmodule Mint.HTTP2 do
   end
 
   def close(%__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn) do
-    case conn.transport.close(conn.socket) do
-      :ok ->
-        conn = put_in(conn.state, :closed)
-        {:ok, conn}
-
-      {:error, reason} ->
-        {:error, conn, reason}
-    end
+    _ = conn.transport.close(conn.socket)
+    {:ok, put_in(conn.state, :closed)}
   end
 
   def close(%__MODULE__{state: :closed} = conn) do
@@ -438,6 +442,17 @@ defmodule Mint.HTTP2 do
   each header. Note that pseudo-headers (like `:path` or `:method`) count towards
   this size. If the size is exceeded, an error is returned. To check what the size
   is, use `get_server_setting/2`.
+
+  ## Request body size
+
+  If the request body size will exceed the window size of the HTTP/2 stream created by the
+  request or the window size of the connection Mint will return a `:exceeds_window_size`
+  error.
+
+  To ensure you do not exceed the window size it is recommended to stream the request
+  body by initially passing `:stream` as the body and sending the body in chunks using
+  `stream_request_body/3` and using `get_window_size/2` to get the window size of the
+  request and connection.
   """
   @impl true
   @spec request(
@@ -470,15 +485,9 @@ defmodule Mint.HTTP2 do
     headers =
       headers
       |> downcase_header_names()
+      |> add_pseudo_headers(conn, method, path)
       |> add_default_headers(body)
-
-    headers = [
-      {":method", method},
-      {":path", path},
-      {":scheme", conn.scheme},
-      {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
-      | headers
-    ]
+      |> sort_pseudo_headers_to_front()
 
     {conn, stream_id, ref} = open_stream(conn)
 
@@ -709,10 +718,6 @@ defmodule Mint.HTTP2 do
       {:ok, conn} = Mint.HTTP2.cancel_request(conn, ref)
 
   """
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.2.0"
-  end
-
   @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()} | {:error, t(), Types.error()}
   def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
@@ -819,15 +824,17 @@ defmodule Mint.HTTP2 do
 
   def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
-    data = maybe_concat(conn.buffer, data)
-    {conn, responses} = handle_new_data(conn, data, [])
+    case maybe_concat_and_handle_new_data(conn, data) do
+      {:ok, %{mode: mode, state: state} = conn, responses}
+      when mode == :active and state != :closed ->
+        case transport.setopts(socket, active: :once) do
+          :ok -> {:ok, conn, responses}
+          {:error, reason} -> {:error, put_in(conn.state, :closed), reason, responses}
+        end
 
-    if conn.mode == :active do
-      # TODO: handle errors
-      _ = transport.setopts(socket, active: :once)
+      other ->
+        other
     end
-
-    {:ok, conn, Enum.reverse(responses)}
   catch
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
   end
@@ -861,19 +868,12 @@ defmodule Mint.HTTP2 do
   @spec recv(t(), non_neg_integer(), timeout()) ::
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   def recv(conn, byte_count, timeout)
 
   def recv(%__MODULE__{mode: :passive} = conn, byte_count, timeout) do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} ->
-        data = maybe_concat(conn.buffer, data)
-        {conn, responses} = handle_new_data(conn, data, [])
-        {:ok, conn, Enum.reverse(responses)}
+        maybe_concat_and_handle_new_data(conn, data)
 
       {:error, %TransportError{reason: :closed}} ->
         handle_closed(conn)
@@ -894,11 +894,6 @@ defmodule Mint.HTTP2 do
   @doc """
   See `Mint.HTTP.set_mode/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec set_mode(t(), :active | :passive) :: {:ok, t()} | {:error, Types.error()}
   def set_mode(%__MODULE__{} = conn, mode) when mode in [:active, :passive] do
@@ -916,11 +911,6 @@ defmodule Mint.HTTP2 do
   @doc """
   See `Mint.HTTP.controlling_process/2`.
   """
-  # TODO: remove the check when we depend on Elixir 1.7+.
-  if Version.match?(System.version(), ">= 1.7.0") do
-    @doc since: "0.3.0"
-  end
-
   @impl true
   @spec controlling_process(t(), pid()) :: {:ok, t()} | {:error, Types.error()}
   def controlling_process(%__MODULE__{} = conn, new_pid) when is_pid(new_pid) do
@@ -962,7 +952,7 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec initiate(
           Types.scheme(),
-          Mint.Types.socket(),
+          Types.socket(),
           String.t(),
           :inet.port_number(),
           keyword()
@@ -1013,8 +1003,9 @@ defmodule Mint.HTTP2 do
       {:error, error}
   end
 
-  # Made public to be used with proxying.
-  @doc false
+  @doc """
+  See `Mint.HTTP.get_socket/1`.
+  """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(%Mint.HTTP2{socket: socket} = _conn) do
@@ -1034,22 +1025,17 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp negotiate(hostname, port, :http, transport_opts) do
+  defp negotiate(address, port, :http, transport_opts) do
     # We don't support protocol negotiation for TCP connections
     # so currently we just assume the HTTP/2 protocol
-
     transport = scheme_to_transport(:http)
-
-    case transport.connect(hostname, port, transport_opts) do
-      {:ok, socket} -> {:ok, socket}
-      {:error, reason} -> {:error, reason}
-    end
+    transport.connect(address, port, transport_opts)
   end
 
-  defp negotiate(hostname, port, :https, transport_opts) do
+  defp negotiate(address, port, :https, transport_opts) do
     transport = scheme_to_transport(:https)
 
-    with {:ok, socket} <- transport.connect(hostname, port, transport_opts),
+    with {:ok, socket} <- transport.connect(address, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(socket) do
       if protocol == "h2" do
         {:ok, socket}
@@ -1314,6 +1300,12 @@ defmodule Mint.HTTP2 do
           raise ArgumentError, ":max_header_list_size must be an integer, got: #{inspect(value)}"
         end
 
+      {:enable_connect_protocol, value} ->
+        unless is_boolean(value) do
+          raise ArgumentError,
+                ":enable_connect_protocol must be a boolean, got: #{inspect(value)}"
+        end
+
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
     end)
@@ -1339,7 +1331,37 @@ defmodule Mint.HTTP2 do
     end)
   end
 
+  defp add_pseudo_headers(headers, conn, method, path) do
+    if String.upcase(method) == "CONNECT" do
+      [
+        {":method", method},
+        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        | headers
+      ]
+    else
+      [
+        {":method", method},
+        {":path", path},
+        {":scheme", conn.scheme},
+        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        | headers
+      ]
+    end
+  end
+
+  defp sort_pseudo_headers_to_front(headers) do
+    Enum.sort_by(headers, fn {key, _value} ->
+      not String.starts_with?(key, ":")
+    end)
+  end
+
   ## Frame handling
+
+  defp maybe_concat_and_handle_new_data(conn, data) do
+    data = maybe_concat(conn.buffer, data)
+    {conn, responses} = handle_new_data(conn, data, [])
+    {:ok, conn, Enum.reverse(responses)}
+  end
 
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
@@ -1708,6 +1730,9 @@ defmodule Mint.HTTP2 do
 
       {:max_header_list_size, max_header_list_size}, conn ->
         put_in(conn.server_settings.max_header_list_size, max_header_list_size)
+
+      {:enable_connect_protocol, enable_connect_protocol?}, conn ->
+        put_in(conn.server_settings.enable_connect_protocol, enable_connect_protocol?)
     end)
   end
 
@@ -1946,7 +1971,7 @@ defmodule Mint.HTTP2 do
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
     conn = send!(conn, Frame.encode(frame))
-    :ok = conn.transport.close(conn.socket)
+    _ = conn.transport.close(conn.socket)
     conn = put_in(conn.state, :closed)
     throw({:mint, conn, wrap_error({error_code, debug_data})})
   end

@@ -11,6 +11,8 @@ defmodule Mint.HTTP2Test do
     TransportError
   }
 
+  require Mint.HTTP
+
   setup :start_connection
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
@@ -26,6 +28,28 @@ defmodule Mint.HTTP2Test do
       message = Exception.message(error)
       refute message =~ "got FunctionClauseError"
       assert message != inspect(error.reason)
+    end
+  end
+
+  # TODO: Remove check once we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
+    describe "Mint.HTTP.is_mint_message/2" do
+      test "the guard works with HTTP2 connections", %{conn: conn} do
+        import Mint.HTTP, only: [is_connection_message: 2]
+
+        assert is_connection_message(conn, {:tcp, conn.socket, "foo"}) == true
+        assert is_connection_message(conn, {:tcp_closed, conn.socket}) == true
+        assert is_connection_message(conn, {:tcp_error, conn.socket, :nxdomain}) == true
+
+        assert is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+        assert is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
+
+        assert is_connection_message(_conn = %HTTP2{}, {:tcp, conn.socket, "foo"}) == false
+
+        # If the first argument is not a connection struct, we return false.
+        assert is_connection_message(%{socket: conn.socket}, {:tcp, conn.socket, "foo"}) == false
+        assert is_connection_message(%URI{}, {:tcp, conn.socket, "foo"}) == false
+      end
     end
   end
 
@@ -250,6 +274,16 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [goaway(error_code: :no_error)]
 
+      refute HTTP2.open?(conn)
+    end
+
+    test "close/1 an already closed connection with default inet_backend does not cause error", %{
+      conn: conn
+    } do
+      assert HTTP2.open?(conn)
+      # ignore the returned conn, otherwise transport.close/1 will not be called
+      assert {:ok, _conn} = HTTP2.close(conn)
+      assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
     end
 
@@ -564,6 +598,47 @@ defmodule Mint.HTTP2Test do
       assert [{"cookie", cookie}, {"accept", _}, {"content-type", _}, {"x-header", _}] = headers
 
       assert cookie == "a=b; c=d; e=f; g=h"
+    end
+
+    test "a CONNECT request omits :scheme and :path pseudo-headers", %{conn: conn} do
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", [], nil)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      refute hbf
+             |> server_decode_headers()
+             |> List.keymember?(":scheme", 0)
+
+      refute hbf
+             |> server_decode_headers()
+             |> List.keymember?(":path", 0)
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "explicitly passed pseudo-headers are sorted to the front of the headers list", %{
+      conn: conn
+    } do
+      headers = [
+        {":scheme", conn.scheme},
+        {":path", "/ws"},
+        {":protocol", "websocket"}
+      ]
+
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", headers, :stream)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      assert [
+               {":method", "CONNECT"},
+               {":authority", _},
+               {":scheme", _},
+               {":path", "/ws"},
+               {":protocol", "websocket"},
+               {"user-agent", _}
+             ] = server_decode_headers(hbf)
+
+      assert HTTP2.open?(conn)
     end
   end
 
@@ -1217,6 +1292,7 @@ defmodule Mint.HTTP2Test do
     test "get_server_setting/2 can be used to read server settings", %{conn: conn} do
       assert HTTP2.get_server_setting(conn, :max_concurrent_streams) == 100
       assert HTTP2.get_server_setting(conn, :enable_push) == true
+      assert HTTP2.get_server_setting(conn, :enable_connect_protocol) == false
     end
 
     test "get_server_setting/2 fails with unknown settings", %{conn: conn} do
