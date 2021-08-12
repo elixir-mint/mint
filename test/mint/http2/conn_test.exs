@@ -499,12 +499,14 @@ defmodule Mint.HTTP2Test do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
 
-      assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
-
-      assert HTTP2.open_request_count(conn) == 0
-      assert HTTP2.open?(conn)
+        assert HTTP2.open_request_count(conn) == 0
+        assert HTTP2.open?(conn)
+        conn
+      end)
     end
 
     test ":authority pseudo-header includes port", %{conn: conn} do
