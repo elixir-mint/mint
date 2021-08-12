@@ -301,12 +301,13 @@ defmodule Mint.HTTP2Test do
 
       test_bodies = [nil, :stream, "XX"]
 
-      Enum.reduce(test_bodies, conn, fn body, conn ->
-        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
-        assert_http2_error error, :closed_for_writing
-        assert HTTP2.open_request_count(conn) == 0
-        conn
-      end)
+      conn =
+        Enum.reduce(test_bodies, conn, fn body, conn ->
+          assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+          assert_http2_error error, :closed_for_writing
+          assert HTTP2.open_request_count(conn) == 0
+          conn
+        end)
 
       assert {:ok, conn} = HTTP2.close(conn)
 
