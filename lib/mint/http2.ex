@@ -1100,7 +1100,7 @@ defmodule Mint.HTTP2 do
       nil ->
         encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
 
-      _iodata ->
+      body ->
         {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
         {conn, data_payload} = encode_data(conn, stream_id, body, [:end_stream])
         {conn, [headers_payload, data_payload]}
