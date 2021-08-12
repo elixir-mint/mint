@@ -299,23 +299,23 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :closed_for_writing
-      assert HTTP2.open_request_count(conn) == 0
+      test_bodies = [nil, :stream, "XX"]
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
-      assert_http2_error error, :closed_for_writing
-      assert HTTP2.open_request_count(conn) == 0
+      Enum.reduce(test_bodies, conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, :closed_for_writing
+        assert HTTP2.open_request_count(conn) == 0
+        conn
+      end)
 
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :closed
-      assert HTTP2.open_request_count(conn) == 0
-
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
-      assert_http2_error error, :closed
-      assert HTTP2.open_request_count(conn) == 0
+      Enum.reduce(test_bodies, conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, :closed
+        assert HTTP2.open_request_count(conn) == 0
+        conn
+      end)
     end
   end
 
@@ -325,17 +325,14 @@ defmodule Mint.HTTP2Test do
       {conn, _ref} = open_request(conn)
       assert HTTP2.open_request_count(conn) == 1
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :too_many_concurrent_requests
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, :too_many_concurrent_requests
 
-      assert HTTP2.open_request_count(conn) == 1
-      assert HTTP2.open?(conn)
-
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
-      assert_http2_error error, :too_many_concurrent_requests
-
-      assert HTTP2.open_request_count(conn) == 1
-      assert HTTP2.open?(conn)
+        assert HTTP2.open_request_count(conn) == 1
+        assert HTTP2.open?(conn)
+        conn
+      end)
     end
   end
 
