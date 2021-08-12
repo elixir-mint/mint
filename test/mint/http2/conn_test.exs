@@ -303,9 +303,17 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, :closed_for_writing
       assert HTTP2.open_request_count(conn) == 0
 
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
+      assert_http2_error error, :closed_for_writing
+      assert HTTP2.open_request_count(conn) == 0
+
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [], nil)
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
+      assert_http2_error error, :closed
+      assert HTTP2.open_request_count(conn) == 0
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
       assert_http2_error error, :closed
       assert HTTP2.open_request_count(conn) == 0
     end
@@ -318,6 +326,12 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open_request_count(conn) == 1
 
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
+      assert_http2_error error, :too_many_concurrent_requests
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], :stream)
       assert_http2_error error, :too_many_concurrent_requests
 
       assert HTTP2.open_request_count(conn) == 1

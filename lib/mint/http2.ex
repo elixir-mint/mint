@@ -492,7 +492,7 @@ defmodule Mint.HTTP2 do
     {conn, stream_id, ref} = open_stream(conn)
 
     try do
-      {conn, payload} = encode_payload(conn, stream_id, headers, body)
+      {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
       conn = send!(conn, payload)
       {:ok, conn, ref}
     catch
@@ -1092,7 +1092,7 @@ defmodule Mint.HTTP2 do
     {conn, stream.id, stream.ref}
   end
 
-  defp encode_payload(conn, stream_id, headers, body) do
+  defp encode_request_payload(conn, stream_id, headers, body) do
     case body do
       :stream ->
         encode_headers(conn, stream_id, headers, [:end_headers])
