@@ -1092,19 +1092,18 @@ defmodule Mint.HTTP2 do
     {conn, stream.id, stream.ref}
   end
 
-  defp encode_request_payload(conn, stream_id, headers, body) do
-    case body do
-      :stream ->
-        encode_headers(conn, stream_id, headers, [:end_headers])
+  defp encode_request_payload(conn, stream_id, headers, :stream) do
+    encode_headers(conn, stream_id, headers, [:end_headers])
+  end
 
-      nil ->
-        encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+  defp encode_request_payload(conn, stream_id, headers, nil) do
+    encode_headers(conn, stream_id, headers, [:end_stream, :end_headers])
+  end
 
-      body ->
-        {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
-        {conn, data_payload} = encode_data(conn, stream_id, body, [:end_stream])
-        {conn, [headers_payload, data_payload]}
-    end
+  defp encode_request_payload(conn, stream_id, headers, iodata) do
+    {conn, headers_payload} = encode_headers(conn, stream_id, headers, [:end_headers])
+    {conn, data_payload} = encode_data(conn, stream_id, iodata, [:end_stream])
+    {conn, [headers_payload, data_payload]}
   end
 
   defp encode_headers(conn, stream_id, headers, enabled_flags) do
