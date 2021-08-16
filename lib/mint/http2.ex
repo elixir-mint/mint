@@ -482,24 +482,25 @@ defmodule Mint.HTTP2 do
 
   def request(%Mint.HTTP2{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
-    headers =
-      headers
-      |> downcase_header_names()
-      |> add_pseudo_headers(conn, method, path)
-      |> add_default_headers(body)
-      |> sort_pseudo_headers_to_front()
-
-    {conn, stream_id, ref} = open_stream(conn)
+    original_conn = conn
 
     try do
+      headers =
+        headers
+        |> downcase_header_names()
+        |> add_pseudo_headers(conn, method, path)
+        |> add_default_headers(body)
+        |> sort_pseudo_headers_to_front()
+
+      {conn, stream_id, ref} = open_stream(conn)
       {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
       conn = send!(conn, payload)
       {:ok, conn, ref}
     catch
-      :throw, {:mint, conn, reason} ->
-        stream = Map.fetch!(conn.streams, stream_id)
-        conn = delete_stream(conn, stream)
-        {:error, conn, reason}
+      :throw, {:mint, _conn, reason} ->
+        # Revert the connection to the original version before we tried to do the request,
+        # to clean up any tracking we added to conn for the request that no longer exists.
+        {:error, original_conn, reason}
     end
   catch
     :throw, {:mint, conn, reason} -> {:error, conn, reason}
