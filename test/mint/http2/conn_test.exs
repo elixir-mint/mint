@@ -299,6 +299,7 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
       test_bodies = [nil, :stream, "XX"]
 
       conn =
@@ -306,6 +307,7 @@ defmodule Mint.HTTP2Test do
           assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
           assert_http2_error error, :closed_for_writing
           assert HTTP2.open_request_count(conn) == 0
+          assert HTTP2.get_window_size(conn, :connection) == expected_window_size
           conn
         end)
 
@@ -315,6 +317,7 @@ defmodule Mint.HTTP2Test do
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
         assert_http2_error error, :closed
         assert HTTP2.open_request_count(conn) == 0
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
         conn
       end)
     end
@@ -325,6 +328,7 @@ defmodule Mint.HTTP2Test do
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
       {conn, _ref} = open_request(conn)
       assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
@@ -332,6 +336,7 @@ defmodule Mint.HTTP2Test do
 
         assert HTTP2.open_request_count(conn) == 1
         assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
         conn
       end)
     end
@@ -499,6 +504,7 @@ defmodule Mint.HTTP2Test do
     test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
@@ -506,6 +512,7 @@ defmodule Mint.HTTP2Test do
 
         assert HTTP2.open_request_count(conn) == 0
         assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
         conn
       end)
     end
@@ -1148,10 +1155,12 @@ defmodule Mint.HTTP2Test do
 
     @tag server_settings: [initial_window_size: 1]
     test "if client's request goes over window size, no HEADER frames are sent", %{conn: conn} do
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], "XX")
       assert_http2_error error, {:exceeds_window_size, :request, 1}
       assert HTTP2.open?(conn)
       assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
       refute_receive {:ssl, _, _}
     end
 
