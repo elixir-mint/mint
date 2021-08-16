@@ -502,8 +502,6 @@ defmodule Mint.HTTP2 do
         # to clean up any tracking we added to conn for the request that no longer exists.
         {:error, original_conn, reason}
     end
-  catch
-    :throw, {:mint, conn, reason} -> {:error, conn, reason}
   end
 
   @doc """
@@ -534,33 +532,20 @@ defmodule Mint.HTTP2 do
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-        {conn, payload} =
-          case chunk do
-            :eof ->
-              encode_data(conn, stream_id, "", [:end_stream])
-
-            {:eof, trailing_headers} ->
-              lowered_headers = downcase_header_names(trailing_headers)
-
-              if unallowed_trailing_header = Util.find_unallowed_trailing_header(lowered_headers) do
-                error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
-                throw({:mint, conn, error})
-              end
-
-              encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])
-
-            iodata ->
-              encode_data(conn, stream_id, iodata, [])
-          end
-
-        conn = send!(conn, payload)
-        {:ok, conn}
-
+        original_conn = conn
+        try do
+          {conn, payload} = encode_stream_body_request_payload(conn, stream_id, chunk)
+          conn = send!(conn, payload)
+          {:ok, conn}
+        catch
+          :throw, {:mint, _conn, reason} ->
+            # Revert the connection to the original version before we tried to do the request,
+            # to clean up any tracking we added to conn for the request that no longer exists.
+            {:error, original_conn, reason}
+        end
       :error ->
         {:error, conn, wrap_error(:unknown_request_to_stream)}
     end
-  catch
-    :throw, {:mint, conn, error} -> {:error, conn, error}
   end
 
   @doc """
@@ -1091,6 +1076,25 @@ defmodule Mint.HTTP2 do
     conn = put_in(conn.ref_to_stream_id[stream.ref], stream.id)
     conn = update_in(conn.next_stream_id, &(&1 + 2))
     {conn, stream.id, stream.ref}
+  end
+
+  defp encode_stream_body_request_payload(conn, stream_id, :eof) do
+    encode_data(conn, stream_id, "", [:end_stream])
+  end
+
+  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailing_headers}) do
+    lowered_headers = downcase_header_names(trailing_headers)
+
+    if unallowed_trailing_header = Util.find_unallowed_trailing_header(lowered_headers) do
+      error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
+      throw({:mint, conn, error})
+    end
+
+    encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])
+  end
+
+  defp encode_stream_body_request_payload(conn, stream_id, iodata) do
+    encode_data(conn, stream_id, iodata, [])
   end
 
   defp encode_request_payload(conn, stream_id, headers, :stream) do

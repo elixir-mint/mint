@@ -369,6 +369,26 @@ defmodule Mint.HTTP2Test do
         conn
       end)
     end
+
+    test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
+      # open a streaming request.
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers()]
+
+      # force the transport to one that always times out on send
+      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
+      assert_transport_error error, :timeout
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+    end
   end
 
   describe "headers and continuation" do
@@ -1413,15 +1433,27 @@ defmodule Mint.HTTP2Test do
          %{conn: conn} do
       {conn, ref} = open_request(conn)
 
+      assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "foo")
       assert_http2_error error, :request_is_not_streaming
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 1
 
       assert HTTP2.open?(conn)
     end
 
     test "streaming to an unknown request returns an error", %{conn: conn} do
+      assert HTTP2.open_request_count(conn) == 0
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, make_ref(), "x")
       assert_http2_error error, :unknown_request_to_stream
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 0
       assert HTTP2.open?(conn)
     end
 
@@ -1455,12 +1487,18 @@ defmodule Mint.HTTP2Test do
     test "unallowed trailing headers cause an error", %{conn: conn} do
       {conn, ref} = open_request(conn, :stream)
 
+      assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       trailing_headers = [{"x-trailing", "value"}, {"Host", "example.com"}]
 
       assert {:error, %HTTP2{} = _conn, error} =
                HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 1
     end
   end
 
