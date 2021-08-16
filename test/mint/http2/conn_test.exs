@@ -31,6 +31,18 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  defmacrop assert_transport_error(error, expected_reason) do
+    quote do
+      error = unquote(error)
+
+      assert %TransportError{reason: unquote(expected_reason)} = error
+
+      message = Exception.message(error)
+      refute message =~ "got FunctionClauseError"
+      assert message != inspect(error.reason)
+    end
+  end
+
   # TODO: Remove check once we depend on Elixir 1.10+.
   if Version.match?(System.version(), ">= 1.10.0") do
     describe "Mint.HTTP.is_mint_message/2" do
@@ -335,6 +347,23 @@ defmodule Mint.HTTP2Test do
         assert_http2_error error, :too_many_concurrent_requests
 
         assert HTTP2.open_request_count(conn) == 1
+        assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+        conn
+      end)
+    end
+
+    test "when an ssl timeout is triggered on request", %{conn: conn} do
+      # force the transport to one that always times out on send
+      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_transport_error error, :timeout
+
+        assert HTTP2.open_request_count(conn) == 0
         assert HTTP2.open?(conn)
         assert HTTP2.get_window_size(conn, :connection) == expected_window_size
         conn
