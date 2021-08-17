@@ -361,7 +361,7 @@ defmodule Mint.HTTP2Test do
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
-        assert_transport_error(error, :timeout)
+        assert_transport_error error, :timeout
 
         assert HTTP2.open_request_count(conn) == 0
         assert HTTP2.open?(conn)
@@ -383,7 +383,7 @@ defmodule Mint.HTTP2Test do
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
-      assert_transport_error(error, :timeout)
+      assert_transport_error error, :timeout
 
       assert HTTP2.open_request_count(conn) == 1
       assert HTTP2.open?(conn)
