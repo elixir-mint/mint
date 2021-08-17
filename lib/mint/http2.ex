@@ -507,8 +507,7 @@ defmodule Mint.HTTP2 do
           t(),
           Types.request_ref(),
           iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
-        ) ::
-          {:ok, t()} | {:error, t(), Types.error()}
+        ) :: {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, request_ref, chunk)
 
   def stream_request_body(%Mint.HTTP2{state: :closed} = conn, _request_ref, _chunk) do
@@ -527,9 +526,9 @@ defmodule Mint.HTTP2 do
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-          {conn, payload} = encode_stream_body_request_payload(conn, stream_id, chunk)
-          conn = send!(conn, payload)
-          {:ok, conn}
+        {conn, payload} = encode_stream_body_request_payload(conn, stream_id, chunk)
+        conn = send!(conn, payload)
+        {:ok, conn}
 
       :error ->
         {:error, conn, wrap_error(:unknown_request_to_stream)}
