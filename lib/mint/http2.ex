@@ -482,25 +482,21 @@ defmodule Mint.HTTP2 do
 
   def request(%Mint.HTTP2{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
-    original_conn = conn
+    headers =
+      headers
+      |> downcase_header_names()
+      |> add_pseudo_headers(conn, method, path)
+      |> add_default_headers(body)
+      |> sort_pseudo_headers_to_front()
 
-    try do
-      headers =
-        headers
-        |> downcase_header_names()
-        |> add_pseudo_headers(conn, method, path)
-        |> add_default_headers(body)
-        |> sort_pseudo_headers_to_front()
-
-      {conn, stream_id, ref} = open_stream(conn)
-      {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
-      conn = send!(conn, payload)
-      {:ok, conn, ref}
-    catch
-      :throw, {:mint, _conn, reason} ->
-        # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
-        {:error, original_conn, reason}
-    end
+    {conn, stream_id, ref} = open_stream(conn)
+    {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
+    conn = send!(conn, payload)
+    {:ok, conn, ref}
+  catch
+    :throw, {:mint, _conn, reason} ->
+      # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
+      {:error, conn, reason}
   end
 
   @doc """
@@ -531,19 +527,17 @@ defmodule Mint.HTTP2 do
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-        original_conn = conn
-        try do
           {conn, payload} = encode_stream_body_request_payload(conn, stream_id, chunk)
           conn = send!(conn, payload)
           {:ok, conn}
-        catch
-          :throw, {:mint, _conn, reason} ->
-            # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
-            {:error, original_conn, reason}
-        end
+
       :error ->
         {:error, conn, wrap_error(:unknown_request_to_stream)}
     end
+  catch
+    :throw, {:mint, _conn, reason} ->
+      # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
+      {:error, conn, reason}
   end
 
   @doc """
