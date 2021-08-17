@@ -498,8 +498,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn, ref}
     catch
       :throw, {:mint, _conn, reason} ->
-        # Revert the connection to the original version before we tried to do the request,
-        # to clean up any tracking we added to conn for the request that no longer exists.
+        # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
         {:error, original_conn, reason}
     end
   end
@@ -539,8 +538,7 @@ defmodule Mint.HTTP2 do
           {:ok, conn}
         catch
           :throw, {:mint, _conn, reason} ->
-            # Revert the connection to the original version before we tried to do the request,
-            # to clean up any tracking we added to conn for the request that no longer exists.
+            # The stream is invalid and "_conn" may be tracking it, so we return the original connection instead.
             {:error, original_conn, reason}
         end
       :error ->
