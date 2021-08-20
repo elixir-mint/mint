@@ -31,6 +31,18 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  defmacrop assert_transport_error(error, expected_reason) do
+    quote do
+      error = unquote(error)
+
+      assert %TransportError{reason: unquote(expected_reason)} = error
+
+      message = Exception.message(error)
+      refute message =~ "got FunctionClauseError"
+      assert message != inspect(error.reason)
+    end
+  end
+
   # TODO: Remove check once we depend on Elixir 1.10+.
   if Version.match?(System.version(), ">= 1.10.0") do
     describe "Mint.HTTP.is_mint_message/2" do
@@ -299,13 +311,27 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :closed_for_writing
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+      test_bodies = [nil, :stream, "XX"]
+
+      conn =
+        Enum.reduce(test_bodies, conn, fn body, conn ->
+          assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+          assert_http2_error error, :closed_for_writing
+          assert HTTP2.open_request_count(conn) == 0
+          assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+          conn
+        end)
 
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert {:error, %HTTP2{}, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :closed
+      Enum.reduce(test_bodies, conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, :closed
+        assert HTTP2.open_request_count(conn) == 0
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+        conn
+      end)
     end
   end
 
@@ -313,11 +339,55 @@ defmodule Mint.HTTP2Test do
     @tag server_settings: [max_concurrent_streams: 1]
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
       {conn, _ref} = open_request(conn)
+      assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
-      assert_http2_error error, :too_many_concurrent_requests
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, :too_many_concurrent_requests
 
+        assert HTTP2.open_request_count(conn) == 1
+        assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+        conn
+      end)
+    end
+
+    test "when an ssl timeout is triggered on request", %{conn: conn} do
+      # force the transport to one that always times out on send
+      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_transport_error error, :timeout
+
+        assert HTTP2.open_request_count(conn) == 0
+        assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+        conn
+      end)
+    end
+
+    test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
+      # open a streaming request.
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers()]
+
+      # force the transport to one that always times out on send
+      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
+      assert_transport_error error, :timeout
+
+      assert HTTP2.open_request_count(conn) == 1
       assert HTTP2.open?(conn)
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
     end
   end
 
@@ -483,12 +553,17 @@ defmodule Mint.HTTP2Test do
     test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
 
-      assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], nil)
+      Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
+        assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
 
-      assert_http2_error error, {:max_header_list_size_exceeded, _, 20}
-
-      assert HTTP2.open?(conn)
+        assert HTTP2.open_request_count(conn) == 0
+        assert HTTP2.open?(conn)
+        assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+        conn
+      end)
     end
 
     test ":authority pseudo-header includes port", %{conn: conn} do
@@ -539,8 +614,7 @@ defmodule Mint.HTTP2Test do
 
       assert hbf
              |> server_decode_headers()
-             |> List.keyfind("content-length", 0) ==
-               {"content-length", "5"}
+             |> List.keyfind("content-length", 0) == {"content-length", "5"}
 
       # Let's check that content-length is not overridden if already present.
 
@@ -551,8 +625,7 @@ defmodule Mint.HTTP2Test do
 
       assert hbf
              |> server_decode_headers()
-             |> List.keyfind("content-length", 0) ==
-               {"content-length", "10"}
+             |> List.keyfind("content-length", 0) == {"content-length", "10"}
 
       # Let's make sure content-length isn't added if the body is nil or :stream.
 
@@ -1129,9 +1202,12 @@ defmodule Mint.HTTP2Test do
 
     @tag server_settings: [initial_window_size: 1]
     test "if client's request goes over window size, no HEADER frames are sent", %{conn: conn} do
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], "XX")
       assert_http2_error error, {:exceeds_window_size, :request, 1}
       assert HTTP2.open?(conn)
+      assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
       refute_receive {:ssl, _, _}
     end
 
@@ -1355,15 +1431,27 @@ defmodule Mint.HTTP2Test do
          %{conn: conn} do
       {conn, ref} = open_request(conn)
 
+      assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "foo")
       assert_http2_error error, :request_is_not_streaming
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 1
 
       assert HTTP2.open?(conn)
     end
 
     test "streaming to an unknown request returns an error", %{conn: conn} do
+      assert HTTP2.open_request_count(conn) == 0
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, make_ref(), "x")
       assert_http2_error error, :unknown_request_to_stream
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 0
       assert HTTP2.open?(conn)
     end
 
@@ -1397,12 +1485,18 @@ defmodule Mint.HTTP2Test do
     test "unallowed trailing headers cause an error", %{conn: conn} do
       {conn, ref} = open_request(conn, :stream)
 
+      assert HTTP2.open_request_count(conn) == 1
+      expected_window_size = HTTP2.get_window_size(conn, :connection)
+
       trailing_headers = [{"x-trailing", "value"}, {"Host", "example.com"}]
 
       assert {:error, %HTTP2{} = _conn, error} =
                HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
 
       assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
+
+      assert HTTP2.get_window_size(conn, :connection) == expected_window_size
+      assert HTTP2.open_request_count(conn) == 1
     end
   end
 
