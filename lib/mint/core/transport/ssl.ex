@@ -623,7 +623,10 @@ defmodule Mint.Core.Transport.SSL do
   def partial_chain(cacerts, certs) do
     # TODO: Shim this with OTP 21.1 implementation?
 
-    certs = Enum.map(certs, &{&1, :public_key.pkix_decode_cert(&1, :plain)})
+    certs =
+      certs
+      |> Enum.map(&{&1, :public_key.pkix_decode_cert(&1, :plain)})
+      |> Enum.drop_while(&cert_expired?/1)
 
     trusted =
       Enum.find_value(certs, fn {der, cert} ->
@@ -642,10 +645,53 @@ defmodule Mint.Core.Transport.SSL do
     end
   end
 
+  defp cert_expired?({_der, cert}) do
+    now = DateTime.utc_now()
+    {not_before, not_after} = extract_validity(cert)
+
+    DateTime.compare(now, not_before) == :lt or
+      DateTime.compare(now, not_after) == :gt
+  end
+
+  defp extract_validity(cert) do
+    {:Validity, not_before, not_after} =
+      cert
+      |> certificate(:tbsCertificate)
+      |> tbs_certificate(:validity)
+
+    {to_datetime(not_before), to_datetime(not_after)}
+  end
+
   defp extract_public_key_info(cert) do
     cert
     |> certificate(:tbsCertificate)
     |> tbs_certificate(:subjectPublicKeyInfo)
+  end
+
+  defp to_datetime({:utcTime, time}) do
+    "20#{time}" |> to_datetime()
+  end
+
+  defp to_datetime({:generalTime, time}) do
+    time |> to_string() |> to_datetime()
+  end
+
+  defp to_datetime(
+         <<year::binary-size(4), month::binary-size(2), day::binary-size(2), hour::binary-size(2),
+           minute::binary-size(2), second::binary-size(2), "Z"::binary>>
+       ) do
+    %DateTime{
+      year: String.to_integer(year),
+      month: String.to_integer(month),
+      day: String.to_integer(day),
+      hour: String.to_integer(hour),
+      minute: String.to_integer(minute),
+      second: String.to_integer(second),
+      time_zone: "Etc/UTC",
+      zone_abbr: "UTC",
+      utc_offset: 0,
+      std_offset: 0
+    }
   end
 
   defp blocked_cipher?(%{cipher: cipher, key_exchange: kex, prf: prf}),
