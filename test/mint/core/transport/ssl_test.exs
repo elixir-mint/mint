@@ -287,9 +287,7 @@ defmodule Mint.Core.Transport.SSLTest do
   defp chain_with_expired_root(_context) do
     [
       chain: load_all_certs(@chain),
-      ca_store:
-        load_all_certs(@ca_store)
-        |> Enum.map(&:public_key.pkix_decode_cert(&1, :plain))
+      ca_store: Enum.map(load_all_certs(@ca_store), &:public_key.pkix_decode_cert(&1, :plain))
     ]
   end
 

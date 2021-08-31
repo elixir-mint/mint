@@ -683,10 +683,7 @@ defmodule Mint.Core.Transport.SSL do
          <<year::binary-size(4), month::binary-size(2), day::binary-size(2), hour::binary-size(2),
            minute::binary-size(2), second::binary-size(2), "Z"::binary>>
        ) do
-    {:ok, datetime, _} =
-      DateTime.from_iso8601("#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z")
-
-    datetime
+    DateTime.from_iso8601!("#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z")
   end
 
   defp blocked_cipher?(%{cipher: cipher, key_exchange: kex, prf: prf}),
