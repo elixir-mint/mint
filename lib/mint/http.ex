@@ -382,7 +382,7 @@ defmodule Mint.HTTP do
 
   ## Examples
 
-      Mint.HTTP1 = Mint.HTTP.module(conn)
+      :http1 = Mint.HTTP.protocol(conn)
   """
   @spec protocol(t()) :: :http1 | :http2
   def protocol(%Mint.HTTP1{}), do: :http1
