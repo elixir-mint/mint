@@ -384,9 +384,10 @@ defmodule Mint.HTTP do
 
       Mint.HTTP1 = Mint.HTTP.module(conn)
   """
-  @spec module(t()) :: atom()
-  def module(%Mint.HTTP1{}), do: Mint.HTTP1
-  def module(%Mint.HTTP2{}), do: Mint.HTTP2
+  @spec protocol(t()) :: :http1 | :http2
+  def protocol(%Mint.HTTP1{}), do: :http1
+  def protocol(%Mint.UnsafeProxy{}), do: :http1
+  def protocol(%Mint.HTTP2{}), do: :http2
 
   @doc false
   @impl true
