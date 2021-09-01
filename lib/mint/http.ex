@@ -386,7 +386,6 @@ defmodule Mint.HTTP do
   """
   @spec protocol(t()) :: :http1 | :http2
   def protocol(%Mint.HTTP1{}), do: :http1
-  def protocol(%Mint.UnsafeProxy{}), do: :http1
   def protocol(%Mint.HTTP2{}), do: :http2
 
   @doc false
