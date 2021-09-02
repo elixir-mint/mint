@@ -150,6 +150,20 @@ defmodule Mint.Core.Transport.SSLTest do
     end
   end
 
+  # Certificate chain rooted in an expired root CA, and CA store containing
+  # expired and alternate root CAs
+  @chain Path.expand("../../../support/mint/chain.pem", __DIR__)
+  @ca_store Path.expand("../../../support/mint/ca_store.pem", __DIR__)
+
+  describe "partial_chain/2" do
+    setup [:chain_with_expired_root]
+
+    test "ignore expired CA cert(s)", %{chain: chain, ca_store: ca_store} do
+      [_, cross_signed | _] = chain
+      assert {:trusted_ca, ^cross_signed} = SSL.partial_chain(ca_store, chain)
+    end
+  end
+
   describe "controlling_process/2" do
     setup do
       parent = self()
@@ -270,9 +284,23 @@ defmodule Mint.Core.Transport.SSLTest do
     [cert: load_cert(@wildcard_san)]
   end
 
+  defp chain_with_expired_root(_context) do
+    [
+      chain: load_all_certs(@chain),
+      ca_store: Enum.map(load_all_certs(@ca_store), &:public_key.pkix_decode_cert(&1, :plain))
+    ]
+  end
+
   defp load_cert(path) do
     [{_, binary, _} | _] = path |> File.read!() |> :public_key.pem_decode()
     :public_key.pkix_decode_cert(binary, :otp)
+  end
+
+  defp load_all_certs(path) do
+    path
+    |> File.read!()
+    |> :public_key.pem_decode()
+    |> Enum.map(&elem(&1, 1))
   end
 
   defp process_mirror(parent, ref) do
