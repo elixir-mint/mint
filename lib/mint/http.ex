@@ -378,15 +378,21 @@ defmodule Mint.HTTP do
     do: Mint.Negotiate.upgrade(old_transport, transport_state, scheme, hostname, port, opts)
 
   @doc """
-  Returns an atom describing the current connection type
+  Returns the protocol used by the current connection.
 
   ## Examples
 
-      :http1 = Mint.HTTP.protocol(conn)
+      iex> Mint.HTTP.protocol(%Mint.HTTP1{})
+      :http1
+
+      iex> Mint.HTTP.protocol(%Mint.HTTP2{})
+      :http2
   """
+  @doc since: "1.4.0"
   @spec protocol(t()) :: :http1 | :http2
   def protocol(%Mint.HTTP1{}), do: :http1
   def protocol(%Mint.HTTP2{}), do: :http2
+  def protocol(%Mint.UnsafeProxy{state: internal_conn}), do: protocol(internal_conn)
 
   @doc false
   @impl true
