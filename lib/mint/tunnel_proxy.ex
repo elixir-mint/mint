@@ -22,8 +22,8 @@ defmodule Mint.TunnelProxy do
          timeout_deadline = timeout_deadline(proxy_opts),
          headers = Keyword.get(opts, :proxy_headers, []),
          {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, headers, nil),
-         :ok <- receive_response(conn, ref, timeout_deadline) do
-      {:ok, conn}
+         {:ok, proxy_headers} <- receive_response(conn, ref, timeout_deadline) do
+      {:ok, struct!(conn, proxy_headers: proxy_headers)}
     else
       {:error, reason} ->
         {:error, wrap_in_proxy_error(reason)}
@@ -34,13 +34,16 @@ defmodule Mint.TunnelProxy do
     end
   end
 
-  defp upgrade_connection(conn, proxy, {scheme, hostname, port, opts}) do
-    {proxy_scheme, _proxy_address, _proxy_port, _proxy_opts} = proxy
+  defp upgrade_connection(
+         %{proxy_headers: proxy_headers} = conn,
+         {proxy_scheme, _proxy_address, _proxy_port, _proxy_opts} = _proxy,
+         {scheme, hostname, port, opts} = _host
+       ) do
     socket = HTTP1.get_socket(conn)
 
     # Note that we may leak messages if the server sent data after the CONNECT response
     case Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts) do
-      {:ok, conn} -> {:ok, conn}
+      {:ok, conn} -> {:ok, struct!(conn, proxy_headers: proxy_headers)}
       {:error, reason} -> wrap_in_proxy_error(reason)
     end
   end
@@ -68,7 +71,7 @@ defmodule Mint.TunnelProxy do
     case HTTP1.stream(conn, msg) do
       {:ok, conn, responses} ->
         case handle_responses(ref, timeout_deadline, responses) do
-          :done -> :ok
+          {:done, proxy_headers} -> {:ok, proxy_headers}
           :more -> receive_response(conn, ref, timeout_deadline)
           {:error, reason} -> {:error, conn, reason}
         end
@@ -86,8 +89,8 @@ defmodule Mint.TunnelProxy do
       {:status, ^ref, status} ->
         {:error, wrap_error({:proxy, {:unexpected_status, status}})}
 
-      {:headers, ^ref, _headers} when responses == [] ->
-        :done
+      {:headers, ^ref, headers} when responses == [] ->
+        {:done, headers}
 
       {:headers, ^ref, _headers} ->
         {:error, wrap_error({:proxy, {:unexpected_trailing_responses, responses}})}

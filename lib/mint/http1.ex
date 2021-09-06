@@ -91,6 +91,7 @@ defmodule Mint.HTTP1 do
     requests: :queue.new(),
     state: :closed,
     buffer: "",
+    proxy_headers: [],
     private: %{}
   ]
 
@@ -562,6 +563,13 @@ defmodule Mint.HTTP1 do
   def get_socket(%__MODULE__{socket: socket} = _conn) do
     socket
   end
+
+  @doc """
+  See `Mint.HTTP.get_proxy_headers/1`.
+  """
+  @impl true
+  @spec get_proxy_headers(t()) :: Mint.Types.headers()
+  def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
 
   ## Helpers
 

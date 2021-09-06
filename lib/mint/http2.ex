@@ -213,6 +213,9 @@ defmodule Mint.HTTP2 do
     # the continuation frames must come one right after the other).
     headers_being_processed: nil,
 
+    # Stores the headers returned by the proxy in the `CONNECT` method
+    proxy_headers: [],
+
     # Private store.
     private: %{}
   ]
@@ -980,6 +983,13 @@ defmodule Mint.HTTP2 do
   def get_socket(%Mint.HTTP2{socket: socket} = _conn) do
     socket
   end
+
+  @doc """
+  See `Mint.HTTP.get_proxy_headers/1`.
+  """
+  @impl true
+  @spec get_proxy_headers(t()) :: Mint.Types.headers()
+  def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
 
   ## Helpers
 

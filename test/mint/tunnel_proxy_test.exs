@@ -18,6 +18,10 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP1
+
+    assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
+             Mint.HTTP1.get_proxy_headers(conn)
+
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -87,6 +91,10 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP2
+
+    assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
+             Mint.HTTP2.get_proxy_headers(conn)
+
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -105,6 +113,10 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP2
+
+    assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
+             Mint.HTTP.get_proxy_headers(conn)
+
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
@@ -124,6 +136,10 @@ defmodule Mint.TunnelProxyTest do
              )
 
     assert conn.__struct__ == Mint.HTTP1
+
+    assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
+             Mint.HTTP.get_proxy_headers(conn)
+
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
