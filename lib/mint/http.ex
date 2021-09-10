@@ -388,7 +388,10 @@ defmodule Mint.HTTP do
       iex> Mint.HTTP.protocol(%Mint.HTTP2{})
       :http2
   """
-  @doc since: "1.4.0"
+  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
+    @doc since: "1.4.0"
+  end
+
   @spec protocol(t()) :: :http1 | :http2
   def protocol(%Mint.HTTP1{}), do: :http1
   def protocol(%Mint.HTTP2{}), do: :http2
