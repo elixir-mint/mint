@@ -56,4 +56,6 @@ defmodule Mint.Core.Conn do
   @callback delete_private(conn(), key :: atom()) :: conn()
 
   @callback get_socket(conn()) :: Mint.Types.socket()
+
+  @callback get_proxy_headers(conn()) :: Mint.Types.headers()
 end

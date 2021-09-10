@@ -910,6 +910,16 @@ defmodule Mint.HTTP do
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(conn), do: conn_module(conn).get_socket(conn)
 
+  @doc """
+  Gets the proxy headers associated with the connection in the `CONNECT` method.
+
+  When using tunnel proxy and HTTPs, the only way to exchange data with
+  the proxy is through headers in the `CONNECT` method.
+  """
+  @impl true
+  @spec get_proxy_headers(t()) :: Mint.Types.headers()
+  def get_proxy_headers(conn), do: conn_module(conn).get_proxy_headers(conn)
+
   ## Helpers
 
   defp conn_module(%UnsafeProxy{}), do: UnsafeProxy
