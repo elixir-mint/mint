@@ -913,7 +913,8 @@ defmodule Mint.HTTP do
   @doc """
   Gets the proxy headers associated with the connection in the `CONNECT` method.
 
-  When using tunnel proxy and https there is the only way to exchange data with the proxy is through headers in the `CONNECT` method.
+  When using tunnel proxy and HTTPs, the only way to exchange data with
+  the proxy is through headers in the `CONNECT` method.
   """
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
