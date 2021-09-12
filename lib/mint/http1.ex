@@ -567,6 +567,10 @@ defmodule Mint.HTTP1 do
   @doc """
   See `Mint.HTTP.get_proxy_headers/1`.
   """
+  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
+    @doc since: "1.4.0"
+  end
+
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers

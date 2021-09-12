@@ -936,6 +936,10 @@ defmodule Mint.HTTP do
   When using tunnel proxy and HTTPs, the only way to exchange data with
   the proxy is through headers in the `CONNECT` method.
   """
+  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
+    @doc since: "1.4.0"
+  end
+
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(conn), do: conn_module(conn).get_proxy_headers(conn)
