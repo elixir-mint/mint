@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.0
+
+### Bug fixes and improvements
+
+  * Add support for `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/2 server setting.
+  * Omit the `:scheme` and `:path` pseudo headers for HTTP/2 CONNECT.
+  * Fix invalid conn state when data can't be sent.
+  * Skip expired certs in partial chain hook.
+  * Add `Mint.HTTP.get_proxy_headers/1`.
+  * Add `Mint.HTTP.module/1`.
+
 ## v1.3.0
 
 ### Bug fixes and improvements
