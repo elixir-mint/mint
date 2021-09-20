@@ -6,10 +6,7 @@ defmodule Mint.HTTP2.FrameTest do
 
   import Mint.HTTP2.Frame, except: [decode_next: 1, encode_raw: 4]
 
-  alias Mint.HTTP2.{
-    Frame,
-    HPACK
-  }
+  alias Mint.HTTP2.Frame
 
   test "set_flags/2" do
     assert set_flags(:ping, [:ack]) == 0x01
@@ -65,12 +62,12 @@ defmodule Mint.HTTP2.FrameTest do
       {encoded_headers, _} =
         headers
         |> Enum.map(fn {name, value} -> {:no_store, name, value} end)
-        |> HPACK.encode(HPACK.new(100_000))
+        |> HPAX.encode(HPAX.new(100_000))
 
       assert {:ok, headers(stream_id: 3, flags: 0x00, hbf: hbf, padding: nil), "rest"} =
                Frame.decode_next(encode_raw(0x01, 0x00, 3, encoded_headers) <> "rest")
 
-      assert {:ok, ^headers, _} = HPACK.decode(hbf, HPACK.new(100_000))
+      assert {:ok, ^headers, _} = HPAX.decode(hbf, HPAX.new(100_000))
     end
 
     test "without padding and without priority" do
