@@ -133,11 +133,7 @@ defmodule Mint.HTTP2 do
   alias Mint.{HTTPError, TransportError}
   alias Mint.Types
   alias Mint.Core.Util
-
-  alias Mint.HTTP2.{
-    Frame,
-    HPACK
-  }
+  alias Mint.HTTP2.Frame
 
   require Logger
   require Integer
@@ -175,8 +171,8 @@ defmodule Mint.HTTP2 do
     # Fields of the connection.
     buffer: "",
     window_size: @default_window_size,
-    encode_table: HPACK.new(4096),
-    decode_table: HPACK.new(4096),
+    encode_table: HPAX.new(4096),
+    decode_table: HPAX.new(4096),
 
     # Queue for sent PING frames.
     ping_queue: :queue.new(),
@@ -1120,7 +1116,7 @@ defmodule Mint.HTTP2 do
     assert_headers_smaller_than_max_header_list_size(conn, headers)
 
     headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-    {hbf, conn} = get_and_update_in(conn.encode_table, &HPACK.encode(headers, &1))
+    {hbf, conn} = get_and_update_in(conn.encode_table, &HPAX.encode(headers, &1))
 
     payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
 
@@ -1632,7 +1628,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp decode_hbf(conn, hbf) do
-    case HPACK.decode(hbf, conn.decode_table) do
+    case HPAX.decode(hbf, conn.decode_table) do
       {:ok, headers, decode_table} ->
         conn = put_in(conn.decode_table, decode_table)
         {conn, headers}
@@ -1720,7 +1716,7 @@ defmodule Mint.HTTP2 do
   defp apply_server_settings(conn, server_settings) do
     Enum.reduce(server_settings, conn, fn
       {:header_table_size, header_table_size}, conn ->
-        update_in(conn.encode_table, &HPACK.resize(&1, header_table_size))
+        update_in(conn.encode_table, &HPAX.resize(&1, header_table_size))
 
       {:enable_push, enable_push?}, conn ->
         put_in(conn.server_settings.enable_push, enable_push?)
