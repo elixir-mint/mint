@@ -126,6 +126,11 @@ defmodule Mint.IntegrationTest do
 
     @dst_and_isrg Path.expand("../support/mint/dst_and_isrg.pem", __DIR__)
 
+    # OTP 18.3 fails to connect to letsencrypt.org, skip this test
+    if Mint.Core.Transport.SSL.ssl_version() < [8, 0] do
+      @tag skip: ":ssl version too old"
+    end
+
     # This test assumes the letsencrypt.org server presents the 'long chain',
     # consisting of the following certificates:
     #
@@ -139,7 +144,7 @@ defmodule Mint.IntegrationTest do
     # This is currently the case, but won't be the case after Sep 2024, or
     # possibly earlier.
     test "Let's Encrypt ISRG cross-signed by expired root" do
-      assert {:ok, conn} =
+      assert {:ok, _conn} =
                HTTP.connect(:https, "letsencrypt.org", 443,
                  transport_opts: [cacertfile: @dst_and_isrg, reuse_sessions: false]
                )
