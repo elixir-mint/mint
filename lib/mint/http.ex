@@ -234,7 +234,7 @@ defmodule Mint.HTTP do
 
     * `:active` - controlled by the `:mode` option. Cannot be overridden.
 
-    * `:mode` - set to `:binary`. Cannot be overriden.
+    * `:mode` - set to `:binary`. Cannot be overridden.
 
     * `:packet` - set to `:raw`. Cannot be overridden.
 
