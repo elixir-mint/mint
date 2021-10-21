@@ -15,10 +15,10 @@
 
 ### Bug fixes and improvements
 
-  * Improve compatability with OTP 24.
+  * Improve compatibility with OTP 24.
   * Support HTTP/1 pipelining when streaming requests.
   * Add `Mint.HTTP.get_socket/1` for returning the connection socket.
-  * Improve compatability with TLS 1.3.
+  * Improve compatibility with TLS 1.3.
 
 ## v1.2.1
 
@@ -48,7 +48,7 @@
   * Fix a bug where we would send `WINDOW_UPDATE` frames with an increment of `0` in HTTP/2.
   * Make the empty body chunk a no-op for `Mint.HTTP.stream_request_body/3` (only for HTTP/1).
   * Add the `Mint.HTTP.is_connection_message/2` guard.
-  * Fix wildcard certifcate verification in OTP 23.
+  * Fix wildcard certificate verification in OTP 23.
 
 ## v1.0.0
 
