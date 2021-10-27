@@ -324,6 +324,24 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "body following a 101 switching-protocols", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/socket/websocket", [], nil)
+
+    response =
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: WebSocket\r\n" <>
+        "Connection: Upgrade\r\n\r\n" <> <<129, 3, 53, 49, 55, 136, 0>>
+
+    assert {:ok, conn, [status, headers, data, done]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, 101}
+    assert headers == {:headers, ref, [{"upgrade", "WebSocket"}, {"connection", "Upgrade"}]}
+    assert data == {:data, ref, <<129, 3, 53, 49, 55, 136, 0>>}
+    assert done == {:done, ref}
+
+    assert conn.buffer == <<>>
+  end
+
   test "unallowed trailing headers are removed from the trailing headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
