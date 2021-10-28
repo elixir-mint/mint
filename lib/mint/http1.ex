@@ -642,7 +642,7 @@ defmodule Mint.HTTP1 do
     {:ok, conn, responses}
   end
 
-  defp decode_body(:eager, conn, data, request_ref, responses) do
+  defp decode_body(:single, conn, data, request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
     conn = request_done(conn)
     responses = [{:done, request_ref} | responses]
@@ -879,7 +879,7 @@ defmodule Mint.HTTP1 do
   defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       status == 101 ->
-        {:ok, :eager}
+        {:ok, :single}
 
       method == "HEAD" or status in 100..199 or status in [204, 304] ->
         {:ok, :none}
