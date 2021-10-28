@@ -316,8 +316,20 @@ defmodule HTTP2.IntegrationTest do
     assert_receive message, 1000
 
     case HTTP2.stream(conn, message) do
-      {:ok, %HTTP2{} = conn, []} -> stream_messages_until_response(conn)
-      other -> other
+      {:ok, %HTTP2{} = conn, [:settings]} ->
+        stream_messages_until_response(conn)
+
+      {:ok, %HTTP2{} = conn, [:settings_ack]} ->
+        stream_messages_until_response(conn)
+
+      {:ok, %HTTP2{} = conn, [:settings, :settings_ack | rest]} ->
+        {:ok, %HTTP2{} = conn, rest}
+
+      {:ok, %HTTP2{} = conn, []} ->
+        stream_messages_until_response(conn)
+
+      other ->
+        other
     end
   end
 

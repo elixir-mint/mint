@@ -52,7 +52,7 @@ defmodule Mint.IntegrationTest do
 
       assert conn.__struct__ == Mint.HTTP2
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
-      assert {:ok, _conn, responses} = receive_stream(conn)
+      assert {:ok, _conn, responses} = Mint.HTTP2.TestHelpers.receive_stream(conn)
 
       assert [
                {:status, ^request, 200},

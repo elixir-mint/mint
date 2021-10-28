@@ -51,8 +51,7 @@ defmodule Mint.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      # LRB TODO :sasl for test only
-      extra_applications: [:sasl, :logger, :ssl],
+      extra_applications: [:logger, :ssl],
       mod: {Mint.Application, []}
     ]
   end
