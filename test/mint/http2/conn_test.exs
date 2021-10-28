@@ -13,10 +13,12 @@ defmodule Mint.HTTP2Test do
 
   require Mint.HTTP
 
+  @pdict_key {__MODULE__, :http2_test_server}
+
   setup :start_connection
 
-  defmacrop assert_recv_frames(frames) when is_list(frames) do
-    quote do: unquote(frames) = recv_next_frames(unquote(length(frames)))
+  defmacrop assert_recv_frames(test_runner_ref, frames) when is_list(frames) do
+    quote do: unquote(frames) = recv_frames(unquote(test_runner_ref), unquote(length(frames)))
   end
 
   defmacrop assert_http2_error(error, expected_reason) do
@@ -81,10 +83,10 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closed streams" do
-    test "server closes a stream with RST_STREAM", %{conn: conn} do
+    test "server closes a stream with RST_STREAM", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -98,10 +100,10 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when server sends frames after sending RST_STREAM, they are ignored",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -115,14 +117,17 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "client closes a stream with cancel_request/2", %{conn: conn} do
+    test "client closes a stream with cancel_request/2", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
       {:ok, conn} = HTTP2.cancel_request(conn, ref)
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         headers(stream_id: stream_id),
         rst_stream(stream_id: stream_id, error_code: :cancel)
-      ]
+      ])
 
       # If the server replies next, we ignore the replies.
       assert {:ok, %HTTP2{} = conn, []} =
@@ -134,10 +139,13 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "receiving a RST_STREAM on a closed stream is ignored", %{conn: conn} do
+    test "receiving a RST_STREAM on a closed stream is ignored", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -146,7 +154,7 @@ defmodule Mint.HTTP2Test do
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
-      assert_recv_frames [rst_stream(stream_id: ^stream_id)]
+      assert_recv_frames(test_runner_ref, [rst_stream(stream_id: ^stream_id)])
 
       assert {:ok, %HTTP2{} = conn, []} =
                stream_frames(conn, [
@@ -160,10 +168,10 @@ defmodule Mint.HTTP2Test do
 
   describe "stream state transitions" do
     test "if client receives HEADERS after receiving a END_STREAM flag, it ignores it",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -177,10 +185,10 @@ defmodule Mint.HTTP2Test do
     end
 
     test "if client receives DATA after receiving a END_STREAM flag, it ignores it",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -195,12 +203,16 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "server closes the connection" do
-    test "with GOAWAY with :protocol_error", %{conn: conn} do
+    test "with GOAWAY with :protocol_error", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
       {conn, ref1} = open_request(conn)
       {conn, ref2} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: first_stream_id), headers(), headers()]
+      assert_recv_frames(test_runner_ref, [
+        headers(stream_id: first_stream_id),
+        headers(),
+        headers()
+      ])
 
       assert {:error, %HTTP2{} = conn, error, responses} =
                stream_frames(conn, [
@@ -229,17 +241,20 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn, :read)
     end
 
-    test "with GOAWAY with :no_error and responses after the GOAWAY frame", %{conn: conn} do
+    test "with GOAWAY with :no_error and responses after the GOAWAY frame", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
                  goaway(last_stream_id: stream_id, error_code: :no_error, debug_data: ""),
                  headers(
                    stream_id: stream_id,
-                   hbf: server_encode_headers([{":status", "200"}]),
+                   hbf: encode_headers([{":status", "200"}]),
                    flags: set_flags(:headers, [:end_headers, :end_stream])
                  )
                ])
@@ -281,10 +296,13 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closed connection" do
-    test "client closes the connection with close/1", %{conn: conn} do
+    test "client closes the connection with close/1", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       assert {:ok, conn} = HTTP2.close(conn)
 
-      assert_recv_frames [goaway(error_code: :no_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :no_error)])
 
       refute HTTP2.open?(conn)
     end
@@ -299,8 +317,7 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "request/5 returns error if the connection is closed",
-         %{conn: conn} do
+    test "request/5 returns error if the connection is closed", %{conn: conn} do
       assert {:error, %HTTP2{} = conn, _error, []} =
                stream_frames(conn, [
                  goaway(
@@ -338,6 +355,7 @@ defmodule Mint.HTTP2Test do
   describe "client errors" do
     @tag server_settings: [max_concurrent_streams: 1]
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
+      {:ok, conn} = wait_for_settings(conn)
       {conn, _ref} = open_request(conn)
       assert HTTP2.open_request_count(conn) == 1
       expected_window_size = HTTP2.get_window_size(conn, :connection)
@@ -370,11 +388,14 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
-    test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
+    test "when an ssl timeout is triggered on stream request body", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       # open a streaming request.
       {conn, ref} = open_request(conn, :stream)
 
-      assert_recv_frames [headers()]
+      assert_recv_frames(test_runner_ref, [headers()])
 
       # force the transport to one that always times out on send
       conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
@@ -392,13 +413,16 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "headers and continuation" do
-    test "server splits headers into multiple CONTINUATION frames", %{conn: conn} do
+    test "server splits headers into multiple CONTINUATION frames", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> =
-        server_encode_headers([{":status", "200"}, {"foo", "bar"}, {"baz", "bong"}])
+        encode_headers([{":status", "200"}, {"foo", "bar"}, {"baz", "bong"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -421,10 +445,13 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "server sends a badly encoded header block fragment", %{conn: conn} do
+    test "server sends a badly encoded header block fragment", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -438,16 +465,16 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:compression_error, debug_data}
       assert debug_data =~ "unable to decode headers: :bad_binary_encoding"
 
-      assert_recv_frames [goaway(error_code: :compression_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :compression_error)])
 
       refute HTTP2.open?(conn)
     end
 
     test "server sends a CONTINUATION frame outside of headers streaming",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [continuation(stream_id: stream_id, hbf: "hbf")])
@@ -455,16 +482,16 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, debug_data}
       assert debug_data =~ "CONTINUATION received outside of headers streaming"
 
-      assert_recv_frames [goaway(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :protocol_error)])
 
       refute HTTP2.open?(conn)
     end
 
     test "server sends a non-CONTINUATION frame while streaming headers",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -475,19 +502,19 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, debug_data}
       assert debug_data =~ "headers are streaming but got a :data frame"
 
-      assert_recv_frames [goaway(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :protocol_error)])
 
       refute HTTP2.open?(conn)
     end
 
     test "server sends HEADERS with END_STREAM but no END_HEADERS and then sends CONTINUATIONs",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
       <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> =
-        server_encode_headers([{":status", "200"}, {"foo", "bar"}, {"baz", "bong"}])
+        encode_headers([{":status", "200"}, {"foo", "bar"}, {"baz", "bong"}])
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       {:ok, %HTTP2{} = conn, responses} =
         stream_frames(conn, [
@@ -502,15 +529,18 @@ defmodule Mint.HTTP2Test do
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
 
-      assert_recv_frames [rst_stream(error_code: :no_error)]
+      assert_recv_frames(test_runner_ref, [rst_stream(error_code: :no_error)])
 
       assert HTTP2.open?(conn)
     end
 
-    test "server sends a response without a :status header", %{conn: conn} do
+    test "server sends a response without a :status header", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -521,29 +551,32 @@ defmodule Mint.HTTP2Test do
       assert [{:error, ^ref, error}] = responses
       assert_http2_error error, :missing_status_header
 
-      assert_recv_frames [rst_stream(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [rst_stream(error_code: :protocol_error)])
 
       assert HTTP2.open?(conn)
     end
 
-    test "client has to split headers because of max frame size", %{conn: conn} do
+    test "client has to split headers because of max frame size", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       # This is an empirical number of headers so that the minimum max frame size (~16kb) fits
       # between 2 and 3 times (so that we can test the behaviour above).
       headers = for i <- 1..400, do: {"a#{i}", String.duplicate("a", 100)}
       assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers, nil)
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         headers(stream_id: stream_id, hbf: hbf1, flags: flags1),
         continuation(stream_id: stream_id, hbf: hbf2, flags: flags2),
         continuation(stream_id: stream_id, hbf: hbf3, flags: flags3)
-      ]
+      ])
 
       assert flag_set?(flags1, :headers, :end_stream)
       refute flag_set?(flags1, :headers, :end_headers)
       refute flag_set?(flags2, :continuation, :end_headers)
       assert flag_set?(flags3, :continuation, :end_headers)
 
-      headers = server_decode_headers(hbf1 <> hbf2 <> hbf3)
+      headers = decode_headers(hbf1 <> hbf2 <> hbf3)
       assert [{":method", "GET"}, {":path", "/"}, {":scheme", "https"} | _] = headers
 
       assert HTTP2.open?(conn)
@@ -553,6 +586,7 @@ defmodule Mint.HTTP2Test do
     test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
+      {:ok, conn} = wait_for_settings(conn)
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
@@ -566,14 +600,14 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
-    test ":authority pseudo-header includes port", %{conn: conn} do
+    test ":authority pseudo-header includes port", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf)])
 
       assert {":authority", authority} =
                hbf
-               |> server_decode_headers()
+               |> decode_headers()
                |> List.keyfind(":authority", 0)
 
       assert authority == "#{conn.hostname}:#{conn.port}"
@@ -582,7 +616,7 @@ defmodule Mint.HTTP2Test do
     end
 
     test ":authority pseudo-header does not include port if it is the scheme's default",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       default_https_port = URI.default_port("https")
 
       try do
@@ -591,11 +625,11 @@ defmodule Mint.HTTP2Test do
 
         {conn, _ref} = open_request(conn)
 
-        assert_recv_frames [headers(hbf: hbf)]
+        assert_recv_frames(test_runner_ref, [headers(hbf: hbf)])
 
         assert {":authority", authority} =
                  hbf
-                 |> server_decode_headers()
+                 |> decode_headers()
                  |> List.keyfind(":authority", 0)
 
         assert authority == conn.hostname
@@ -607,13 +641,13 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when there's a request body, the content-length header is passed if not present",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn, "hello")
 
-      assert_recv_frames [headers(hbf: hbf), data()]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf), data()])
 
       assert hbf
-             |> server_decode_headers()
+             |> decode_headers()
              |> List.keyfind("content-length", 0) == {"content-length", "5"}
 
       # Let's check that content-length is not overridden if already present.
@@ -621,33 +655,33 @@ defmodule Mint.HTTP2Test do
       headers = [{"content-length", "10"}]
       assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers, "XX")
 
-      assert_recv_frames [headers(hbf: hbf), data()]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf), data()])
 
       assert hbf
-             |> server_decode_headers()
+             |> decode_headers()
              |> List.keyfind("content-length", 0) == {"content-length", "10"}
 
       # Let's make sure content-length isn't added if the body is nil or :stream.
 
       {conn, _ref} = open_request(conn, nil)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf)])
 
       refute hbf
-             |> server_decode_headers()
+             |> decode_headers()
              |> List.keymember?("content-length", 0)
 
       assert HTTP2.open?(conn)
     end
 
     test "the Cookie header is joined into a single value if present multiple times",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       hbf =
-        server_encode_headers([
+        encode_headers([
           {":status", "200"},
           {"accept", "text/plain"},
           {"cookie", "a=b"},
@@ -673,24 +707,28 @@ defmodule Mint.HTTP2Test do
       assert cookie == "a=b; c=d; e=f; g=h"
     end
 
-    test "a CONNECT request omits :scheme and :path pseudo-headers", %{conn: conn} do
+    test "a CONNECT request omits :scheme and :path pseudo-headers", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", [], nil)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf)])
 
       refute hbf
-             |> server_decode_headers()
+             |> decode_headers()
              |> List.keymember?(":scheme", 0)
 
       refute hbf
-             |> server_decode_headers()
+             |> decode_headers()
              |> List.keymember?(":path", 0)
 
       assert HTTP2.open?(conn)
     end
 
     test "explicitly passed pseudo-headers are sorted to the front of the headers list", %{
-      conn: conn
+      conn: conn,
+      test_runner_ref: test_runner_ref
     } do
       headers = [
         {":scheme", conn.scheme},
@@ -700,7 +738,7 @@ defmodule Mint.HTTP2Test do
 
       assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", headers, :stream)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames(test_runner_ref, [headers(hbf: hbf)])
 
       assert [
                {":method", "CONNECT"},
@@ -709,22 +747,25 @@ defmodule Mint.HTTP2Test do
                {":path", "/ws"},
                {":protocol", "websocket"},
                {"user-agent", _}
-             ] = server_decode_headers(hbf)
+             ] = decode_headers(hbf)
 
       assert HTTP2.open?(conn)
     end
   end
 
   describe "trailing headers" do
-    test "sent by the server with a normal response", %{conn: conn} do
+    test "sent by the server with a normal response", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      hbf = server_encode_headers([{":status", "200"}])
+      hbf = encode_headers([{":status", "200"}])
 
       <<trailing_hbf1::1-bytes, trailing_hbf2::binary>> =
-        server_encode_headers([{"x-trailing", "some value"}])
+        encode_headers([{"x-trailing", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -759,13 +800,13 @@ defmodule Mint.HTTP2Test do
     end
 
     test "sent by the server directly after the \"opening\" headers (without data in between)",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      hbf = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      hbf = encode_headers([{":status", "200"}])
+      trailing_hbf = encode_headers([{"x-trailing", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -791,17 +832,17 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "with a push promise request", %{conn: conn} do
+    test "with a push promise request", %{conn: conn, test_runner_ref: test_runner_ref} do
       promised_stream_id = 4
 
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      promised_hbf = server_encode_headers([{":method", "GET"}])
-      hbf1 = server_encode_headers([{":status", "200"}])
-      hbf2 = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      promised_hbf = encode_headers([{":method", "GET"}])
+      hbf1 = encode_headers([{":status", "200"}])
+      hbf2 = encode_headers([{":status", "200"}])
+      trailing_hbf = encode_headers([{"x-trailing", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -843,13 +884,16 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "protocol error if trailing headers don't have END_STREAM set", %{conn: conn} do
+    test "protocol error if trailing headers don't have END_STREAM set", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      hbf = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      hbf = encode_headers([{":status", "200"}])
+      trailing_hbf = encode_headers([{"x-trailing", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -879,16 +923,16 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "unallowed headers are removed", %{conn: conn} do
+    test "unallowed headers are removed", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      hbf = server_encode_headers([{":status", "200"}])
+      hbf = encode_headers([{":status", "200"}])
 
       # Note that headers are lowercase in HTTP/2 responses because the spec
       # says so.
-      trailing_hbf = server_encode_headers([{"x-trailing", "value"}, {"host", "example.com"}])
+      trailing_hbf = encode_headers([{"x-trailing", "value"}, {"host", "example.com"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -918,20 +962,20 @@ defmodule Mint.HTTP2Test do
 
   describe "server pushes" do
     test "a PUSH_PROMISE frame and a few CONTINUATION frames are received",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       promised_stream_id = 4
 
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       # Promised headers.
       headers = [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
 
-      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = server_encode_headers(headers)
+      <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = encode_headers(headers)
 
       # Normal headers.
-      hbf = server_encode_headers([{":status", "200"}, {"push", "promise"}])
+      hbf = encode_headers([{":status", "200"}, {"push", "promise"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -989,12 +1033,13 @@ defmodule Mint.HTTP2Test do
 
     @tag connect_options: [client_settings: [enable_push: false]]
     test "receiving PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH is false causes an error",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
+      {:ok, conn} = wait_for_settings(conn)
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      hbf = server_encode_headers([{":method", "GET"}])
+      hbf = encode_headers([{":method", "GET"}])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -1009,18 +1054,18 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, debug_data}
       assert debug_data =~ "received PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH was false"
 
-      assert_recv_frames [goaway(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :protocol_error)])
       refute HTTP2.open?(conn)
     end
 
     test "if the server tries to reserve an already existing stream the connection errors",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
-      normal_headers_hbf = server_encode_headers([{":status", "200"}])
+      promised_headers_hbf = encode_headers([{":method", "GET"}])
+      normal_headers_hbf = encode_headers([{":status", "200"}])
 
       assert {:error, %HTTP2{} = conn, error, _responses} =
                stream_frames(conn, [
@@ -1051,13 +1096,14 @@ defmodule Mint.HTTP2Test do
 
     @tag connect_options: [client_settings: [max_concurrent_streams: 1]]
     test "if the server reaches the max number of client streams, the client sends an error",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
+      {:ok, conn} = wait_for_settings(conn)
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
-      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
-      normal_headers_hbf = server_encode_headers([{":status", "200"}])
+      promised_headers_hbf = encode_headers([{":method", "GET"}])
+      normal_headers_hbf = encode_headers([{":status", "200"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1088,7 +1134,9 @@ defmodule Mint.HTTP2Test do
                {:done, ^ref}
              ] = responses
 
-      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+      assert_recv_frames(test_runner_ref, [
+        rst_stream(stream_id: ^stream_id, error_code: :no_error)
+      ])
 
       # Here we send headers for the two promised streams. Note that neither of the
       # header frames have the END_STREAM flag set otherwise we close the streams and
@@ -1109,19 +1157,19 @@ defmodule Mint.HTTP2Test do
 
       assert [{:status, ^promised_ref1, 200}, {:headers, ^promised_ref1, []}] = responses
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         rst_stream(stream_id: 6, error_code: :refused_stream)
-      ]
+      ])
 
       assert HTTP2.open?(conn)
     end
   end
 
   describe "misbehaving server" do
-    test "sends a frame with the wrong stream id", %{conn: conn} do
+    test "sends a frame with the wrong stream id", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers()]
+      assert_recv_frames(test_runner_ref, [headers()])
 
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
       assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
@@ -1129,15 +1177,15 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, debug_data}
       assert debug_data =~ "frame :ping only allowed at the connection level"
 
-      assert_recv_frames [goaway(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :protocol_error)])
 
       refute HTTP2.open?(conn)
     end
 
-    test "sends a frame with a bad size", %{conn: conn} do
+    test "sends a frame with a bad size", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers()]
+      assert_recv_frames(test_runner_ref, [headers()])
 
       # Payload should be 8 bytes long, but is empty here.
       data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<>>))
@@ -1147,15 +1195,15 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:frame_size_error, debug_data}
       assert debug_data =~ "error with size of frame: :ping"
 
-      assert_recv_frames [goaway(error_code: :frame_size_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :frame_size_error)])
       refute HTTP2.open?(conn)
     end
 
     test "sends a frame on a stream with a stream ID bigger than client's biggest",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       bad_stream_id = stream_id + 10
 
@@ -1167,7 +1215,7 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, debug_data}
       assert debug_data =~ "frame with stream ID #{bad_stream_id} has not been opened yet"
 
-      assert_recv_frames [goaway(error_code: :protocol_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :protocol_error)])
 
       refute HTTP2.open?(conn)
     end
@@ -1175,17 +1223,17 @@ defmodule Mint.HTTP2Test do
 
   describe "flow control" do
     test "client sends data that goes over window size of a stream/connection when streaming",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       # First we decrease the connection size by 5 bytes, so that the connection window
       # size is smaller than the stream window size.
       {conn, _ref} = open_request(conn, "XXXXX")
 
-      assert_recv_frames [headers(), data()]
+      assert_recv_frames(test_runner_ref, [headers(), data()])
 
       # Then we open a streaming request.
       {conn, ref} = open_request(conn, :stream)
 
-      assert_recv_frames [headers()]
+      assert_recv_frames(test_runner_ref, [headers()])
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}) + 1)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
@@ -1201,21 +1249,23 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag server_settings: [initial_window_size: 1]
-    test "if client's request goes over window size, no HEADER frames are sent", %{conn: conn} do
+    test "if client's request goes over window size, no HEADER frames are sent",
+         %{conn: conn} do
+      {:ok, conn} = wait_for_settings(conn)
       expected_window_size = HTTP2.get_window_size(conn, :connection)
       assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], "XX")
       assert_http2_error error, {:exceeds_window_size, :request, 1}
       assert HTTP2.open?(conn)
       assert HTTP2.open_request_count(conn) == 0
       assert HTTP2.get_window_size(conn, :connection) == expected_window_size
-      refute_receive {:ssl, _, _}
+      refute_received {:ssl, _sock, _data}
     end
 
     test "server sends a WINDOW_UPDATE with too big of a size on a stream",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1229,16 +1279,18 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:flow_control_error, debug_data}
       assert debug_data =~ "window size too big"
 
-      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :flow_control_error)]
+      assert_recv_frames(test_runner_ref, [
+        rst_stream(stream_id: ^stream_id, error_code: :flow_control_error)
+      ])
 
       assert HTTP2.open?(conn)
     end
 
     test "server sends a WINDOW_UPDATE with too big of a size on the connection level",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: _stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: _stream_id)])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -1251,15 +1303,18 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:flow_control_error, debug_data}
       assert debug_data =~ "window size too big"
 
-      assert_recv_frames [goaway(error_code: :flow_control_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :flow_control_error)])
 
       refute HTTP2.open?(conn)
     end
 
-    test "server violates client's max frame size", %{conn: conn} do
+    test "server violates client's max frame size", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -1269,23 +1324,23 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:frame_size_error, debug_data}
       assert debug_data =~ "frame payload exceeds connection's max frame size"
 
-      assert_recv_frames [goaway(error_code: :frame_size_error)]
+      assert_recv_frames(test_runner_ref, [goaway(error_code: :frame_size_error)])
 
       refute HTTP2.open?(conn)
     end
 
     test "client splits data automatically based on server's max frame size",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       max_frame_size = HTTP2.get_server_setting(conn, :max_frame_size)
 
       body = :binary.copy(<<0>>, max_frame_size + 1)
       {conn, _ref} = open_request(conn, body)
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         headers(stream_id: stream_id),
         data(stream_id: stream_id, flags: flags1, data: data1),
         data(stream_id: stream_id, flags: flags2, data: data2)
-      ]
+      ])
 
       assert flags1 == set_flags(:data, [])
       assert data1 == :binary.copy(<<0>>, max_frame_size)
@@ -1317,17 +1372,19 @@ defmodule Mint.HTTP2Test do
     end
 
     test "if the server sends an empty DATA frame, we don't send WINDOW_UPDATE back",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn, :stream)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert {:ok, %HTTP2{} = _conn, responses} =
                stream_frames(conn, [
                  data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
                ])
 
-      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+      assert_recv_frames(test_runner_ref, [
+        rst_stream(stream_id: ^stream_id, error_code: :no_error)
+      ])
 
       assert responses == [{:data, ref, ""}, {:done, ref}]
     end
@@ -1340,14 +1397,18 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "settings" do
-    test "put_settings/2 can be used to send settings to server", %{conn: conn} do
+    test "put_settings/2 can be used to send settings to server", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
+      {:ok, conn} = wait_for_settings(conn)
       {:ok, conn} = HTTP2.put_settings(conn, max_concurrent_streams: 123)
 
-      assert_recv_frames [settings() = frame]
+      assert_recv_frames(test_runner_ref, [settings() = frame])
       assert settings(frame, :params) == [max_concurrent_streams: 123]
       assert settings(frame, :flags) == set_flags(:settings, [])
 
-      assert {:ok, %HTTP2{} = conn, []} =
+      assert {:ok, %HTTP2{} = conn, [:settings_ack]} =
                stream_frames(conn, [
                  settings(flags: set_flags(:settings, [:ack]), params: [])
                ])
@@ -1378,12 +1439,13 @@ defmodule Mint.HTTP2Test do
     end
 
     test "server can update the initial window size and affect open streams",
-         %{conn: conn} do
+         %{conn: conn, test_runner_ref: test_runner_ref} do
+      {:ok, conn} = wait_for_settings(conn)
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers()]
+      assert_recv_frames(test_runner_ref, [headers()])
 
-      {:ok, %HTTP2{} = conn, []} =
+      {:ok, %HTTP2{} = conn, [:settings]} =
         stream_frames(conn, [settings(params: [initial_window_size: 100])])
 
       assert HTTP2.get_server_setting(conn, :initial_window_size) == 100
@@ -1391,9 +1453,6 @@ defmodule Mint.HTTP2Test do
       # This stream is half_closed_local, so there's not point in updating its window size since
       # we won't send anything on it anymore.
       assert HTTP2.get_window_size(conn, {:request, ref}) == 65535
-
-      assert_recv_frames [settings(flags: flags)]
-      assert flags == set_flags(:settings, [:ack])
     end
 
     # TODO: We're skipping this test for now because we need to find a good way
@@ -1406,18 +1465,18 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "stream_request_body/3" do
-    test "streaming a request", %{conn: conn} do
+    test "streaming a request", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, ref} = open_request(conn, :stream)
       assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "foo")
       assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "bar")
       assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, :eof)
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         headers(stream_id: stream_id) = headers,
         data(stream_id: stream_id, data: "foo") = data1,
         data(stream_id: stream_id, data: "bar") = data2,
         data(stream_id: stream_id, data: "") = data3
-      ]
+      ])
 
       refute flag_set?(headers(headers, :flags), :headers, :end_stream)
       refute flag_set?(data(data1, :flags), :data, :end_stream)
@@ -1455,7 +1514,10 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "streaming a request with trailing headers", %{conn: conn} do
+    test "streaming a request with trailing headers", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn, :stream)
 
       # Using 1000 headers will go over the default max_frame_size so that the
@@ -1465,11 +1527,11 @@ defmodule Mint.HTTP2Test do
 
       assert {:ok, _conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
 
-      assert_recv_frames [
+      assert_recv_frames(test_runner_ref, [
         headers(stream_id: stream_id) = headers,
         headers(stream_id: stream_id, hbf: trailing_hbf1) = trailing_headers1,
         continuation(stream_id: stream_id, hbf: trailing_hbf2) = trailing_headers2
-      ]
+      ])
 
       assert flag_set?(headers(headers, :flags), :headers, :end_headers)
       refute flag_set?(headers(headers, :flags), :headers, :end_stream)
@@ -1479,7 +1541,7 @@ defmodule Mint.HTTP2Test do
 
       assert flag_set?(continuation(trailing_headers2, :flags), :continuation, :end_headers)
 
-      assert server_decode_headers(trailing_hbf1 <> trailing_hbf2) == trailing_headers
+      assert decode_headers(trailing_hbf1 <> trailing_hbf2) == trailing_headers
     end
 
     test "unallowed trailing headers cause an error", %{conn: conn} do
@@ -1501,7 +1563,10 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "open_request_count/1" do
-    test "returns the number of client-initiated open streams", %{conn: conn} do
+    test "returns the number of client-initiated open streams", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       assert HTTP2.open_request_count(conn) == 0
 
       {conn, _ref} = open_request(conn)
@@ -1510,13 +1575,13 @@ defmodule Mint.HTTP2Test do
       {conn, _ref} = open_request(conn)
       assert HTTP2.open_request_count(conn) == 2
 
-      assert_recv_frames [headers(stream_id: stream_id1), headers()]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id1), headers()])
 
       assert {:ok, %HTTP2{} = conn, _responses} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id1,
-                   hbf: server_encode_headers([{":status", "200"}]),
+                   hbf: encode_headers([{":status", "200"}]),
                    flags: set_flags(:headers, [:end_headers, :end_stream])
                  )
                ])
@@ -1527,34 +1592,36 @@ defmodule Mint.HTTP2Test do
 
   describe "connection modes" do
     @tag connect_options: [mode: :passive]
-    test "starting a connection with :passive mode and using recv/3", %{conn: conn} do
+    test "starting a connection with :passive mode and using recv/3", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       data =
-        server_encode_frames([
+        encode_frames([
           headers(
             stream_id: stream_id,
-            hbf: server_encode_headers([{":status", "200"}]),
+            hbf: encode_headers([{":status", "200"}]),
             flags: set_flags(:headers, [:end_headers, :end_stream])
           )
         ])
 
-      :ok = :ssl.send(server_get_socket(), data)
+      :ok = TestServer.send_data(Process.get(@pdict_key), data)
 
-      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
+      assert {:ok, conn, responses} = recv_ignore_settings(conn)
 
-      assert responses == [
-               {:status, ref, 200},
-               {:headers, ref, []},
-               {:done, ref}
-             ]
+      assert responses == [{:status, ref, 200}, {:headers, ref, []}, {:done, ref}]
 
       assert HTTP2.open?(conn)
     end
 
-    test "changing the mode of a connection with set_mode/2", %{conn: conn} do
+    test "changing the mode of a connection with set_mode/2", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       assert_raise ArgumentError, ~r"^can't use recv/3", fn ->
         HTTP2.recv(conn, 0, 100)
       end
@@ -1563,20 +1630,20 @@ defmodule Mint.HTTP2Test do
 
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       data =
-        server_encode_frames([
+        encode_frames([
           headers(
             stream_id: stream_id,
-            hbf: server_encode_headers([{":status", "200"}]),
+            hbf: encode_headers([{":status", "200"}]),
             flags: set_flags(:headers, [:end_headers, :end_stream])
           )
         ])
 
-      :ok = :ssl.send(server_get_socket(), data)
+      :ok = TestServer.send_data(Process.get(@pdict_key), data)
 
-      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
+      assert {:ok, conn, responses} = recv_ignore_settings(conn)
 
       assert responses == [
                {:status, ref, 200},
@@ -1595,10 +1662,15 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "ping" do
-    test "if we send a PING we then get a :pong reply", %{conn: conn} do
+    test "if we send a PING we then get a :pong reply", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       assert {:ok, conn, ref} = HTTP2.ping(conn)
 
-      assert_recv_frames [ping(opaque_data: opaque_data)]
+      ping_frame = recv_frames(test_runner_ref, 1)
+
+      assert [ping(opaque_data: opaque_data)] = ping_frame
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1610,10 +1682,13 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "if the server sends a PING we reply automatically", %{conn: conn} do
+    test "if the server sends a PING we reply automatically", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       opaque_data = :binary.copy(<<0>>, 8)
       assert {:ok, %HTTP2{}, []} = stream_frames(conn, [ping(opaque_data: opaque_data)])
-      assert_recv_frames [ping(opaque_data: ^opaque_data)]
+      assert [ping(opaque_data: ^opaque_data)] = recv_frames(test_runner_ref, 1)
     end
 
     test "if the server sends a PING ack but no PING requests are pending we emit a warning",
@@ -1643,10 +1718,10 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "stream priority" do
-    test "PRIORITY frames are ignored", %{conn: conn} do
+    test "PRIORITY frames are ignored", %{conn: conn, test_runner_ref: test_runner_ref} do
       {conn, _ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       assert capture_log(fn ->
                assert {:ok, %HTTP2{} = conn, []} =
@@ -1665,7 +1740,10 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "controlling process" do
-    test "changing the controlling process with controlling_process/2", %{conn: conn} do
+    test "changing the controlling process with controlling_process/2", %{
+      conn: conn,
+      test_runner_ref: test_runner_ref
+    } do
       parent = self()
       ref = make_ref()
 
@@ -1680,20 +1758,20 @@ defmodule Mint.HTTP2Test do
 
       {conn, request_ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(test_runner_ref, [headers(stream_id: stream_id)])
 
       data =
-        server_encode_frames([
+        encode_frames([
           headers(
             stream_id: stream_id,
-            hbf: server_encode_headers([{":status", "200"}]),
+            hbf: encode_headers([{":status", "200"}]),
             flags: set_flags(:headers, [:end_headers, :end_stream])
           )
         ])
 
       {:ok, %HTTP2{} = conn} = HTTP2.controlling_process(conn, new_pid)
 
-      :ok = :ssl.send(server_get_socket(), data)
+      :ok = TestServer.send_data(Process.get(@pdict_key), data)
 
       assert_receive {^ref, message}
       assert {:ok, %HTTP2{} = conn, responses} = HTTP2.stream(conn, message)
@@ -1708,51 +1786,98 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  @pdict_key {__MODULE__, :http2_test_server}
-
   defp start_connection(context) do
-    default_options = [transport_opts: [verify: :verify_none]]
-    options = Keyword.merge(default_options, context[:connect_options] || [])
-    {conn, server} = TestServer.connect(options, context[:server_settings] || [])
+    default_connect_options = [transport_opts: [verify: :verify_none]]
 
-    Process.put(@pdict_key, server)
+    context_connect_options = context[:connect_options] || []
+    context_server_settings = context[:server_settings] || []
 
-    [conn: conn]
+    connect_options = Keyword.merge(default_connect_options, context_connect_options)
+    test_runner_ref = make_ref()
+
+    send_settings_delay = Enum.random(0..10)
+
+    args = [
+      test_runner: {self(), test_runner_ref},
+      connect_options: connect_options,
+      server_settings: context_server_settings,
+      send_settings_delay: send_settings_delay
+    ]
+
+    {:ok, server_pid} = start_http2_server(args, test_runner_ref)
+
+    port =
+      receive do
+        {^test_runner_ref, {:port, port}} ->
+          port
+      after
+        500 ->
+          flunk("did not get server port in time!")
+      end
+
+    assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, connect_options)
+    assert %HTTP2{} = conn
+
+    Process.put(@pdict_key, server_pid)
+
+    [conn: conn, test_runner_ref: test_runner_ref, send_settings_delay: send_settings_delay]
   end
 
-  defp recv_next_frames(n) do
-    server = Process.get(@pdict_key)
-    TestServer.recv_next_frames(server, n)
+  defp recv_frames(ref, n) do
+    receive do
+      {^ref, {:frames_available, c}} when c >= n ->
+        server = Process.get(@pdict_key)
+        TestServer.recv_next_frames(server, n)
+
+      {^ref, {:frames_available, c}} when c < n ->
+        recv_frames(ref, n)
+    after
+      1000 ->
+        flunk("did not decode #{n} frames in 1000ms")
+    end
   end
 
   defp stream_frames(conn, frames) do
-    data = server_encode_frames(frames)
+    data = encode_frames(frames)
     HTTP2.stream(conn, {:ssl, conn.socket, data})
   end
 
-  defp server_get_socket() do
-    server = Process.get(@pdict_key)
-    TestServer.get_socket(server)
+  @spec encode_frames([frame :: term(), ...]) :: binary()
+  defp encode_frames(frames) when is_list(frames) and frames != [] do
+    {data, _final_encode_table} =
+      Enum.map_reduce(frames, HPAX.new(4096), fn
+        {frame_type, stream_id, headers, flags}, enc_tbl
+        when frame_type in [:headers, :push_promise] ->
+          {enc_tbl, hbf} = encode_headers(enc_tbl, headers)
+          flags = set_flags(frame_type, flags)
+          frame = headers(stream_id: stream_id, hbf: hbf, flags: flags)
+          {encode(frame), enc_tbl}
+
+        frame, enc_tbl ->
+          {encode(frame), enc_tbl}
+      end)
+
+    IO.iodata_to_binary(data)
   end
 
-  defp server_encode_frames(frames) do
-    server = Process.get(@pdict_key)
-    {server, data} = TestServer.encode_frames(server, frames)
-    Process.put(@pdict_key, server)
-    data
+  @spec encode_headers(Mint.Types.headers()) :: binary()
+  defp encode_headers(headers) when is_list(headers) do
+    headers = for {name, value} <- headers, do: {:store_name, name, value}
+    {hbf, _encode_table} = HPAX.encode(headers, HPAX.new(4096))
+    IO.iodata_to_binary(hbf)
   end
 
-  defp server_encode_headers(headers) do
-    server = Process.get(@pdict_key)
-    {server, hbf} = TestServer.encode_headers(server, headers)
-    Process.put(@pdict_key, server)
-    hbf
+  @spec encode_headers(binary(), Mint.Types.headers()) :: binary()
+  defp encode_headers(encode_table, headers) when is_list(headers) do
+    headers = for {name, value} <- headers, do: {:store_name, name, value}
+    {hbf, encode_table} = HPAX.encode(headers, encode_table)
+    {encode_table, IO.iodata_to_binary(hbf)}
   end
 
-  defp server_decode_headers(hbf) do
-    server = Process.get(@pdict_key)
-    {server, headers} = TestServer.decode_headers(server, hbf)
-    Process.put(@pdict_key, server)
+  @spec decode_headers(binary()) :: Mint.Types.headers()
+  def decode_headers(hbf) when is_binary(hbf) do
+    decode_table = HPAX.new(4096)
+    assert {:ok, headers, _decode_table} = HPAX.decode(hbf, decode_table)
     headers
   end
 
@@ -1760,5 +1885,51 @@ defmodule Mint.HTTP2Test do
     assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], body)
     assert is_reference(ref)
     {conn, ref}
+  end
+
+  defp start_http2_server(args, test_runner_ref) do
+    %{id: http2_server_id} = http2_server_spec = TestServer.child_spec(args)
+    new_id = String.to_atom(Atom.to_string(http2_server_id) <> "_" <> inspect(test_runner_ref))
+
+    http2_server_spec =
+      Map.put(http2_server_spec, :restart, :transient)
+      |> Map.put(:id, new_id)
+
+    server_pid = start_supervised!(http2_server_spec)
+    {:ok, server_pid}
+  end
+
+  defp recv_ignore_settings(conn) do
+    case HTTP2.recv(conn, 0, 100) do
+      {:ok, conn, [:settings]} ->
+        recv_ignore_settings(conn)
+
+      {:ok, conn, [:settings_ack]} ->
+        recv_ignore_settings(conn)
+
+      recvd ->
+        recvd
+    end
+  end
+
+  defp wait_for_settings(conn0) do
+    conn1 =
+      receive do
+        msg ->
+          {:ok, c, [:settings]} = Mint.HTTP.stream(conn0, msg)
+          c
+      after
+        1000 ->
+          flunk("did not receive expected :settings frame in 1s")
+      end
+
+    receive do
+      msg ->
+        {:ok, c, [:settings_ack]} = Mint.HTTP.stream(conn1, msg)
+        {:ok, c}
+    after
+      1000 ->
+        flunk("did not receive expected :settings_ack frame in 1s")
+    end
   end
 end

@@ -953,17 +953,7 @@ defmodule Mint.HTTP2 do
          preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
-
-         # LRB TODO elixir-mint/mint#311
-         {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
-         server_settings_ack =
-           settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
-         conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
-
-         # LRB TODO elixir-mint/mint#311
-         conn = apply_server_settings(conn, settings(server_settings, :params)),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
     else
@@ -1027,41 +1017,6 @@ defmodule Mint.HTTP2 do
       else
         {:error, transport.wrap_error({:bad_alpn_protocol, protocol})}
       end
-    end
-  end
-
-  # LRB TODO elixir-mint/mint#311
-  defp receive_server_settings(transport, socket) do
-    case recv_next_frame(transport, socket, _buffer = "") do
-      {:ok, settings(), _buffer, _socket} = result ->
-        result
-
-      {:ok, goaway(error_code: error_code, debug_data: debug_data), _buffer, _socket} ->
-        error = wrap_error({:server_closed_connection, error_code, debug_data})
-        {:error, error}
-
-      {:ok, frame, _buffer, _socket} ->
-        debug_data = "received invalid frame #{elem(frame, 0)} during handshake"
-        {:error, wrap_error({:protocol_error, debug_data})}
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  defp recv_next_frame(transport, socket, buffer) do
-    case Frame.decode_next(buffer, @default_max_frame_size) do
-      {:ok, frame, rest} ->
-        {:ok, frame, rest, socket}
-
-      :more ->
-        with {:ok, data} <- transport.recv(socket, 0, _timeout = 10_000) do
-          data = maybe_concat(buffer, data)
-          recv_next_frame(transport, socket, data)
-        end
-
-      {:error, {kind, _info} = reason} when kind in [:frame_size_error, :protocol_error] ->
-        {:error, wrap_error(reason)}
     end
   end
 
@@ -1711,12 +1666,12 @@ defmodule Mint.HTTP2 do
     if flag_set?(flags, :settings, :ack) do
       {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
       conn = apply_client_settings(conn, params)
-      {conn, responses}
+      {conn, [:settings_ack | responses]}
     else
       conn = apply_server_settings(conn, params)
       frame = settings(flags: set_flags(:settings, [:ack]), params: [])
       conn = send!(conn, Frame.encode(frame))
-      {conn, responses}
+      {conn, [:settings | responses]}
     end
   end
 

@@ -27,6 +27,14 @@ defmodule Mint.HTTP2.TestHelpers do
     end
   end
 
+  def maybe_done(conn, [:settings | rest], acc) do
+    maybe_done(conn, rest, acc)
+  end
+
+  def maybe_done(conn, [:settings_ack | rest], acc) do
+    maybe_done(conn, rest, acc)
+  end
+
   def maybe_done(conn, [{:done, _} = done | rest], acc) do
     if rest != [] do
       send(self(), {:rest, conn, rest})
