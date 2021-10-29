@@ -47,17 +47,29 @@ defmodule Mint.HTTP1.TestHelpers do
     end
   end
 
+  def settings_filter(:settings) do
+    false
+  end
+
+  def settings_filter(:settings_ack) do
+    false
+  end
+
+  def settings_filter(_) do
+    true
+  end
+
   def receive_stream(conn, acc) do
     socket = Mint.HTTP.get_socket(conn)
 
     receive do
       {tag, ^socket, _data} = message when tag in [:tcp, :ssl] ->
         assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
-        maybe_done(conn, acc ++ responses)
+        maybe_done(conn, acc ++ Enum.filter(responses, &settings_filter/1))
 
       {tag, ^socket} = message when tag in [:tcp_closed, :ssl_closed] ->
         assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
-        maybe_done(conn, acc ++ responses)
+        maybe_done(conn, acc ++ Enum.filter(responses, &settings_filter/1))
 
       {tag, ^socket, _reason} = message when tag in [:tcp_error, :ssl_error] ->
         assert {:error, _conn, _reason, _responses} = conn.__struct__.stream(conn, message)
