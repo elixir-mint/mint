@@ -267,6 +267,9 @@ defmodule HTTP2.IntegrationTest do
       {:ok, %HTTP2{} = conn, [:settings_ack]} ->
         stream_messages_until_response(conn)
 
+      {:ok, %HTTP2{} = conn, [:settings_ack | rest]} ->
+        {:ok, %HTTP2{} = conn, rest}
+
       {:ok, %HTTP2{} = conn, [:settings, :settings_ack | rest]} ->
         {:ok, %HTTP2{} = conn, rest}
 
