@@ -289,9 +289,8 @@ defmodule Mint.HTTP2.TestServer do
     end
   end
 
-  defp send_msg({pid, ref}, msg0) when is_pid(pid) and is_reference(ref) do
-    msg1 = {ref, msg0}
-    send(pid, msg1)
+  defp send_msg(pid, msg) when is_pid(pid) do
+    send(pid, msg)
     :ok
   end
 
