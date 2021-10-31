@@ -202,14 +202,7 @@ defmodule Mint.HTTP2.TestServer do
   defp send_settings(server_socket, server_settings) do
     import Mint.HTTP2.Frame, only: [settings: 1]
     settings_frame = Frame.encode(settings(params: server_settings))
-
-    case :ssl.send(server_socket, settings_frame) do
-      {:error, :closed} ->
-        :ok
-
-      val ->
-        val
-    end
+    :ok = ssl_send_closed_is_ok(server_socket, settings_frame)
   end
 
   defp maybe_send_settings_ack(_server_socket, {:more, _frames, _data} = frames) do
@@ -224,7 +217,7 @@ defmodule Mint.HTTP2.TestServer do
     f = fn
       settings(flags: ^ack_flags, params: []) ->
         reply_settings_frame = Frame.encode(settings(flags: ack_flags, params: []))
-        :ok = :ssl.send(server_socket, reply_settings_frame)
+        :ok = ssl_send_closed_is_ok(server_socket, reply_settings_frame)
         false
 
       _frame ->
@@ -300,5 +293,15 @@ defmodule Mint.HTTP2.TestServer do
     msg1 = {ref, msg0}
     send(pid, msg1)
     :ok
+  end
+
+  defp ssl_send_closed_is_ok(socket, data) do
+    case :ssl.send(socket, data) do
+      {:error, :closed} ->
+        :ok
+
+      val ->
+        val
+    end
   end
 end
