@@ -2052,7 +2052,7 @@ defmodule Mint.HTTP2Test do
         {^test_runner_ref, {:port, port}} ->
           port
       after
-        500 ->
+        1000 ->
           flunk("did not get server port in time!")
       end
 
