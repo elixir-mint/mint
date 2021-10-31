@@ -34,10 +34,6 @@ jobs:
             elixir: "1.9.4"
           - erlang: "21.3.8.24"
             elixir: "1.8.2"
-          - erlang: "20.3.8.26"
-            elixir: "1.7.4"
-          - erlang: "19.3.6.13"
-            elixir: "1.7.4"
     steps:
       - uses: actions/checkout@v1
 
