@@ -350,6 +350,7 @@ defmodule Mint.HTTP2Test do
 
   describe "client errors" do
     @tag server_settings: [max_concurrent_streams: 1]
+    @tag connect_options: [enable_async_settings: true]
     test "when the client tries to open too many concurrent requests", %{conn: conn} do
       {:ok, conn} = wait_for_settings(conn)
       {conn, _ref} = open_request(conn)
@@ -574,6 +575,7 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag server_settings: [max_header_list_size: 20]
+    @tag connect_options: [enable_async_settings: true]
     test "an error is returned if client exceeds SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
       # With such a low max_header_list_size, even the default :special headers (such as
       # :method or :path) exceed the size.
@@ -1018,7 +1020,7 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    @tag connect_options: [client_settings: [enable_push: false]]
+    @tag connect_options: [enable_async_settings: true, client_settings: [enable_push: false]]
     test "receiving PUSH_PROMISE frame when SETTINGS_ENABLE_PUSH is false causes an error",
          %{conn: conn} do
       {:ok, conn} = wait_for_settings(conn)
@@ -1081,7 +1083,10 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    @tag connect_options: [client_settings: [max_concurrent_streams: 1]]
+    @tag connect_options: [
+           enable_async_settings: true,
+           client_settings: [max_concurrent_streams: 1]
+         ]
     test "if the server reaches the max number of client streams, the client sends an error",
          %{conn: conn} do
       {:ok, conn} = wait_for_settings(conn)
@@ -1236,6 +1241,7 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag server_settings: [initial_window_size: 1]
+    @tag connect_options: [enable_async_settings: true]
     test "if client's request goes over window size, no HEADER frames are sent",
          %{conn: conn} do
       {:ok, conn} = wait_for_settings(conn)
@@ -1383,6 +1389,7 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "settings" do
+    @tag connect_options: [enable_async_settings: true]
     test "put_settings/2 can be used to send settings to server", %{
       conn: conn
     } do
@@ -1393,7 +1400,7 @@ defmodule Mint.HTTP2Test do
       assert settings(frame, :params) == [max_concurrent_streams: 123]
       assert settings(frame, :flags) == set_flags(:settings, [])
 
-      assert {:ok, %HTTP2{} = conn, [:settings_ack]} =
+      assert {:ok, %HTTP2{} = conn, []} =
                stream_frames(conn, [
                  settings(flags: set_flags(:settings, [:ack]), params: [])
                ])
@@ -1423,6 +1430,7 @@ defmodule Mint.HTTP2Test do
       end
     end
 
+    @tag connect_options: [enable_async_settings: true]
     test "server can update the initial window size and affect open streams",
          %{conn: conn} do
       {:ok, conn} = wait_for_settings(conn)
@@ -1593,7 +1601,12 @@ defmodule Mint.HTTP2Test do
 
       :ok = TestServer.send_data(Process.get(@pdict_key), data)
 
-      assert {:ok, conn, responses} = recv_ignore_settings(conn)
+      # LRB TODO
+      IO.puts(:stderr, "@@@@@@@@@ HTTP2 RECV 1 SETTINGS_ACK I BET")
+      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
+
+      IO.puts(:stderr, "@@@@@@@@@ HTTP2 RECV 2")
+      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
 
       assert responses == [{:status, ref, 200}, {:headers, ref, []}, {:done, ref}]
 
@@ -1613,18 +1626,19 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames([headers(stream_id: stream_id)])
 
-      data =
-        encode_frames([
-          headers(
-            stream_id: stream_id,
-            hbf: encode_headers([{":status", "200"}]),
-            flags: set_flags(:headers, [:end_headers, :end_stream])
-          )
-        ])
+      headers_frames = [
+        headers(
+          stream_id: stream_id,
+          hbf: encode_headers([{":status", "200"}]),
+          flags: set_flags(:headers, [:end_headers, :end_stream])
+        )
+      ]
+
+      data = encode_frames(headers_frames)
 
       :ok = TestServer.send_data(Process.get(@pdict_key), data)
 
-      assert {:ok, conn, responses} = recv_ignore_settings(conn)
+      assert {:ok, conn, responses} = HTTP2.recv(conn, 0, 100)
 
       assert responses == [
                {:status, ref, 200},
@@ -1869,19 +1883,6 @@ defmodule Mint.HTTP2Test do
     http2_server_spec = Map.put(http2_server_spec, :restart, :transient)
     server_pid = start_supervised!(http2_server_spec)
     {:ok, server_pid}
-  end
-
-  defp recv_ignore_settings(conn) do
-    case HTTP2.recv(conn, 0, 100) do
-      {:ok, conn, [:settings]} ->
-        recv_ignore_settings(conn)
-
-      {:ok, conn, [:settings_ack]} ->
-        recv_ignore_settings(conn)
-
-      recvd ->
-        recvd
-    end
   end
 
   defp wait_for_settings(conn0) do

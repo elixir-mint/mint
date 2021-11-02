@@ -170,6 +170,9 @@ defmodule Mint.HTTP2 do
     # Connection state (open, closed, and so on).
     :state,
 
+    # Handle SETTINGS asynchronously?
+    :enable_async_settings,
+
     # Fields of the connection.
     buffer: "",
     window_size: @default_window_size,
@@ -929,14 +932,23 @@ defmodule Mint.HTTP2 do
         ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
+
     mode = Keyword.get(opts, :mode, :active)
-    client_settings_params = Keyword.get(opts, :client_settings, [])
-    validate_settings!(client_settings_params)
 
     unless mode in [:active, :passive] do
       raise ArgumentError,
             "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
     end
+
+    enable_async_settings = Keyword.get(opts, :enable_async_settings, false)
+
+    unless is_boolean(enable_async_settings) do
+      raise ArgumentError,
+            "the :enable_async_settings option must be a boolean, got: #{inspect(enable_async_settings)}"
+    end
+
+    client_settings_params = Keyword.get(opts, :client_settings, [])
+    validate_settings!(client_settings_params)
 
     conn = %Mint.HTTP2{
       hostname: hostname,
@@ -945,7 +957,8 @@ defmodule Mint.HTTP2 do
       socket: socket,
       mode: mode,
       scheme: Atom.to_string(scheme),
-      state: :open
+      state: :open,
+      enable_async_settings: enable_async_settings
     }
 
     with :ok <- inet_opts(transport, socket),
@@ -953,6 +966,9 @@ defmodule Mint.HTTP2 do
          preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
+         {:ok, conn, buffer} <-
+           maybe_wait_for_settings(enable_async_settings, transport, socket, conn),
+         conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
@@ -989,6 +1005,27 @@ defmodule Mint.HTTP2 do
 
   ## Helpers
 
+  defp maybe_wait_for_settings(_enable_async_settings = true, _transport, _socket, conn) do
+    IO.puts(:stderr, "@@@@@@@@ SETTINGS ARE ASYNC")
+    {:ok, conn, ""}
+  end
+
+  defp maybe_wait_for_settings(_enable_async_settings = false, transport, socket, conn) do
+    IO.puts(:stderr, "@@@@@@@@ SETTINGS ARE NOT ASYNC")
+
+    with {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
+         server_settings_ack =
+           settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
+         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
+         conn = apply_server_settings(conn, settings(server_settings, :params)) do
+         IO.puts(:stderr, "@@@@@@@@ APPLIED SERVER SETTINGS")
+      {:ok, conn, buffer}
+    else
+      error ->
+        error
+    end
+  end
+
   defp handle_closed(conn) do
     conn = put_in(conn.state, :closed)
 
@@ -1017,6 +1054,40 @@ defmodule Mint.HTTP2 do
       else
         {:error, transport.wrap_error({:bad_alpn_protocol, protocol})}
       end
+    end
+  end
+
+  defp receive_server_settings(transport, socket) do
+    case recv_next_frame(transport, socket, _buffer = "") do
+      {:ok, settings(), _buffer, _socket} = result ->
+        result
+
+      {:ok, goaway(error_code: error_code, debug_data: debug_data), _buffer, _socket} ->
+        error = wrap_error({:server_closed_connection, error_code, debug_data})
+        {:error, error}
+
+      {:ok, frame, _buffer, _socket} ->
+        debug_data = "received invalid frame #{elem(frame, 0)} during handshake"
+        {:error, wrap_error({:protocol_error, debug_data})}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp recv_next_frame(transport, socket, buffer) do
+    case Frame.decode_next(buffer, @default_max_frame_size) do
+      {:ok, frame, rest} ->
+        {:ok, frame, rest, socket}
+
+      :more ->
+        with {:ok, data} <- transport.recv(socket, 0, _timeout = 10_000) do
+          data = maybe_concat(buffer, data)
+          recv_next_frame(transport, socket, data)
+        end
+
+      {:error, {kind, _info} = reason} when kind in [:frame_size_error, :protocol_error] ->
+        {:error, wrap_error(reason)}
     end
   end
 
@@ -1660,18 +1731,32 @@ defmodule Mint.HTTP2 do
 
   # SETTINGS
 
-  defp handle_settings(conn, frame, responses) do
+  defp handle_settings(
+         %Mint.HTTP2{enable_async_settings: enable_async_settings} = conn,
+         frame,
+         responses
+       ) do
     settings(flags: flags, params: params) = frame
 
     if flag_set?(flags, :settings, :ack) do
       {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
       conn = apply_client_settings(conn, params)
-      {conn, [:settings_ack | responses]}
+
+      if enable_async_settings do
+        {conn, [:settings_ack | responses]}
+      else
+        {conn, responses}
+      end
     else
       conn = apply_server_settings(conn, params)
       frame = settings(flags: set_flags(:settings, [:ack]), params: [])
       conn = send!(conn, Frame.encode(frame))
-      {conn, [:settings | responses]}
+
+      if enable_async_settings do
+        {conn, [:settings | responses]}
+      else
+        {conn, responses}
+      end
     end
   end
 
