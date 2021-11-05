@@ -67,7 +67,6 @@ defmodule Mint.HTTP2.TestServer do
 
   @impl true
   def handle_call({:send_data, data}, _from, %__MODULE__{server_socket: server_socket} = state) do
-    IO.puts(:stderr, "@@@@@@@@@ SENDING DATA #{inspect(data)}")
     result = :ssl.send(server_socket, data)
     {:reply, result, state}
   end

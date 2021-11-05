@@ -1006,19 +1006,15 @@ defmodule Mint.HTTP2 do
   ## Helpers
 
   defp maybe_wait_for_settings(_enable_async_settings = true, _transport, _socket, conn) do
-    IO.puts(:stderr, "@@@@@@@@ SETTINGS ARE ASYNC")
     {:ok, conn, ""}
   end
 
   defp maybe_wait_for_settings(_enable_async_settings = false, transport, socket, conn) do
-    IO.puts(:stderr, "@@@@@@@@ SETTINGS ARE NOT ASYNC")
-
     with {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
          server_settings_ack =
            settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
          :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
          conn = apply_server_settings(conn, settings(server_settings, :params)) do
-         IO.puts(:stderr, "@@@@@@@@ APPLIED SERVER SETTINGS")
       {:ok, conn, buffer}
     else
       error ->
