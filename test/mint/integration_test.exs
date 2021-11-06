@@ -76,6 +76,7 @@ defmodule Mint.IntegrationTest do
   describe "ssl certificate verification" do
     @describetag :integration
 
+    @tag :capture_log
     test "bad certificate - badssl.com" do
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
@@ -98,6 +99,7 @@ defmodule Mint.IntegrationTest do
                )
     end
 
+    @tag :capture_log
     test "bad hostname - badssl.com" do
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
