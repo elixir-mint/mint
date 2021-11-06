@@ -47,6 +47,7 @@ defmodule HTTP2.IntegrationTest do
   describe "http2.golang.org" do
     @describetag connect: {"http2.golang.org", 443}
 
+    @tag skip: "http2.golang.org is flaky"
     test "GET /reqinfo", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
 
@@ -66,6 +67,7 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "GET /clockstream", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [], nil)
 
@@ -93,6 +95,7 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "PUT /ECHO", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} =
                HTTP2.request(conn, "PUT", "/ECHO", [], "hello world")
@@ -114,6 +117,7 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "GET /file/gopher.png", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/file/gopher.png", [], nil)
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
@@ -136,6 +140,7 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "ping", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
       assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
@@ -143,6 +148,7 @@ defmodule HTTP2.IntegrationTest do
       assert HTTP2.open?(conn)
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "GET /serverpush", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/serverpush", [], nil)
       assert {:ok, %HTTP2{} = _conn, responses} = receive_stream(conn)
@@ -261,23 +267,8 @@ defmodule HTTP2.IntegrationTest do
     assert_receive message, 1000
 
     case HTTP2.stream(conn, message) do
-      {:ok, %HTTP2{} = conn, [:settings]} ->
-        stream_messages_until_response(conn)
-
-      {:ok, %HTTP2{} = conn, [:settings_ack]} ->
-        stream_messages_until_response(conn)
-
-      {:ok, %HTTP2{} = conn, [:settings_ack | rest]} ->
-        {:ok, %HTTP2{} = conn, rest}
-
-      {:ok, %HTTP2{} = conn, [:settings, :settings_ack | rest]} ->
-        {:ok, %HTTP2{} = conn, rest}
-
-      {:ok, %HTTP2{} = conn, []} ->
-        stream_messages_until_response(conn)
-
-      other ->
-        other
+      {:ok, %HTTP2{} = conn, []} -> stream_messages_until_response(conn)
+      other -> other
     end
   end
 
