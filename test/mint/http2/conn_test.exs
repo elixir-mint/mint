@@ -2049,19 +2049,21 @@ defmodule Mint.HTTP2Test do
     assert %HTTP2{} = conn
 
     enable_async_settings = Keyword.get(context_connect_options, :enable_async_settings, false)
-    conn = if enable_async_settings do
-      conn
-    else
-      # Wait for SETTINGS here.
-      if context_connect_options[:mode] == :passive do
-        assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, 100)
+
+    conn =
+      if enable_async_settings do
         conn
       else
-        assert_receive message, 100
-        assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
-        conn
+        # Wait for SETTINGS here.
+        if context_connect_options[:mode] == :passive do
+          assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, 100)
+          conn
+        else
+          assert_receive message, 100
+          assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
+          conn
+        end
       end
-    end
 
     conn = put_server_pid(conn, server_pid)
 
