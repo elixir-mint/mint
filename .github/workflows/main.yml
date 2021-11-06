@@ -7,7 +7,7 @@ jobs:
     name: Test
     runs-on: ubuntu-18.04
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - erlang: "24.1.3"

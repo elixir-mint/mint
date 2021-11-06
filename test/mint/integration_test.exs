@@ -183,6 +183,7 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin.org"
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "200 response with explicit http2 - https://http2.golang.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, "http2.golang.org", 443,
@@ -201,6 +202,7 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
     end
 
+    @tag skip: "http2.golang.org is flaky"
     test "200 response without explicit http2 - https://http2.golang.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, "http2.golang.org", 443,
