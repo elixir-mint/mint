@@ -1888,10 +1888,7 @@ defmodule Mint.HTTP2Test do
   end
 
   defp start_http2_server(args) do
-    http2_server_spec = TestServer.child_spec(args)
-    http2_server_spec = Map.put(http2_server_spec, :restart, :transient)
-    server_pid = start_supervised!(http2_server_spec)
-    {:ok, server_pid}
+    TestServer.start_link(args)
   end
 
   defp wait_for_settings(conn0) do

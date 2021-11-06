@@ -54,8 +54,27 @@ defmodule Mint.HTTP2.TestServer do
   def init(args) do
     test_runner = Keyword.fetch!(args, :test_runner)
 
-    {:ok, %__MODULE__{test_runner: test_runner, frames: :queue.new()},
-     {:continue, {:do_init, args}}}
+    frames = :queue.new()
+    connect_options = Keyword.fetch!(args, :connect_options)
+    server_settings = Keyword.fetch!(args, :server_settings)
+    send_settings_delay = Keyword.fetch!(args, :send_settings_delay)
+
+    {:ok, {{:port, port} = port_msg, {:listen_socket, listen_socket}}} = start_socket()
+    :ok = send_msg(test_runner, port_msg)
+    {:ok, server_socket, frames} = accept_and_handshakes(listen_socket, :queue.new())
+    :ok = maybe_send_frames_event(test_runner, frames)
+    Process.send_after(self(), :send_settings, send_settings_delay)
+
+    {:ok,
+     %__MODULE__{
+       test_runner: test_runner,
+       connect_options: connect_options,
+       server_settings: server_settings,
+       port: port,
+       listen_socket: listen_socket,
+       server_socket: server_socket,
+       frames: frames
+     }}
   end
 
   @impl true
@@ -74,36 +93,6 @@ defmodule Mint.HTTP2.TestServer do
   @impl true
   def handle_call(:get_socket, _from, %__MODULE__{server_socket: server_socket} = state) do
     {:reply, {:ok, server_socket}, state}
-  end
-
-  @impl true
-  def handle_continue(
-        {:do_init, args},
-        %__MODULE__{frames: frames, test_runner: test_runner} = state
-      ) do
-    connect_options = Keyword.fetch!(args, :connect_options)
-    server_settings = Keyword.fetch!(args, :server_settings)
-    send_settings_delay = Keyword.fetch!(args, :send_settings_delay)
-    {:ok, {{:port, port} = port_msg, {:listen_socket, listen_socket}}} = start_socket()
-
-    :ok = send_msg(test_runner, port_msg)
-
-    {:ok, server_socket, frames} = accept_and_handshakes(listen_socket, frames)
-
-    :ok = maybe_send_frames_event(test_runner, frames)
-
-    _ref = Process.send_after(self(), :send_settings, send_settings_delay)
-
-    {:noreply,
-     %__MODULE__{
-       state
-       | connect_options: connect_options,
-         server_settings: server_settings,
-         port: port,
-         listen_socket: listen_socket,
-         server_socket: server_socket,
-         frames: frames
-     }}
   end
 
   @impl true

@@ -7,20 +7,26 @@ jobs:
     name: Test
     runs-on: ubuntu-18.04
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - erlang: "24.1.3"
             elixir: "1.12.3"
             lint: true
-          - erlang: "23.3.4.8"
+          - erlang: "23.3"
             elixir: "1.11.4"
-          - erlang: "23.3.4"
+          - erlang: "23.3"
             elixir: "1.10.4"
-          - erlang: "22.3.4.22"
+          - erlang: "22.3"
             elixir: "1.9.4"
-          - erlang: "21.3.8.24"
+          - erlang: "21.3"
             elixir: "1.8.2"
+          - erlang: "20.3.1"
+            elixir: "1.7.4"
+          - erlang: "19.3"
+            elixir: "1.6.6"
+          - erlang: "18.3"
+            elixir: "1.5.3"
     steps:
       - uses: actions/checkout@v1
 
