@@ -12,7 +12,7 @@ jobs:
     # We need Ubuntu 18.04 for older OTP versions.
     runs-on: ubuntu-18.04
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - erlang: "25.0"

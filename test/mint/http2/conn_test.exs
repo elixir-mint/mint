@@ -15,7 +15,6 @@ defmodule Mint.HTTP2Test do
   require Mint.HTTP
 
   @moduletag :capture_log
-  @pdict_key {__MODULE__, :http2_test_server}
 
   setup :start_connection
 
@@ -25,6 +24,7 @@ defmodule Mint.HTTP2Test do
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
     quote do: unquote(frames) = recv_frames(unquote(length(frames)))
+  end
 
   defmacrop assert_recv_frames(conn, frames) when is_list(frames) do
     quote do: unquote(frames) = recv_frames(unquote(conn), unquote(length(frames)))
@@ -80,7 +80,7 @@ defmodule Mint.HTTP2Test do
     test "handle origin frame from the server", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      assert_recv_frames(conn, [headers(stream_id: stream_id)])
 
       origin_payload =
         Base.decode16!("001c68747470733a2f2f6472616e642e636c6f7564666c6172652e636f6d",
@@ -97,7 +97,7 @@ defmodule Mint.HTTP2Test do
 
       assert responses == []
 
-      hbf = server_encode_headers([{":status", "200"}])
+      hbf = encode_headers([{":status", "200"}])
 
       assert {:ok, %HTTP2{} = _conn, responses} =
                stream_frames(conn, [
@@ -310,9 +310,6 @@ defmodule Mint.HTTP2Test do
                    flags: set_flags(:headers, [:end_headers])
                  ),
                  data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
-                   hbf: encode_headers([{":status", "200"}]),
-                   flags: set_flags(:headers, [:end_headers, :end_stream])
-                 )
                ])
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "hello"}, {:done, ^ref}] =
