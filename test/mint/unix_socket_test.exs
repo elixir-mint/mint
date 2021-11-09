@@ -24,6 +24,7 @@ defmodule Mint.UnitSocketTest do
     assert responses == [{:status, ref, 200}]
   end
 
+  @tag :capture_log
   test "starting an https connection to a unix domain socket works" do
     {:ok, address, server_ref} = TestSocketServer.start(ssl: true)
 

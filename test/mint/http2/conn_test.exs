@@ -13,6 +13,8 @@ defmodule Mint.HTTP2Test do
 
   require Mint.HTTP
 
+  @moduletag :capture_log
+
   setup :start_connection
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do

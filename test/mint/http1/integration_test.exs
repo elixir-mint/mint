@@ -187,6 +187,7 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   describe "badssl.com" do
+    @tag :capture_log
     test "SSL with bad certificate" do
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
@@ -203,6 +204,7 @@ defmodule Mint.HTTP1.IntegrationTest do
                )
     end
 
+    @tag :capture_log
     test "SSL with bad hostname" do
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(:https, "wrong.host.badssl.com", 443,

@@ -165,6 +165,8 @@ defmodule Mint.Core.Transport.SSLTest do
   end
 
   describe "controlling_process/2" do
+    @describetag :capture_log
+
     setup do
       parent = self()
       ref = make_ref()
