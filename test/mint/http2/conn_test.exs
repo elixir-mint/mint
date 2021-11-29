@@ -17,6 +17,10 @@ defmodule Mint.HTTP2Test do
 
   setup :start_connection
 
+  defmacrop assert_recv_frames([]) do
+    quote do: refute_receive {:ssl, _socket, _data}
+  end
+
   defmacrop assert_recv_frames(frames) when is_list(frames) do
     quote do: unquote(frames) = recv_next_frames(unquote(length(frames)))
   end
@@ -242,11 +246,17 @@ defmodule Mint.HTTP2Test do
                  headers(
                    stream_id: stream_id,
                    hbf: server_encode_headers([{":status", "200"}]),
-                   flags: set_flags(:headers, [:end_headers, :end_stream])
-                 )
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
                ])
 
-      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "hello"}, {:done, ^ref}] =
+               responses
+
+      # the client would normally send two window_updates and a rst_stream, but since the
+      # connection is now read-only, it should send nothing
+      assert_recv_frames []
 
       assert HTTP2.open_request_count(conn) == 0
 
