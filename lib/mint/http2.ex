@@ -1524,7 +1524,12 @@ defmodule Mint.HTTP2 do
   defp refill_client_windows(conn, stream_id, data_size) do
     connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
     stream_frame = window_update(stream_id: stream_id, window_size_increment: data_size)
-    send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
+
+    if open?(conn) do
+      send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
+    else
+      conn
+    end
   end
 
   # HEADERS
@@ -1994,7 +1999,13 @@ defmodule Mint.HTTP2 do
     # First of all we send a RST_STREAM with the given error code so that we
     # move the stream to the :closed state (that is, we remove it).
     rst_stream_frame = rst_stream(stream_id: stream_id, error_code: error_code)
-    conn = send!(conn, Frame.encode(rst_stream_frame))
+
+    conn =
+      if open?(conn) do
+        send!(conn, Frame.encode(rst_stream_frame))
+      else
+        conn
+      end
 
     delete_stream(conn, stream)
   end
