@@ -239,7 +239,7 @@ defmodule Mint.HTTP1 do
       |> lower_header_keys()
       |> add_default_headers(conn)
 
-    with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
+    with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(method, headers, body),
          {:ok, iodata} <- Request.encode(method, path, headers, body),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
@@ -946,7 +946,7 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp add_content_length_or_transfer_encoding(headers, :stream) do
+  defp add_content_length_or_transfer_encoding(_method, headers, :stream) do
     cond do
       List.keymember?(headers, "content-length", 0) ->
         {:ok, headers, :identity}
@@ -972,11 +972,15 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp add_content_length_or_transfer_encoding(headers, nil) do
+  defp add_content_length_or_transfer_encoding(method, headers, nil) when method in ["POST", "PUT", "OPTIONS", "PATCH"] do
+    {:ok, Util.put_new_header(headers, "content-length", "0"), :identity}
+  end
+
+  defp add_content_length_or_transfer_encoding(_method, headers, nil) do
     {:ok, headers, :identity}
   end
 
-  defp add_content_length_or_transfer_encoding(headers, body) do
+  defp add_content_length_or_transfer_encoding(_method, headers, body) do
     length_fun = fn -> body |> IO.iodata_length() |> Integer.to_string() end
     {:ok, Util.put_new_header_lazy(headers, "content-length", length_fun), :identity}
   end
