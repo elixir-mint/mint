@@ -588,7 +588,7 @@ defmodule Mint.HTTP2 do
 
   See `t:setting/0` for the supported settings. You can see the meaning
   of these settings [in the corresponding section in the HTTP/2
-  RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
+  RFC](https://httpwg.org/specs/rfc7540.html#SettingValues).
 
   See the "HTTP/2 settings" section in the module documentation for more information.
 
@@ -611,7 +611,7 @@ defmodule Mint.HTTP2 do
   This function returns the value of the given HTTP/2 setting that the server
   advertised to the client. This function is HTTP/2 specific.
   For more information on HTTP/2 settings, see [the related section in
-  the RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
+  the RFC](https://httpwg.org/specs/rfc7540.html#SettingValues).
 
   See the "HTTP/2 settings" section in the module documentation for more information.
 
@@ -641,7 +641,7 @@ defmodule Mint.HTTP2 do
   Client settings have to be acknowledged by the server before coming into effect.
 
   This function is HTTP/2 specific. For more information on HTTP/2 settings, see
-  [the related section in the RFC](https://http2.github.io/http2-spec/#rfc.section.6.5.2).
+  [the related section in the RFC](https://httpwg.org/specs/rfc7540.html#SettingValues).
 
   See the "HTTP/2 settings" section in the module documentation for more information.
 
