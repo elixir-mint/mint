@@ -1421,6 +1421,10 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  defp assert_valid_frame(_conn, unknown()) do
+    # we should ignore unknown frames
+  end
+
   defp assert_valid_frame(conn, frame) do
     stream_id = elem(frame, 1)
 
@@ -1479,12 +1483,19 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  for frame_name <- stream_level_frames ++ connection_level_frames ++ [:window_update] do
+  for frame_name <- stream_level_frames ++ connection_level_frames ++ [:window_update, :unknown] do
     function_name = :"handle_#{frame_name}"
 
     defp handle_frame(conn, Frame.unquote(frame_name)() = frame, responses) do
       unquote(function_name)(conn, frame, responses)
     end
+  end
+
+  defp handle_unknown(conn, _frame, responses) do
+    # Implementations MUST ignore and discard any frame that has a type that is unknown.
+    # see: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+
+    {conn, responses}
   end
 
   # DATA

@@ -18,6 +18,7 @@ defmodule Mint.HTTP2.Frame do
   defrecord :goaway, shared_conn ++ [:last_stream_id, :error_code, :debug_data]
   defrecord :window_update, shared_stream ++ [:window_size_increment]
   defrecord :continuation, shared_stream ++ [:hbf]
+  defrecord :unknown, []
 
   @types %{
     data: 0x00,
@@ -117,6 +118,10 @@ defmodule Mint.HTTP2.Frame do
     defp decode_contents(unquote(type), flags, stream_id, payload) do
       unquote(function)(flags, stream_id, payload)
     end
+  end
+
+  defp decode_contents(_type, _flags, _stream_id, _payload) do
+    unknown()
   end
 
   # Parsing of specific frames

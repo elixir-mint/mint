@@ -71,6 +71,51 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "handling unknown frames from the server" do
+    test "handle origin frame from the server", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      {:ok, conn, responses} =
+        HTTP2.stream(
+          conn,
+          {:ssl, conn.socket,
+           IO.iodata_to_binary(
+             HTTP2.Frame.encode_raw(
+               12,
+               0,
+               0,
+               Base.decode16!("001c68747470733a2f2f6472616e642e636c6f7564666c6172652e636f6d",
+                 case: :lower
+               )
+             )
+           )}
+        )
+
+      assert responses == []
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = _conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "stream/2 with unknown messages or error messages" do
     test "unknown message", %{conn: conn} do
       assert HTTP2.stream(conn, :unknown_message) == :unknown
