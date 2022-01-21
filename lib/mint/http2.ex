@@ -1422,7 +1422,9 @@ defmodule Mint.HTTP2 do
   end
 
   defp assert_valid_frame(_conn, unknown()) do
-    # we should ignore unknown frames
+    # Unknown frames MUST be ignored:
+    # https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    :ok
   end
 
   defp assert_valid_frame(conn, frame) do

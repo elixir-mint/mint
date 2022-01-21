@@ -83,7 +83,6 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  @tag skip: "http2.golang.org down"
   test "200 response with explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
@@ -106,7 +105,6 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
   end
 
-  @tag skip: "http2.golang.org down"
   test "200 response without explicit http2 - https://http2.golang.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(

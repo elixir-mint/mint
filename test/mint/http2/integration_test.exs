@@ -46,7 +46,6 @@ defmodule HTTP2.IntegrationTest do
 
   describe "http2.golang.org" do
     @describetag connect: {"http2.golang.org", 443}
-    @describetag skip: "http2.golang.org is down"
 
     test "GET /reqinfo", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
