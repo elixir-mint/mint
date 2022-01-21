@@ -18,7 +18,7 @@ defmodule Mint.HTTP2Test do
   setup :start_connection
 
   defmacrop assert_recv_frames([]) do
-    quote do: refute_receive {:ssl, _socket, _data}
+    quote do: refute_receive({:ssl, _socket, _data})
   end
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
