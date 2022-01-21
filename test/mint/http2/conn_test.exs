@@ -77,20 +77,17 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
+      origin_payload =
+        Base.decode16!("001c68747470733a2f2f6472616e642e636c6f7564666c6172652e636f6d",
+          case: :lower
+        )
+
+      frame = HTTP2.Frame.encode_raw(12, 0, 0, origin_payload)
+
       {:ok, conn, responses} =
         HTTP2.stream(
           conn,
-          {:ssl, conn.socket,
-           IO.iodata_to_binary(
-             HTTP2.Frame.encode_raw(
-               12,
-               0,
-               0,
-               Base.decode16!("001c68747470733a2f2f6472616e642e636c6f7564666c6172652e636f6d",
-                 case: :lower
-               )
-             )
-           )}
+          {:ssl, conn.socket, IO.iodata_to_binary(frame)}
         )
 
       assert responses == []
