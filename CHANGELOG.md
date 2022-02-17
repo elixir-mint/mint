@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.1
+
+### Bug fixes and improvements
+
+  * Emit the remaining buffer as `:data` when switching protocols from HTTP/1.
+  * Respect closed-for-writing when streaming data frames in HTTP/2.
+  * Fix handling of HTTP/2 frames of an unknonw type.
+
 ## v1.4.0
 
 ### Bug fixes and improvements
