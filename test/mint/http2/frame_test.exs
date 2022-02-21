@@ -2,7 +2,7 @@ defmodule Mint.HTTP2.FrameTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  use Bitwise, skip_operators: true
+  import Bitwise, only: [bor: 2]
 
   import Mint.HTTP2.Frame, except: [decode_next: 1, encode_raw: 4]
 
