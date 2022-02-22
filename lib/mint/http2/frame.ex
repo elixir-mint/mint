@@ -1,8 +1,7 @@
 defmodule Mint.HTTP2.Frame do
   @moduledoc false
 
-  use Bitwise, skip_operators: true
-
+  import Bitwise, only: [band: 2, bor: 2]
   import Record
 
   shared_stream = [:stream_id, {:flags, 0x00}]

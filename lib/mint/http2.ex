@@ -125,8 +125,6 @@ defmodule Mint.HTTP2 do
   is enabled.
   """
 
-  use Bitwise, skip_operators: true
-
   import Mint.Core.Util
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
 
