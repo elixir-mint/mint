@@ -475,24 +475,14 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp add_customize_hostname_check(opts) do
-    customize_hostname_check_present? = Keyword.has_key?(opts, :customize_hostname_check)
-
-    if not customize_hostname_check_present? do
-      Keyword.put(opts, :customize_hostname_check, match_fun: &match_fun/2)
-    else
-      opts
-    end
+    Keyword.put_new(opts, :customize_hostname_check, match_fun: &match_fun/2)
   end
 
   defp add_verify_fun(opts, host_or_ip) do
-    verify_fun_present? = Keyword.has_key?(opts, :verify_fun)
-
-    if not verify_fun_present? do
+    Keyword.put_new_lazy(opts, :verify_fun, fn ->
       reference_ids = [dns_id: host_or_ip, ip: host_or_ip]
-      Keyword.put(opts, :verify_fun, {&verify_fun/3, reference_ids})
-    else
-      opts
-    end
+      {&verify_fun/3, reference_ids}
+    end)
   end
 
   def verify_fun(_, {:bad_cert, _} = reason, _), do: {:fail, reason}
@@ -565,11 +555,14 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp add_cacerts(opts) do
-    if Keyword.has_key?(opts, :cacertfile) || Keyword.has_key?(opts, :cacerts) do
+    if Keyword.has_key?(opts, :cacertfile) or Keyword.has_key?(opts, :cacerts) do
       opts
     else
       raise_on_missing_castore!()
-      Keyword.put(opts, :cacertfile, CAStore.file_path())
+      # Use a dynamic module name to avoid compilation warnings when Mint is used as
+      # a dependency without :castore.
+      castore_mod = CAStore
+      Keyword.put(opts, :cacertfile, castore_mod.file_path())
     end
   end
 
