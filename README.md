@@ -91,6 +91,14 @@ def deps do
 end
 ```
 
+### WebSocket Support
+
+Mint itself does not support the WebSocket protocol, but it can be used as the foundation to build a WebSocket client on top of. If you need WebSocket support, you can use [mint_web_socket].
+
+### Connection Management and Pooling
+
+Mint is a low-level client. If you need higher-level features such as connection management, pooling, metrics, and more, check out [Finch], a project built on top of Mint that provides those things.
+
 ## Contributing
 
 If you wish to contribute check out the [issue list](https://github.com/elixir-mint/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
@@ -121,3 +129,5 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
 
 [castore]: https://github.com/elixir-mint/castore
 [documentation]: https://hexdocs.pm/mint
+[mint_web_socket]: https://github.com/NFIBrokerage/mint_web_socket
+[Finch]: https://github.com/sneako/finch
