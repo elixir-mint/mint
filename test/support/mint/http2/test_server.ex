@@ -48,7 +48,6 @@ defmodule Mint.HTTP2.TestServer do
     GenServer.call(server_pid, :get_socket)
   end
 
-  # LRB TODO specs for GenServer callbacks?
   @impl true
   @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, {:do_init, keyword()}}}
   def init(args) do
@@ -241,7 +240,6 @@ defmodule Mint.HTTP2.TestServer do
         {:more, frames0, data}
 
       other ->
-        # LRB TODO throw? exit?
         {:error, "Error decoding frame: #{inspect(other)}"}
     end
   end
@@ -268,7 +266,6 @@ defmodule Mint.HTTP2.TestServer do
         dequeue(q1, n - 1, [item | acc])
 
       {:empty, q1} ->
-        # LRB TODO error
         dequeue(q1, 0, acc)
     end
   end

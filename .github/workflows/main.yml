@@ -17,6 +17,8 @@ jobs:
         include:
           - erlang: "25.0"
             elixir: "1.13"
+          - erlang: "24.3.3"
+            elixir: "1.13.4"
             lint: true
             coverage: true
             dialyzer: true
@@ -35,7 +37,7 @@ jobs:
           - erlang: "21.3.8.24"
             elixir: "1.8.2"
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
 
       - name: Install OTP and Elixir
         uses: erlef/setup-beam@v1
