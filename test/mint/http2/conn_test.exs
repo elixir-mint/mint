@@ -1615,7 +1615,7 @@ defmodule Mint.HTTP2Test do
       assert settings(frame, :params) == [max_concurrent_streams: 123]
       assert settings(frame, :flags) == set_flags(:settings, [])
 
-      assert {:ok, %HTTP2{} = conn, [:settings_ack]} =
+      assert {:ok, %HTTP2{} = conn, []} =
                stream_frames(conn, [
                  settings(flags: set_flags(:settings, [:ack]), params: [])
                ])
@@ -1653,7 +1653,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames(conn, [headers()])
 
-      {:ok, %HTTP2{} = conn, [:settings]} =
+      {:ok, %HTTP2{} = conn, []} =
         stream_frames(conn, [settings(params: [initial_window_size: 100])])
 
       assert HTTP2.get_server_setting(conn, :initial_window_size) == 100
@@ -2141,7 +2141,7 @@ defmodule Mint.HTTP2Test do
     conn1 =
       receive do
         msg ->
-          {:ok, c, [:settings]} = Mint.HTTP.stream(conn0, msg)
+          {:ok, c, []} = Mint.HTTP.stream(conn0, msg)
           c
       after
         1000 ->
@@ -2150,7 +2150,7 @@ defmodule Mint.HTTP2Test do
 
     receive do
       msg ->
-        {:ok, c, [:settings_ack]} = Mint.HTTP.stream(conn1, msg)
+        {:ok, c, []} = Mint.HTTP.stream(conn1, msg)
         {:ok, c}
     after
       1000 ->

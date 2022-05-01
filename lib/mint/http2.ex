@@ -1785,33 +1785,20 @@ defmodule Mint.HTTP2 do
 
   # SETTINGS
 
-  defp handle_settings(
-         %Mint.HTTP2{enable_async_settings: enable_async_settings} = conn,
-         frame,
-         responses
-       ) do
+  defp handle_settings(conn, frame, responses) do
     settings(flags: flags, params: params) = frame
 
-    if flag_set?(flags, :settings, :ack) do
-      {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
-      conn = apply_client_settings(conn, params)
-
-      if enable_async_settings do
-        {conn, [:settings_ack | responses]}
+    conn =
+      if flag_set?(flags, :settings, :ack) do
+        {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
+        apply_client_settings(conn, params)
       else
-        {conn, responses}
+        conn = apply_server_settings(conn, params)
+        frame = settings(flags: set_flags(:settings, [:ack]), params: [])
+        send!(conn, Frame.encode(frame))
       end
-    else
-      conn = apply_server_settings(conn, params)
-      frame = settings(flags: set_flags(:settings, [:ack]), params: [])
-      conn = send!(conn, Frame.encode(frame))
 
-      if enable_async_settings do
-        {conn, [:settings | responses]}
-      else
-        {conn, responses}
-      end
-    end
+    {conn, responses}
   end
 
   defp apply_server_settings(conn, server_settings) do
