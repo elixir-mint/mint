@@ -129,5 +129,5 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
 
 [castore]: https://github.com/elixir-mint/castore
 [documentation]: https://hexdocs.pm/mint
-[mint_web_socket]: https://github.com/NFIBrokerage/mint_web_socket
+[mint_web_socket]: https://github.com/elixir-mint/mint_web_socket
 [Finch]: https://github.com/sneako/finch
