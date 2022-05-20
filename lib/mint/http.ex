@@ -88,6 +88,17 @@ defmodule Mint.HTTP do
   [CAStore](https://github.com/elixir-mint/castore), which provides an up-to-date certificate store. If
   you don't want to use your own certificate store, just add `:castore` to your dependencies.
 
+  Starting [from OTP
+  25](https://www.erlang.org/blog/my-otp-25-highlights/#ca-certificates-can-be-fetched-from-the-os-standard-place),
+  you can also load certificates from a file
+  ([`:public_key.cacerts_load/1`](https://www.erlang.org/doc/man/public_key.html#cacerts_load-1))
+  or from the OS
+  ([`:public_key.cacerts_load/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_load-0)).
+  You can then use the certificates with
+  [`:public_key.cacerts_get/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_get-0):
+
+      Mint.connect(:https, host, port, transport_opts: [cacerts: :public_key.cacerts_get()])
+
   ## Mode
 
   By default Mint operates in **active mode** meaning that the process that started the
