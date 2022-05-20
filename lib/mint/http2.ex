@@ -735,17 +735,17 @@ defmodule Mint.HTTP2 do
 
   On the connection:
 
-      HTTP.get_window_size(conn, :connection)
+      HTTP2.get_window_size(conn, :connection)
       #=> 65_536
 
   On a single streamed request:
 
       {:ok, conn, request_ref} = HTTP2.request(conn, "GET", "/", [], :stream)
-      HTTP.get_window_size(conn, {:request_ref, request_ref})
+      HTTP2.get_window_size(conn, {:request, request_ref})
       #=> 65_536
 
       {:ok, conn} = HTTP2.stream_request_body(conn, request_ref, "hello")
-      HTTP.get_window_size(conn, {:request_ref, request_ref})
+      HTTP2.get_window_size(conn, {:request, request_ref})
       #=> 65_531
 
   """
