@@ -690,9 +690,16 @@ defmodule Mint.Core.Transport.SSL do
 
   defp raise_on_missing_castore! do
     Code.ensure_loaded?(CAStore) ||
-      raise "default CA trust store not available; " <>
-              "please add `:castore` to your project's dependencies or " <>
-              "specify the trust store using the `:cacertfile`/`:cacerts` option"
+      raise """
+      default CA trust store not available; please add `:castore` to your project's \
+      dependencies or specify the trust store using the :cacertfile/:cacerts option \
+      within :transport_options. From OTP 25, you can also use:
+
+        * :public_key.cacerts_get/0 to get certificates that you loaded from files or
+        * from the OS with :public_key.cacerts_load/0,1
+
+      See: https://www.erlang.org/blog/my-otp-25-highlights/#ca-certificates-can-be-fetched-from-the-os-standard-place
+      """
   end
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
