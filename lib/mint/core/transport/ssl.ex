@@ -559,10 +559,7 @@ defmodule Mint.Core.Transport.SSL do
       opts
     else
       raise_on_missing_castore!()
-      # Use a dynamic module name to avoid compilation warnings when Mint is used as
-      # a dependency without :castore.
-      castore_mod = CAStore
-      Keyword.put(opts, :cacertfile, castore_mod.file_path())
+      Keyword.put(opts, :cacertfile, CAStore.file_path())
     end
   end
 
