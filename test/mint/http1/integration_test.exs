@@ -19,22 +19,6 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    test "SSL with missing CA cacerts" do
-      assert {:error, %TransportError{reason: reason}} =
-               HTTP1.connect(
-                 :https,
-                 "localhost",
-                 8443,
-                 transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
-               )
-
-      # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
-      # Newer OTP versions treat empty list for `cacerts` as if the option was not set
-      assert reason == {:tls_alert, 'unknown ca'} or
-               match?({:tls_alert, {:unknown_ca, _}}, reason) or
-               reason == {:options, {:cacertfile, []}}
-    end
-
     test "POST body" do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
       assert {:ok, conn, request} = HTTP1.request(conn, "POST", "/post", [], "BODY")
@@ -186,6 +170,22 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, _} = headers
       assert byte_size(merge_body(responses, request)) == 50000
+    end
+
+    test "SSL with missing CA cacerts" do
+      assert {:error, %TransportError{reason: reason}} =
+               HTTP1.connect(
+                 :https,
+                 "localhost",
+                 8443,
+                 transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
+               )
+
+      # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+      # Newer OTP versions treat empty list for `cacerts` as if the option was not set
+      assert reason == {:tls_alert, 'unknown ca'} or
+               match?({:tls_alert, {:unknown_ca, _}}, reason) or
+               reason == {:options, {:cacertfile, []}}
     end
   end
 
