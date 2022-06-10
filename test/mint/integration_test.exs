@@ -5,16 +5,16 @@ defmodule Mint.IntegrationTest do
 
   alias Mint.{TransportError, HTTP}
 
-  describe "httpstat.us" do
-    @describetag :integration
-    @describetag skip: "Seems like httpstat.us is down"
+  @moduletag :requires_internet_connection
 
+  describe "httpstat.us" do
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(
                  :https,
                  "httpstat.us",
-                 443
+                 443,
+                 transport_opts: [versions: [:"tlsv1.2"]]
                )
 
       assert conn.__struct__ == Mint.HTTP1
@@ -25,23 +25,13 @@ defmodule Mint.IntegrationTest do
       assert [
                {:status, ^request, 200},
                {:headers, ^request, _},
+               {:data, ^request, "200 OK"},
                {:done, ^request}
              ] = responses
-    end
-
-    @tag :capture_log
-    test "SSL - fail to select HTTP2" do
-      assert {:error, %TransportError{reason: :protocol_not_negotiated}} =
-               HTTP.connect(:https, "httpstat.us", 443,
-                 protocols: [:http2],
-                 transport_opts: [reuse_sessions: false]
-               )
     end
   end
 
   describe "nghttp2.org" do
-    @describetag :integration
-
     test "SSL - select HTTP1" do
       assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443, protocols: [:http1])
 
@@ -74,8 +64,6 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "ssl certificate verification" do
-    @describetag :integration
-
     @tag :capture_log
     test "bad certificate - badssl.com" do
       assert {:error, %TransportError{reason: reason}} =
@@ -124,8 +112,6 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "partial chain handling" do
-    @describetag :integration
-
     @dst_and_isrg Path.expand("../support/mint/dst_and_isrg.pem", __DIR__)
 
     # OTP 18.3 fails to connect to letsencrypt.org, skip this test
@@ -185,46 +171,44 @@ defmodule Mint.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin.org"
     end
 
-    test "200 response with explicit http2 - https://http2.golang.org" do
+    test "200 response with explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "http2.golang.org", 443,
+               HTTP.connect(:https, "httpbin.org", 443,
                  proxy: {:http, "localhost", 8888, []},
                  protocols: [:http2]
                )
 
       assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/user-agent", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+      assert merge_body(responses, request) =~ "mint/"
     end
 
-    test "200 response without explicit http2 - https://http2.golang.org" do
+    test "200 response without explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "http2.golang.org", 443,
+               HTTP.connect(:https, "httpbin.org", 443,
                  proxy: {:http, "localhost", 8888, []},
                  protocols: [:http1, :http2]
                )
 
       assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/user-agent", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [status, headers | responses] = responses
       assert {:status, ^request, 200} = status
       assert {:headers, ^request, headers} = headers
       assert is_list(headers)
-      assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+      assert merge_body(responses, request) =~ "mint/"
     end
   end
 
   describe "information from connection's socket" do
-    @describetag :integration
-
     test "TLSv1.2 - badssl.com" do
       assert {:ok, conn} =
                HTTP.connect(
@@ -244,8 +228,6 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "force TLS v1.3 only" do
-    @describetag :integration
-
     test "rabbitmq.com" do
       if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
         ciphers = :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])

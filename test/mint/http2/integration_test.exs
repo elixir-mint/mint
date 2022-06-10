@@ -5,7 +5,7 @@ defmodule HTTP2.IntegrationTest do
 
   alias Mint.HTTP2
 
-  @moduletag :integration
+  @moduletag :requires_internet_connection
 
   setup context do
     transport_opts =
@@ -44,11 +44,11 @@ defmodule HTTP2.IntegrationTest do
     assert HTTP2.open?(conn)
   end
 
-  describe "http2.golang.org" do
-    @describetag connect: {"http2.golang.org", 443}
+  describe "httpbin.org" do
+    @describetag connect: {"httpbin.org", 443}
 
     test "GET /reqinfo", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/reqinfo", [], nil)
+      assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/user-agent", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -56,15 +56,24 @@ defmodule HTTP2.IntegrationTest do
                {:status, ^req_id, 200},
                {:headers, ^req_id, headers},
                {:data, ^req_id, data},
+               {:data, ^req_id, ""},
                {:done, ^req_id}
              ] = responses
 
       assert is_list(headers)
-      assert data =~ "Method: GET"
+      assert data =~ "mint/"
 
       assert conn.buffer == ""
       assert HTTP2.open?(conn)
     end
+  end
+
+  describe "http2.golang.org" do
+    @describetag skip: """
+                 http2.golang.org has been decommisioned.
+                 Re-enable these tests  in the future if we figure out a test server that supports
+                 a similar set of features.
+                 """
 
     test "GET /clockstream", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/clockstream", [], nil)
