@@ -185,7 +185,9 @@ defmodule Mint.HTTP1.IntegrationTest do
       # Newer OTP versions treat empty list for `cacerts` as if the option was not set
       assert reason == {:tls_alert, 'unknown ca'} or
                match?({:tls_alert, {:unknown_ca, _}}, reason) or
-               reason == {:options, {:cacertfile, []}}
+               reason == {:options, {:cacertfile, []}},
+             "expected error reason to look like {:tls_alert, _} or {:options, {:cacertfile, []}}, " <>
+               "got: #{inspect(reason)}"
     end
   end
 
