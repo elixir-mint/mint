@@ -345,7 +345,7 @@ defmodule Mint.HTTP do
 
   Forcing the connection to be an HTTP/2 connection:
 
-      {:ok, conn} = Mint.HTTP.connect(:https, "http2.golang.org", 443, protocols: [:http2])
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, protocols: [:http2])
 
   Enable all default cipher suites of Erlang/OTP (release 20.3 or later):
 
