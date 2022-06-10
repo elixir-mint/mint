@@ -47,7 +47,7 @@ defmodule HTTP2.IntegrationTest do
   describe "httpbin.org" do
     @describetag connect: {"httpbin.org", 443}
 
-    test "GET /reqinfo", %{conn: conn} do
+    test "GET /user-agent", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/user-agent", [], nil)
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
