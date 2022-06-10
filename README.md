@@ -103,7 +103,7 @@ Mint is a low-level client. If you need higher-level features such as connection
 
 If you wish to contribute check out the [issue list](https://github.com/elixir-mint/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
 
-Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:integration`. Proxy tests are tagged with `:proxy` and require that you run `docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
+Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:requires_internet_connection`. Proxy tests are tagged with `:proxy` and require that you run `docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
 
   * `$ mix test` to run the test suite without caring about Docker and `docker-compose up`.
 

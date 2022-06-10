@@ -5,7 +5,14 @@ services:
     build: ./test/docker/tinyproxy
     ports:
       - "8888:8888"
+
   proxy-auth:
     build: ./test/docker/tinyproxy-auth
     ports:
       - "8889:8888"
+
+  httpbin:
+    image: kennethreitz/httpbin:latest
+    ports:
+      - "8080:80"
+      - "8443:443"

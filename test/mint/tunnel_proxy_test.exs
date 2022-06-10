@@ -6,6 +6,7 @@ defmodule Mint.TunnelProxyTest do
   alias Mint.HTTP
 
   @moduletag :proxy
+  @moduletag :requires_internet_connection
 
   test "200 response - http://httpbin.org" do
     # Ensure we only match relevant messages
@@ -83,11 +84,11 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "httpbin"
   end
 
-  test "200 response with explicit http2 - https://http2.golang.org" do
+  test "200 response with explicit http2 - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "http2.golang.org", 443, [protocols: [:http2]]}
+               {:https, "httpbin.org", 443, [protocols: [:http2]]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -95,21 +96,21 @@ defmodule Mint.TunnelProxyTest do
     assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
              Mint.HTTP2.get_proxy_headers(conn)
 
-    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/user-agent", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+    assert merge_body(responses, request) =~ "mint/"
   end
 
-  test "200 response without explicit http2 - https://http2.golang.org" do
+  test "200 response without explicit http2 - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "http2.golang.org", 443, [protocols: [:http1, :http2]]}
+               {:https, "httpbin.org", 443, [protocols: [:http1, :http2]]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -117,14 +118,14 @@ defmodule Mint.TunnelProxyTest do
     assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
              Mint.HTTP.get_proxy_headers(conn)
 
-    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/reqinfo", [], nil)
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/user-agent", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
 
     assert [status, headers | responses] = responses
     assert {:status, ^request, 200} = status
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
-    assert merge_body(responses, request) =~ "Protocol: HTTP/2.0"
+    assert merge_body(responses, request) =~ "mint/"
   end
 
   @tag :skip
