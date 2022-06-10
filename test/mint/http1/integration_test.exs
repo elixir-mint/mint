@@ -19,19 +19,6 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert merge_body(responses, request) =~ "httpbin"
     end
 
-    test "timeout with http" do
-      assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, "localhost", 8080, transport_opts: [timeout: 0])
-    end
-
-    # TODO: remove check once we depend on OTP 19+
-    if System.otp_release() >= "19" do
-      test "timeout with https" do
-        assert {:error, %TransportError{reason: :timeout}} =
-                 HTTP1.connect(:https, "localhost", 8443, transport_opts: [timeout: 0])
-      end
-    end
-
     test "SSL with missing CA cacerts" do
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(
@@ -131,6 +118,19 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   describe "httpbin.org" do
     @describetag :requires_internet_connection
+
+    test "timeout with http" do
+      assert {:error, %TransportError{reason: :timeout}} =
+               HTTP1.connect(:http, "localhost", 8080, transport_opts: [timeout: 0])
+    end
+
+    # TODO: remove check once we depend on OTP 19+
+    if System.otp_release() >= "19" do
+      test "timeout with https" do
+        assert {:error, %TransportError{reason: :timeout}} =
+                 HTTP1.connect(:https, "localhost", 8443, transport_opts: [timeout: 0])
+      end
+    end
 
     test "keep alive" do
       assert {:ok, conn} = HTTP1.connect(:https, "httpbin.org", 443)
