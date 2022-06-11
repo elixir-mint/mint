@@ -64,7 +64,7 @@ jobs:
         run: docker-compose up --detach
 
       - name: Check for unused dependencies
-        run: mix deps.unlock --check-unused
+        run: mix deps.get && mix deps.unlock --check-unused
         if: ${{matrix.lint && steps.cache-deps.outputs.cache-hit != 'true'}}
 
       - name: Compile with --warnings-as-errors
