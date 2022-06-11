@@ -27,6 +27,10 @@ defmodule Mint.MixProject do
         plt_add_apps: [:castore]
       ],
 
+      # Code coverage
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: ["coveralls.html": :test, coveralls: :test],
+
       # Hex
       package: package(),
       description: "Small and composable HTTP client.",
@@ -66,10 +70,13 @@ defmodule Mint.MixProject do
   defp deps do
     [
       {:castore, "~> 0.1.0", optional: true},
-      {:ex_doc, "~> 0.20", only: :dev},
       {:hpax, "~> 0.1.1"},
-      {:stream_data, "~> 0.5.0", only: [:dev, :test]},
-      {:dialyxir, "~> 1.0.0-rc.6", only: [:dev, :test], runtime: false}
+
+      # Dev/test dependencies
+      {:dialyxir, "~> 1.0.0-rc.6", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.20", only: :dev},
+      {:excoveralls, "~> 0.14.5"},
+      {:stream_data, "~> 0.5.0", only: [:dev, :test]}
     ]
   end
 end
