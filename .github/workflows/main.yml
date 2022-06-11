@@ -45,15 +45,27 @@ jobs:
           otp-version: ${{matrix.erlang}}
           elixir-version: ${{matrix.elixir}}
 
-      - name: Install dependencies
-        run: mix deps.get
+      - name: Cache dependencies
+        id: cache-deps
+        uses: actions/cache@v2
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+
+      - name: Install and compile dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get --only test
+          mix deps.compile
 
       - name: Start docker
         run: docker-compose up --detach
 
       - name: Check for unused dependencies
         run: mix deps.unlock --check-unused
-        if: ${{matrix.lint}}
+        if: ${{matrix.lint && steps.cache-deps.outputs.cache-hit != 'true'}}
 
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
@@ -68,5 +80,5 @@ jobs:
         if: ${{ !matrix.coverage }}
 
       - name: Run tests with coverage
-        run: mix coveralls.github
+        run: mix coveralls.github --include proxy
         if: ${{ matrix.coverage }}
