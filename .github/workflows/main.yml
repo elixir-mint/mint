@@ -9,7 +9,8 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }}, OTP ${{ matrix.erlang }})
-    runs-on: ubuntu-20.04
+    # We need Ubuntu 18.04 for older OTP versions.
+    runs-on: ubuntu-18.04
     strategy:
       fail-fast: false
       matrix:
