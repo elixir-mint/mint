@@ -1582,6 +1582,36 @@ defmodule Mint.HTTP2 do
     %{ref: ref, received_first_headers?: received_first_headers?} = stream
 
     case headers do
+      # Interim response (1xx), which is made of only one HEADERS plus zero or more CONTINUATIONs.
+      # There can be zero or more interim responses before a "proper" response.
+      # https://httpwg.org/specs/rfc9113.html#HttpFraming
+      [{":status", <<?1, _, _>> = status} | headers] ->
+        cond do
+          received_first_headers? ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+
+            debug_data =
+              "informational response (1xx) must appear before final response, got a #{status} status"
+
+            error = wrap_error({:protocol_error, debug_data})
+            responses = [{:error, stream.ref, error} | responses]
+            {conn, responses}
+
+          end_stream? ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            debug_data = "informational response (1xx) must not have the END_STREAM flag set"
+            error = wrap_error({:protocol_error, debug_data})
+            responses = [{:error, stream.ref, error} | responses]
+            {conn, responses}
+
+          true ->
+            assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+            status = String.to_integer(status)
+            headers = join_cookie_headers(headers)
+            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+            {conn, new_responses}
+        end
+
       [{":status", status} | headers] when not received_first_headers? ->
         conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
