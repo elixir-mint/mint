@@ -182,6 +182,10 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    test "client closes a non-existent request with cancel_request/2", %{conn: conn} do
+      assert {:ok, ^conn} = HTTP2.cancel_request(conn, make_ref())
+    end
+
     test "receiving a RST_STREAM on a closed stream is ignored", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -1676,6 +1680,32 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.get_window_size(conn, :connection) == expected_window_size
       assert HTTP2.open_request_count(conn) == 1
+    end
+
+    test "streaming to a closed connection returns an error", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+      {:ok, closed_conn} = HTTP2.close(conn)
+      assert {:error, conn, error} = HTTP2.stream_request_body(closed_conn, ref, :eof)
+      assert_http2_error error, :closed
+      refute HTTP2.open?(conn)
+    end
+
+    test "streaming to a connection that got GOAWAY returns an error", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, conn, _goaway_error, _responses} =
+               stream_frames(conn, [
+                 goaway(
+                   last_stream_id: stream_id,
+                   error_code: :protocol_error,
+                   debug_data: "debug data"
+                 )
+               ])
+
+      assert {:error, _conn, error} = HTTP2.stream_request_body(conn, ref, :eof)
+      assert_http2_error error, :closed_for_writing
     end
   end
 
