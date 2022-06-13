@@ -1,12 +1,22 @@
 # Changelog
 
+## v1.4.2
+
+### Bug fixes and improvements
+
+  * Properly handle interim responses (informational `1xx` status codes) in
+    HTTP/2. Now you might get zero or more sequences of `:status` and `:headers`
+    responses with status `1xx` before the *final response* (with status
+    non-`1xx`).
+
 ## v1.4.1
 
 ### Bug fixes and improvements
 
-  * Emit the remaining buffer as `:data` when switching protocols from HTTP/1.
+  * Emit the remaining buffer as a `:data` response when switching protocols
+    from HTTP/1.
   * Respect closed-for-writing when streaming data frames in HTTP/2.
-  * Fix handling of HTTP/2 frames of an unknonw type.
+  * Fix handling of HTTP/2 frames of an unknown type.
 
 ## v1.4.0
 
@@ -14,7 +24,7 @@
 
   * Add support for `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/2 server setting.
   * Omit the `:scheme` and `:path` pseudo headers for HTTP/2 CONNECT.
-  * Fix invalid conn state when data can't be sent.
+  * Fix invalid connection state when data can't be sent.
   * Skip expired certs in partial chain hook.
   * Add `Mint.HTTP.get_proxy_headers/1`.
   * Add `Mint.HTTP.module/1`.
