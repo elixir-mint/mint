@@ -769,6 +769,131 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "interim responses (1xx)" do
+    test "multiple before a single HEADERS", %{conn: conn} do
+      info_status1 = Enum.random(100..199)
+      info_status2 = Enum.random(100..199)
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      <<info_hbf1_part1::1-bytes, info_hbf1_part2::binary>> =
+        server_encode_headers([
+          {":status", Integer.to_string(info_status1)},
+          {"x-info-header1", "this is an info"}
+        ])
+
+      info_hbf2 =
+        server_encode_headers([
+          {":status", Integer.to_string(info_status2)},
+          {"x-info-header2", "this is an info"}
+        ])
+
+      hbf =
+        server_encode_headers([
+          {":status", "200"},
+          {"content-type", "application/json"}
+        ])
+
+      assert {:ok, %HTTP2{} = _conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: info_hbf1_part1,
+                   flags: set_flags(:headers, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: info_hbf1_part2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: info_hbf2,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [
+               {:status, ^ref, ^info_status1},
+               {:headers, ^ref, [{"x-info-header1", "this is an info"}]},
+               {:status, ^ref, ^info_status2},
+               {:headers, ^ref, [{"x-info-header2", "this is an info"}]},
+               {:status, ^ref, 200},
+               {:headers, ^ref, [{"content-type", "application/json"}]},
+               {:done, ^ref}
+             ] = responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "protocol error if interim response has END_STREAM set", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      info_hbf =
+        server_encode_headers([
+          {":status", "101"},
+          {"x-info-header1", "this is an info"}
+        ])
+
+      assert {:ok, %HTTP2{} = _conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: info_hbf,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:error, ^ref, error}] = responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "informational response (1xx) must not have the END_STREAM flag set"
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "protocol error if interim response HEADERS comes after final HEADERS", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+      info_hbf = server_encode_headers([{":status", "101"}])
+
+      assert {:ok, %HTTP2{} = _conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 headers(
+                   stream_id: stream_id,
+                   hbf: info_hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+
+      assert debug_data =~
+               "informational response (1xx) must appear before final response, got a 101 status"
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   describe "trailing headers" do
     test "sent by the server with a normal response", %{conn: conn} do
       {conn, ref} = open_request(conn)

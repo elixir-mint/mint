@@ -266,6 +266,39 @@ defmodule HTTP2.IntegrationTest do
     end
   end
 
+  describe "www.shopify.com" do
+    @describetag connect: {"www.shopify.com", 443}
+
+    # Informational responses were the issue.s
+    # https://github.com/elixir-mint/mint/issues/349
+    test "GET / with specific User-Agent header - regression for #349", %{conn: conn} do
+      assert %HTTP2{} = conn
+
+      assert {:ok, %HTTP2{} = conn, ref} =
+               HTTP2.request(conn, "GET", "/", [{"user-agent", "curl/7.68.0"}], nil)
+
+      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
+
+      assert [
+               {:status, ^ref, informational_status},
+               {:headers, ^ref, informational_headers},
+               {:status, ^ref, status},
+               {:headers, ^ref, headers}
+               | rest
+             ] = responses
+
+      assert informational_status == 103
+      assert {"link", _} = List.keyfind(informational_headers, "link", 0)
+      assert status == 200
+      assert is_list(headers) and length(headers) > 0
+
+      assert Enum.count(rest, &match?({:data, ^ref, _data}, &1)) >= 1
+      assert List.last(rest) == {:done, ref}
+
+      assert HTTP2.open?(conn)
+    end
+  end
+
   defp stream_messages_until_response(conn) do
     assert_receive message, 1000
 

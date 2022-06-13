@@ -675,6 +675,8 @@ defmodule Mint.HTTP do
 
     * `{:status, request_ref, status_code}` - returned when the server replied
       with a response status code. The status code is a non-negative integer.
+      You can have zero or more `1xx` `:status` and `:headers` responses for a
+      single request, but they all precede a single non-`1xx` `:status` response.
 
     * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
