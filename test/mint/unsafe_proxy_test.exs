@@ -5,6 +5,7 @@ defmodule Mint.UnsafeProxyTest do
   alias Mint.HTTP
 
   @moduletag :proxy
+  @moduletag :requires_internet_connection
 
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
@@ -61,5 +62,12 @@ defmodule Mint.UnsafeProxyTest do
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
     assert merge_body(responses, request) =~ "httpbin"
+  end
+
+  test "Mint.HTTP.protocol/1 on an unsafe proxy connection" do
+    assert {:ok, %UnsafeProxy{} = conn} =
+             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+
+    assert Mint.HTTP.protocol(conn) == :http1
   end
 end
