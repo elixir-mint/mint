@@ -87,3 +87,6 @@ jobs:
       - name: Run tests with coverage
         run: mix coveralls.github --include proxy
         if: ${{ matrix.coverage }}
+
+      - name: Run Dialyzer
+        run: mix dialyzer
