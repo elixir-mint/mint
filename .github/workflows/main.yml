@@ -49,15 +49,27 @@ jobs:
 
       - name: Install and compile dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: |
-          mix deps.get --only test
-          mix deps.compile
+        run: mix do deps.get --only test, deps.compile
+
+      # Don't cache PLTs based on mix.lock hash, as Dialyzer can incrementally update even old ones
+      # Cache key based on Elixir & Erlang version (also useful when running in matrix)
+      - name: Cache Dialyzer's PLT
+        uses: actions/cache@v2
+        id: cache-plt
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}
+
+      # Create PLTs if no cache was found
+      - name: Create PLTs
+        if: steps.cache-plt.outputs.cache-hit != 'true'
+        run: mix dialyzer --plt
 
       - name: Start docker
         run: docker-compose up --detach
 
       - name: Check for unused dependencies
-        run: mix deps.get && mix deps.unlock --check-unused
+        run: mix do deps.get, deps.unlock --check-unused
         if: ${{matrix.lint && steps.cache-deps.outputs.cache-hit != 'true'}}
 
       - name: Compile with --warnings-as-errors

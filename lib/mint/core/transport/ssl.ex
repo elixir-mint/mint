@@ -710,6 +710,9 @@ defmodule Mint.Core.Transport.SSL do
     |> Enum.map(&String.to_integer/1)
   end
 
+  # Dialyzer warns on :ssl.cipher_suites/1 for now.
+  @dialyzer {:nowarn_function, get_ciphers_for_versions: 1}
+
   @doc false
   def get_ciphers_for_versions(versions) do
     if ssl_version() >= [8, 2, 4] do

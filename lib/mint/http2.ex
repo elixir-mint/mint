@@ -328,7 +328,12 @@ defmodule Mint.HTTP2 do
   """
   @type error_reason() :: term()
 
-  @opaque t() :: %Mint.HTTP2{}
+  @typedoc """
+  A Mint HTTP/2 connection struct.
+
+  The struct's fields are private.
+  """
+  @opaque t() :: %__MODULE__{}
 
   ## Public interface
 
