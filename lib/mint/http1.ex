@@ -582,6 +582,7 @@ defmodule Mint.HTTP1 do
 
   # Made public since the %Mint.HTTP1{} struct is opaque.
   @doc false
+  @impl true
   @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
     %__MODULE__{conn | proxy_headers: headers}
