@@ -994,6 +994,13 @@ defmodule Mint.HTTP2 do
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
 
+  # Made public since the %Mint.HTTP2{} struct is opaque.
+  @doc false
+  @impl true
+  def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
+    %__MODULE__{conn | proxy_headers: headers}
+  end
+
   ## Helpers
 
   defp handle_closed(conn) do

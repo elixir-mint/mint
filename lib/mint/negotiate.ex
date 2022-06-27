@@ -6,12 +6,15 @@ defmodule Mint.Negotiate do
   alias Mint.{
     HTTP1,
     HTTP2,
-    TransportError
+    TransportError,
+    Types
   }
 
   @default_protocols [:http1, :http2]
   @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
 
+  @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
+          {:ok, Mint.HTTP.t()} | {:error, Types.error()}
   def connect(scheme, address, port, opts \\ []) do
     {protocols, opts} = Keyword.pop(opts, :protocols, @default_protocols)
 
@@ -27,6 +30,14 @@ defmodule Mint.Negotiate do
     end
   end
 
+  @spec upgrade(
+          module(),
+          Types.socket(),
+          Types.scheme(),
+          String.t(),
+          :inet.port_number(),
+          keyword()
+        ) :: {:ok, Mint.HTTP.t()} | {:error, Types.error()}
   def upgrade(proxy_scheme, transport_state, scheme, hostname, port, opts) do
     {protocols, opts} = Keyword.pop(opts, :protocols, @default_protocols)
 
@@ -42,6 +53,8 @@ defmodule Mint.Negotiate do
     end
   end
 
+  @spec initiate(module(), Types.socket(), String.t(), :inet.port_number(), keyword()) ::
+          {:ok, Mint.HTTP.t()} | {:error, Types.error()}
   def initiate(transport, transport_state, hostname, port, opts),
     do: alpn_negotiate(transport, transport_state, hostname, port, opts)
 

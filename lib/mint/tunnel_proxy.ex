@@ -1,7 +1,7 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  alias Mint.{HTTP1, HTTPError, Negotiate, TransportError}
+  alias Mint.{HTTP, HTTP1, HTTPError, Negotiate, TransportError}
 
   @tunnel_timeout 30_000
 
@@ -46,7 +46,7 @@ defmodule Mint.TunnelProxy do
 
     # Note that we may leak messages if the server sent data after the CONNECT response
     case Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts) do
-      {:ok, conn} -> {:ok, HTTP1.put_proxy_headers(conn, proxy_headers)}
+      {:ok, conn} -> {:ok, HTTP.put_proxy_headers(conn, proxy_headers)}
       {:error, reason} -> wrap_in_proxy_error(reason)
     end
   end

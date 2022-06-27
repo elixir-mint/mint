@@ -58,4 +58,6 @@ defmodule Mint.Core.Conn do
   @callback get_socket(conn()) :: Mint.Types.socket()
 
   @callback get_proxy_headers(conn()) :: Mint.Types.headers()
+
+  @callback put_proxy_headers(conn(), Mint.Types.headers()) :: conn()
 end

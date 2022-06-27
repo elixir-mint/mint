@@ -957,6 +957,11 @@ defmodule Mint.HTTP do
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(conn), do: conn_module(conn).get_proxy_headers(conn)
 
+  # Made public since the struct is opaque.
+  @doc false
+  @impl true
+  def put_proxy_headers(conn, headers), do: conn_module(conn).put_proxy_headers(conn, headers)
+
   ## Helpers
 
   defp conn_module(%UnsafeProxy{}), do: UnsafeProxy
