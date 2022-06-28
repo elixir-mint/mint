@@ -23,6 +23,11 @@ defmodule Mint.HTTP1 do
 
   @behaviour Mint.Core.Conn
 
+  @typedoc """
+  A Mint HTTP/2 connection struct.
+
+  The struct's fields are private.
+  """
   @opaque t() :: %__MODULE__{}
 
   @user_agent "mint/" <> Mix.Project.config()[:version]
@@ -574,6 +579,14 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
+
+  # Made public since the %Mint.HTTP1{} struct is opaque.
+  @doc false
+  @impl true
+  @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
+  def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
+    %__MODULE__{conn | proxy_headers: headers}
+  end
 
   ## Helpers
 

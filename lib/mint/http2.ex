@@ -328,7 +328,12 @@ defmodule Mint.HTTP2 do
   """
   @type error_reason() :: term()
 
-  @opaque t() :: %Mint.HTTP2{}
+  @typedoc """
+  A Mint HTTP/2 connection struct.
+
+  The struct's fields are private.
+  """
+  @opaque t() :: %__MODULE__{}
 
   ## Public interface
 
@@ -988,6 +993,13 @@ defmodule Mint.HTTP2 do
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
+
+  # Made public since the %Mint.HTTP2{} struct is opaque.
+  @doc false
+  @impl true
+  def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
+    %__MODULE__{conn | proxy_headers: headers}
+  end
 
   ## Helpers
 

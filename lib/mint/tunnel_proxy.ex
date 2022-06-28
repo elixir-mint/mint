@@ -1,13 +1,15 @@
 defmodule Mint.TunnelProxy do
   @moduledoc false
 
-  alias Mint.{HTTP1, HTTPError, Negotiate, TransportError}
+  alias Mint.{HTTP, HTTP1, HTTPError, Negotiate, TransportError}
 
   @tunnel_timeout 30_000
 
+  @spec connect(tuple(), tuple()) :: {:ok, Mint.HTTP.t()} | {:error, term()}
   def connect(proxy, host) do
-    with {:ok, conn} <- establish_proxy(proxy, host) do
-      upgrade_connection(conn, proxy, host)
+    case establish_proxy(proxy, host) do
+      {:ok, conn} -> upgrade_connection(conn, proxy, host)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -23,7 +25,7 @@ defmodule Mint.TunnelProxy do
          headers = Keyword.get(opts, :proxy_headers, []),
          {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, headers, nil),
          {:ok, proxy_headers} <- receive_response(conn, ref, timeout_deadline) do
-      {:ok, struct!(conn, proxy_headers: proxy_headers)}
+      {:ok, HTTP1.put_proxy_headers(conn, proxy_headers)}
     else
       {:error, reason} ->
         {:error, wrap_in_proxy_error(reason)}
@@ -35,15 +37,16 @@ defmodule Mint.TunnelProxy do
   end
 
   defp upgrade_connection(
-         %{proxy_headers: proxy_headers} = conn,
+         conn,
          {proxy_scheme, _proxy_address, _proxy_port, _proxy_opts} = _proxy,
          {scheme, hostname, port, opts} = _host
        ) do
+    proxy_headers = HTTP1.get_proxy_headers(conn)
     socket = HTTP1.get_socket(conn)
 
     # Note that we may leak messages if the server sent data after the CONNECT response
     case Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts) do
-      {:ok, conn} -> {:ok, struct!(conn, proxy_headers: proxy_headers)}
+      {:ok, conn} -> {:ok, HTTP.put_proxy_headers(conn, proxy_headers)}
       {:error, reason} -> wrap_in_proxy_error(reason)
     end
   end

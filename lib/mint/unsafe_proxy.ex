@@ -186,4 +186,10 @@ defmodule Mint.UnsafeProxy do
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(%__MODULE__{}), do: []
+
+  @impl true
+  @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
+  def put_proxy_headers(%__MODULE__{}, _headers) do
+    raise "invalid function for proxy unsafe proxy connections"
+  end
 end

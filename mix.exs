@@ -73,7 +73,7 @@ defmodule Mint.MixProject do
       {:hpax, "~> 0.1.1"},
 
       # Dev/test dependencies
-      {:dialyxir, "~> 1.0.0-rc.6", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.20", only: :dev},
       {:excoveralls, "~> 0.14.5", only: :test},
       {:stream_data, "~> 0.5.0", only: [:dev, :test]}
