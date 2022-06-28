@@ -19,10 +19,13 @@ jobs:
             elixir: "1.13"
             lint: true
             coverage: true
+            dialyzer: true
           - erlang: "24.3"
             elixir: "1.12"
+            dialyzer: true
           - erlang: "23.3.1"
             elixir: "1.11.4"
+            dialyzer: true
           - erlang: "18.3"
             elixir: "1.5.3"
     env:
@@ -62,7 +65,7 @@ jobs:
 
       # Create PLTs if no cache was found
       - name: Create PLTs
-        if: steps.cache-plt.outputs.cache-hit != 'true'
+        if: ${{matrix.dialyzer && steps.cache-plt.outputs.cache-hit != 'true'}}
         run: mix dialyzer --plt
 
       - name: Start docker
@@ -90,3 +93,4 @@ jobs:
 
       - name: Run Dialyzer
         run: mix dialyzer
+        if: ${{ matrix.dialyzer }}
