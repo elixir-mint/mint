@@ -279,21 +279,34 @@ defmodule HTTP2.IntegrationTest do
 
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
-      assert [
-               {:status, ^ref, informational_status},
-               {:headers, ^ref, informational_headers},
-               {:status, ^ref, status},
-               {:headers, ^ref, headers}
-               | rest
-             ] = responses
+      case responses do
+        [
+          {:status, ^ref, informational_status},
+          {:headers, ^ref, informational_headers},
+          {:status, ^ref, status},
+          {:headers, ^ref, headers}
+          | rest
+        ] ->
+          assert informational_status == 103
+          assert {"link", _} = List.keyfind(informational_headers, "link", 0)
+          assert status == 200
+          assert is_list(headers) and length(headers) > 0
 
-      assert informational_status == 103
-      assert {"link", _} = List.keyfind(informational_headers, "link", 0)
-      assert status == 200
-      assert is_list(headers) and length(headers) > 0
+          assert Enum.count(rest, &match?({:data, ^ref, _data}, &1)) >= 1
+          assert List.last(rest) == {:done, ref}
 
-      assert Enum.count(rest, &match?({:data, ^ref, _data}, &1)) >= 1
-      assert List.last(rest) == {:done, ref}
+        [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] ->
+          assert status == 200
+          assert is_list(headers) and length(headers) > 0
+          assert Enum.count(rest, &match?({:data, ^ref, _data}, &1)) >= 1
+          assert List.last(rest) == {:done, ref}
+
+        other ->
+          flunk(
+            "Unexpected responses. Expected status + headers + data, or informational " <>
+              "response + status + headers + data, got:\n#{inspect(responses, pretty: true)}"
+          )
+      end
 
       assert HTTP2.open?(conn)
     end
