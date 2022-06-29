@@ -391,6 +391,35 @@ defmodule Mint.HTTP2Test do
         conn
       end)
     end
+
+    test "close/1 properly closes socket on active connection", %{conn: conn} do
+      # Check socket status, before close it should be :ok
+      socket = HTTP2.get_socket(conn)
+      assert {:ok, _} = :ssl.getstat(socket)
+
+      # Closed successfully
+      assert {:ok, conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+
+      # Check socket status again, after close it should be :error
+      assert {:error, _} = :ssl.getstat(socket)
+    end
+
+    test "close/1 properly closes socket on errornous connection", %{conn: conn} do
+      # force the transport to one that always times out on send
+      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+
+      # Check socket status, before close it should be :ok
+      socket = HTTP2.get_socket(conn)
+      assert {:ok, _} = :ssl.getstat(socket)
+
+      # Closed successfully
+      assert {:ok, conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+
+      # Check socket status again, after close it should be :error
+      assert {:error, _} = :ssl.getstat(socket)
+    end
   end
 
   describe "client errors" do
