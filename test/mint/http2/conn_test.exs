@@ -2,6 +2,7 @@ defmodule Mint.HTTP2Test do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.Frame
+  import Mint.HTTP2.TestHelpers, only: [extract_port: 1]
   import ExUnit.CaptureLog
 
   alias Mint.{
@@ -393,32 +394,32 @@ defmodule Mint.HTTP2Test do
     end
 
     test "close/1 properly closes socket on active connection", %{conn: conn} do
-      # Check socket status, before close it should be :ok
-      socket = HTTP2.get_socket(conn)
-      assert {:ok, _} = :ssl.getstat(socket)
+      # Check port status, before close it should be opened
+      port = conn |> HTTP2.get_socket() |> extract_port
+      refute :erlang.port_info(port) == :undefined
 
       # Closed successfully
       assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
 
-      # Check socket status again, after close it should be :error
-      assert {:error, _} = :ssl.getstat(socket)
+      # Check port status again, after close it should be closed
+      assert :erlang.port_info(port) == :undefined
     end
 
     test "close/1 properly closes socket on errornous connection", %{conn: conn} do
       # force the transport to one that always times out on send
       conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
 
-      # Check socket status, before close it should be :ok
-      socket = HTTP2.get_socket(conn)
-      assert {:ok, _} = :ssl.getstat(socket)
+      # Check port status, before close it should be opened
+      port = conn |> HTTP2.get_socket() |> extract_port
+      refute :erlang.port_info(port) == :undefined
 
       # Closed successfully
       assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
 
-      # Check socket status again, after close it should be :error
-      assert {:error, _} = :ssl.getstat(socket)
+      # Check port status again, after close it should be closed
+      assert :erlang.port_info(port) == :undefined
     end
   end
 
