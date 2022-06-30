@@ -2028,7 +2028,9 @@ defmodule Mint.HTTP2 do
     frame =
       goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
 
-    # try send goaway frame and close connection
+    # Try to send the GOAWAY frame and close connection.
+    # If the frame fails to send, we still want to set the close
+    # the socket, set the connection state to :closed, and return an error.
     _ = conn.transport.send(conn.socket, Frame.encode(frame))
     _ = conn.transport.close(conn.socket)
 
