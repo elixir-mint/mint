@@ -50,4 +50,11 @@ defmodule Mint.HTTP2.TestHelpers do
   def maybe_done(conn, [], acc) do
     receive_stream(conn, acc)
   end
+
+  @doc """
+  Extracts port from ssl socket
+  """
+  def extract_port({:sslsocket, {_, port, _, _}, _} = _ssl_socket) do
+    port
+  end
 end
