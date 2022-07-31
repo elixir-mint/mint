@@ -70,4 +70,28 @@ defmodule Mint.UnsafeProxyTest do
 
     assert Mint.HTTP.protocol(conn) == :http1
   end
+
+  # TODO: Remove check once we depend on Elixir 1.10+.
+  if Version.match?(System.version(), ">= 1.10.0") do
+    # Regression for #371
+    test "Mint.HTTP.is_connection_message/2 works with unsafe proxy connections" do
+      import Mint.HTTP, only: [is_connection_message: 2]
+
+      assert {:ok, %UnsafeProxy{state: %{socket: socket}} = conn} =
+               UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+
+      assert is_connection_message(conn, {:tcp, socket, "foo"}) == true
+      assert is_connection_message(conn, {:tcp_closed, socket}) == true
+      assert is_connection_message(conn, {:tcp_error, socket, :nxdomain}) == true
+
+      assert is_connection_message(conn, {:tcp, :not_a_socket, "foo"}) == false
+      assert is_connection_message(conn, {:tcp_closed, :not_a_socket}) == false
+
+      assert is_connection_message(_conn = %UnsafeProxy{}, {:tcp, socket, "foo"}) == false
+
+      # If the first argument is not a connection struct, we return false.
+      assert is_connection_message(%{socket: socket}, {:tcp, socket, "foo"}) == false
+      assert is_connection_message(%URI{}, {:tcp, socket, "foo"}) == false
+    end
+  end
 end

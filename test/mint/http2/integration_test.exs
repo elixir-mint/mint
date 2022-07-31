@@ -301,7 +301,7 @@ defmodule HTTP2.IntegrationTest do
           assert Enum.count(rest, &match?({:data, ^ref, _data}, &1)) >= 1
           assert List.last(rest) == {:done, ref}
 
-        other ->
+        _other ->
           flunk(
             "Unexpected responses. Expected status + headers + data, or informational " <>
               "response + status + headers + data, got:\n#{inspect(responses, pretty: true)}"

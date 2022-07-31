@@ -46,6 +46,38 @@ defmodule Mint.Core.Util do
                                 "warning"
                               ])
 
+  # TODO: Remove the conditional definition when we depend on Elixir 1.10+
+  # TODO: Use is_struct/2 and map.field access when we depend on Elixir 1.11+
+  @doc false
+  if Version.match?(System.version(), ">= 1.10.0") do
+    defguard is_non_proxy_connection_message(conn, message)
+             when is_map(conn) and
+                    is_tuple(message) and
+                    is_map_key(conn, :__struct__) and
+                    is_map_key(conn, :socket) and
+                    is_atom(:erlang.map_get(:__struct__, conn)) and
+                    elem(message, 1) == :erlang.map_get(:socket, conn) and
+                    ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
+                       (elem(message, 0) in [:ssl_closed, :tcp_closed] and
+                          tuple_size(message) == 2) or
+                       (elem(message, 0) in [:ssl_error, :tcp_error] and
+                          tuple_size(message) == 3))
+
+    defguard is_proxy_conn(conn)
+             when is_map(conn) and is_map_key(conn, :__struct__) and
+                    :erlang.map_get(:__struct__, conn) == Mint.UnsafeProxy
+  else
+    defmacro is_non_proxy_connection_message(_conn, _message) do
+      raise ArgumentError,
+            "the is_non_proxy_connection_message/2 macro is only available with Elixir 1.10+"
+    end
+
+    defmacro is_proxy_conn(_conn) do
+      raise ArgumentError,
+            "the is_proxy_conn/2 macro is only available with Elixir 1.10+"
+    end
+  end
+
   # We have to do this if/else dance inside the macro because defguard
   # is not available in Elixir 1.5, and macro expansion would raise
   # when expanding the if even if we were on Elixir 1.5. This way, we
@@ -58,20 +90,15 @@ defmodule Mint.Core.Util do
       quote do
         @doc since: "1.1.0"
         defguard is_connection_message(conn, message)
-                 when is_map(conn) and
-                        is_tuple(message) and
-                        is_map_key(conn, :__struct__) and
-                        is_map_key(conn, :socket) and
-                        is_atom(:erlang.map_get(:__struct__, conn)) and
-                        elem(message, 1) == :erlang.map_get(:socket, conn) and
-                        ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
-                           (elem(message, 0) in [:ssl_closed, :tcp_closed] and
-                              tuple_size(message) == 2) or
-                           (elem(message, 0) in [:ssl_error, :tcp_error] and
-                              tuple_size(message) == 3))
+                 when (is_proxy_conn(conn) and
+                         is_non_proxy_connection_message(
+                           :erlang.map_get(:state, conn),
+                           message
+                         )) or is_non_proxy_connection_message(conn, message)
       end
     else
       quote do
+        @doc since: "1.1.0"
         defmacro is_connection_message(_conn, _message) do
           raise ArgumentError,
                 "the is_connection_message/2 macro is only available with Elixir 1.10+"
