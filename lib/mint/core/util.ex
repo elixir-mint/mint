@@ -110,7 +110,6 @@ defmodule Mint.Core.Util do
       end
     else
       quote do
-        @doc since: "1.1.0"
         defmacro is_connection_message(_conn, _message) do
           raise ArgumentError,
                 "the is_connection_message/2 macro is only available with Elixir 1.10+"
