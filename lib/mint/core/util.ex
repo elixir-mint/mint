@@ -56,19 +56,57 @@ defmodule Mint.Core.Util do
     # TODO: Use is_struct/2 and map.field access when we depend on Elixir 1.11+
     if Version.match?(System.version(), ">= 1.10.0") do
       quote do
+        defguardp is_non_proxy_connection_message(conn, message)
+                  when is_map(conn) and
+                         is_tuple(message) and
+                         is_map_key(conn, :__struct__) and
+                         is_map_key(conn, :socket) and
+                         is_atom(:erlang.map_get(:__struct__, conn)) and
+                         elem(message, 1) == :erlang.map_get(:socket, conn) and
+                         ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
+                            (elem(message, 0) in [:ssl_closed, :tcp_closed] and
+                               tuple_size(message) == 2) or
+                            (elem(message, 0) in [:ssl_error, :tcp_error] and
+                               tuple_size(message) == 3))
+
+        defguardp is_proxy_conn(conn)
+                  when is_map(conn) and is_map_key(conn, :__struct__) and
+                         :erlang.map_get(:__struct__, conn) == Mint.UnsafeProxy
+
+        @doc """
+        Macro to check that a given received `message` is intended for the given connection `conn`.
+
+        This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
+        `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
+        `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+
+        This macro can be used in guards.
+
+        **Note**: this macro is only available if you compile Mint with Elixir 1.10.0 or greater (and
+        OTP 21+, which is required by Elixir 1.10.0 and on).
+
+        ## Examples
+
+            require Mint.HTTP
+
+            {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, "")
+
+            receive do
+              message when Mint.HTTP.is_connection_message(conn, message) ->
+                Mint.HTTP.stream(conn, message)
+
+              other ->
+                # This message is related to something else or to some other connection
+            end
+
+        """
         @doc since: "1.1.0"
         defguard is_connection_message(conn, message)
-                 when is_map(conn) and
-                        is_tuple(message) and
-                        is_map_key(conn, :__struct__) and
-                        is_map_key(conn, :socket) and
-                        is_atom(:erlang.map_get(:__struct__, conn)) and
-                        elem(message, 1) == :erlang.map_get(:socket, conn) and
-                        ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
-                           (elem(message, 0) in [:ssl_closed, :tcp_closed] and
-                              tuple_size(message) == 2) or
-                           (elem(message, 0) in [:ssl_error, :tcp_error] and
-                              tuple_size(message) == 3))
+                 when (is_proxy_conn(conn) and
+                         is_non_proxy_connection_message(
+                           :erlang.map_get(:state, conn),
+                           message
+                         )) or is_non_proxy_connection_message(conn, message)
       end
     else
       quote do
