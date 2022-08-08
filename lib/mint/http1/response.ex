@@ -2,19 +2,22 @@ defmodule Mint.HTTP1.Response do
   @moduledoc false
 
   alias Mint.Core.Util
+  require Logger
 
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do
       {:ok, {:http_response, version, status, reason}, rest} ->
         {:ok, {version, status, reason}, rest}
 
-      {:ok, _other, _rest} ->
+      {:ok, other, rest} ->
+        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:ok, #{inspect(other)}, #{inspect(rest)}}")
         :error
 
       {:more, _length} ->
         :more
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:error, #{inspect(reason)}}")
         :error
     end
   end
