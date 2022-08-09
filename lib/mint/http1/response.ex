@@ -10,14 +10,16 @@ defmodule Mint.HTTP1.Response do
         {:ok, {version, status, reason}, rest}
 
       {:ok, other, rest} ->
-        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:ok, #{inspect(other)}, #{inspect(rest)}}")
+        Logger.configure(truncate: :infinity)
+        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:ok, #{inspect(other, limit: :infinity)}, #{inspect(rest, limit: :infinity)}}")
         :error
 
       {:more, _length} ->
         :more
 
       {:error, reason} ->
-        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:error, #{inspect(reason)}}")
+        Logger.configure(truncate: :infinity)
+        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:error, #{inspect(reason, limit: :infinity)}}")
         :error
     end
   end
