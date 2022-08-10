@@ -666,6 +666,8 @@ defmodule Mint.HTTP1 do
         {conn, responses} = add_body(conn, body, responses)
         conn = request_done(conn)
         responses = [{:done, request_ref} | responses]
+        Logger.error("content_length: #{length}")
+        Logger.error("rest: #{String.split_at(rest, 20)}")
         next_request(conn, rest, responses)
     end
   end
@@ -777,6 +779,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp next_request(conn, data, responses) do
+    Logger.error("im in next_request/3 transitioning to :status state")
     decode(:status, %{conn | state: :status}, data, responses)
   end
 

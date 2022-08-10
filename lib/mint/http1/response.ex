@@ -7,11 +7,20 @@ defmodule Mint.HTTP1.Response do
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do
       {:ok, {:http_response, version, status, reason}, rest} ->
+        Logger.configure(truncate: :infinity)
+        Logger.info("binary input: #{inspect(binary)}")
         {:ok, {version, status, reason}, rest}
 
       {:ok, other, rest} ->
         Logger.configure(truncate: :infinity)
-        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:ok, #{inspect(other, limit: :infinity)}, #{inspect(rest, limit: :infinity)}}")
+        Logger.error("binary input: #{inspect(binary)}")
+
+        Logger.error(
+          ":erlang.decode_packet(:http_bin, binary, []) returned {:ok, #{
+            inspect(other, limit: :infinity)
+          }, #{inspect(rest, limit: :infinity)}}"
+        )
+
         :error
 
       {:more, _length} ->
@@ -19,7 +28,13 @@ defmodule Mint.HTTP1.Response do
 
       {:error, reason} ->
         Logger.configure(truncate: :infinity)
-        Logger.error(":erlang.decode_packet(:http_bin, binary, []) returned {:error, #{inspect(reason, limit: :infinity)}}")
+
+        Logger.error(
+          ":erlang.decode_packet(:http_bin, binary, []) returned {:error, #{
+            inspect(reason, limit: :infinity)
+          }}"
+        )
+
         :error
     end
   end
