@@ -666,8 +666,9 @@ defmodule Mint.HTTP1 do
         {conn, responses} = add_body(conn, body, responses)
         conn = request_done(conn)
         responses = [{:done, request_ref} | responses]
-        Logger.error("content_length: #{length}")
-        Logger.error("rest: #{String.split_at(rest, 20)}")
+        Logger.info("content_length: #{length}")
+        {head, _tail} = String.split_at(rest, 50)
+        Logger.info("binary response in decode_body(:content_length, ...): #{head}")
         next_request(conn, rest, responses)
     end
   end
