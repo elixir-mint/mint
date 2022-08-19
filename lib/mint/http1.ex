@@ -236,7 +236,8 @@ defmodule Mint.HTTP1 do
     {:error, conn, wrap_error(:request_body_is_streaming)}
   end
 
-  def request(%__MODULE__{} = conn, method, path, headers, body) do
+  def request(%__MODULE__{} = conn, method, path, headers, body)
+      when is_binary(method) and is_binary(path) and is_list(headers) do
     %__MODULE__{transport: transport, socket: socket} = conn
 
     headers =
