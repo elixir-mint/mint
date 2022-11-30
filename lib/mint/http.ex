@@ -602,7 +602,7 @@ defmodule Mint.HTTP do
     do: conn_module(conn).stream_request_body(conn, ref, body)
 
   @doc """
-  Streams the next batch of responses from the given message.
+  Streams the next batch of responses from the given `message`.
 
   This function processes a "message" which can be any term, but should be
   a message received by the process that owns the connection. **Processing**
@@ -621,6 +621,15 @@ defmodule Mint.HTTP do
 
   If the given `message` is not from the connection's socket,
   this function returns `:unknown`.
+
+  > #### Receiving Multiple Messages {: .warning}
+  >
+  > Your connection and the HTTP server can exchange multiple **protocol-specific messages**
+  > on the socket that don't necessarily *produce responses*. For example, the HTTP server
+  > might tell the connection to update some internal settings. For this reason, you
+  > should always receive as many messages coming to your process as possible, for example
+  > by using `receive` recursively. You can see an example of this approach in the
+  > ["Usage Examples" documentation](architecture.html#usage-examples).
 
   ## Socket mode
 
