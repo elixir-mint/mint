@@ -1,11 +1,11 @@
 # Mint 🌱
 
-[![Build Status](https://travis-ci.org/elixir-mint/mint.svg?branch=master)](https://travis-ci.org/elixir-mint/mint)
-[![Docs](https://img.shields.io/badge/api-docs-green.svg?style=flat)](https://hexdocs.pm/mint)
-[![Hex.pm Version](http://img.shields.io/hexpm/v/mint.svg?style=flat)](https://hex.pm/packages/mint)
-[![Coverage Status](https://coveralls.io/repos/github/elixir-mint/mint/badge.svg?branch=main)](https://coveralls.io/github/elixir-mint/mint?branch=main)
+[![Build status badge](https://travis-ci.org/elixir-mint/mint.svg?branch=master)](https://travis-ci.org/elixir-mint/mint)
+[![Documentation badge](https://img.shields.io/badge/Documentation-ff69b4)][documentation]
+[![Hex.pm badge](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/mint)
+[![Coverage status badge](https://coveralls.io/repos/github/elixir-mint/mint/badge.svg?branch=main)](https://coveralls.io/github/elixir-mint/mint?branch=main)
 
-> Functional HTTP client for Elixir with support for HTTP/1 and HTTP/2.
+> Functional, low-level HTTP client for Elixir with support for HTTP/1 and HTTP/2.
 
 ## Installation
 
@@ -24,15 +24,15 @@ Then, run `$ mix deps.get`.
 
 ## Usage
 
-Mint is different from most Erlang and Elixir HTTP clients because it provides a process-less architecture. Instead, Mint is based on a functional and immutable data structure that represents an HTTP connection. This data structure wraps a TCP or SSL socket. This allows for more fine-tailored architectures where the developer is responsible for wrapping the connection struct, such as having one process handle multiple connections or having different kinds of processes handle connections.
+Mint is different from most Erlang and Elixir HTTP clients because it provides a *process-less architecture*. Instead, Mint is based on a functional and immutable data structure that represents an HTTP connection. This data structure wraps a TCP or SSL socket. This allows for more fine-tailored architectures where the developer is responsible for wrapping the connection struct, such as having one process handle multiple connections or having different kinds of processes handle connections. You can think of Mint as [`:gen_tcp`](https://erlang.org/doc/man/gen_tcp.html) and [`:ssl`](https://www.erlang.org/doc/man/ssl.html), but with an understanding of the HTTP/1.1 and HTTP/2 protocols.
 
-Below is an example of a basic interaction with Mint. First, we start a connection through `Mint.HTTP.connect/3`:
+Let's see an example of a basic interaction with Mint. First, we start a connection through `Mint.HTTP.connect/3`:
 
 ```elixir
 iex> {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
 ```
 
-This transparently chooses between HTTP/1 and HTTP/2. Requests are sent with:
+This transparently chooses between HTTP/1 and HTTP/2. Then, we can send requests with:
 
 ```elixir
 iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
@@ -46,16 +46,16 @@ iex> flush()
  "HTTP/1.1 200 OK\r\n" <> _}
 ```
 
-To handle such messages, Mint provides a `stream/2` function that turns messages into HTTP responses. Responses are streamed back to the user in parts through response parts `:status`, `:headers`, `:data`, and finally `:done`.
+Users are not supposed to examine these messages. Instead, Mint provides a `stream/2` function that turns messages into HTTP responses. Mint streams responses back to the user in parts through response parts such as `:status`, `:headers`, `:data`, and `:done`.
 
 
 ```elixir
-iex> {:ok, conn} = Mint.HTTP.connect(:http, "httpbin.org", 80)
+iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443)
 iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
 iex> receive do
 ...>   message ->
 ...>     {:ok, conn, responses} = Mint.HTTP.stream(conn, message)
-...>     IO.inspect responses
+...>     IO.inspect(responses)
 ...> end
 [
   {:status, #Reference<...>, 200},
@@ -65,14 +65,16 @@ iex> receive do
 ]
 ```
 
-The connection API is stateless, this means that you need to make sure to always save the returned `conn`:
+In the example above, we get all the responses as a single SSL message, but that might not always be the case. This means that `Mint.HTTP.stream/2` might not always return responses.
+
+The connection API is *stateless*, whihc means that you need to make sure to always save the connection that functions return:
 
 ```elixir
-# Wrong
+# Wrong ❌
 {:ok, _conn, ref} = Mint.HTTP.request(conn, "GET", "/foo", [], "")
 {:ok, conn, ref} = Mint.HTTP.request(conn, "GET", "/bar", [], "")
 
-# Correct
+# Correct ✅
 {:ok, conn, ref} = Mint.HTTP.request(conn, "GET", "/foo", [], "")
 {:ok, conn, ref} = Mint.HTTP.request(conn, "GET", "/bar", [], "")
 ```
@@ -84,9 +86,10 @@ For more information, see [the documentation][documentation].
 When using SSL, you can pass in your own CA certificate store or use one provided by Mint. Mint doesn't ship with the certificate store itself, but it has an optional dependency on [CAStore][castore], which provides an up-to-date certificate store. If you don't want to use your own certificate store, just add `:castore` to your dependencies.
 
 ```elixir
-def deps do
+defp deps do
   [
-    {:castore, "~> 0.1.0"},
+    # ...,
+    {:castore, "~> 1.0.0"},
     {:mint, "~> 0.4.0"}
   ]
 end
@@ -102,7 +105,7 @@ Mint is a low-level client. If you need higher-level features such as connection
 
 ## Contributing
 
-If you wish to contribute check out the [issue list](https://github.com/elixir-mint/mint/issues) and let us know what you want to work on so we can discuss it and reduce duplicate work.
+If you wish to contribute, check out the [issue list][issues] and let us know what you want to work on, so that we can discuss it and reduce duplicate work.
 
 Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:requires_internet_connection`. Proxy tests are tagged with `:proxy` and require that you run `docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
 
@@ -130,5 +133,6 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
 
 [castore]: https://github.com/elixir-mint/castore
 [documentation]: https://hexdocs.pm/mint
+[issues]: https://github.com/elixir-mint/mint/issues
 [mint_web_socket]: https://github.com/elixir-mint/mint_web_socket
 [Finch]: https://github.com/sneako/finch
