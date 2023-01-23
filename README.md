@@ -14,7 +14,7 @@ To install Mint, add it to your `mix.exs` file. Unless you're using your own SSL
 ```elixir
 defp deps do
   [
-    {:castore, "~> 0.1.0"},
+    {:castore, "~> 1.0"},
     {:mint, "~> 1.0"}
   ]
 end
