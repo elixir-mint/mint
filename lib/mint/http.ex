@@ -91,11 +91,10 @@ defmodule Mint.HTTP do
   Starting [from OTP
   25](https://www.erlang.org/blog/my-otp-25-highlights/#ca-certificates-can-be-fetched-from-the-os-standard-place),
   you can also load certificates from a file
-  ([`:public_key.cacerts_load/1`](https://www.erlang.org/doc/man/public_key.html#cacerts_load-1))
-  or from the OS
-  ([`:public_key.cacerts_load/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_load-0)).
-  You can then use the certificates with
-  [`:public_key.cacerts_get/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_get-0):
+  ([`:public_key.cacerts_load/1`](https://www.erlang.org/doc/man/public_key.html#cacerts_load-1)).
+  You can also get certificate from the OS trust store using
+  [`:public_key.cacerts_get/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_get-0).
+  If you are using OTP 25+ it is recommended to set this option.
 
       Mint.connect(:https, host, port, transport_opts: [cacerts: :public_key.cacerts_get()])
 
@@ -230,12 +229,16 @@ defmodule Mint.HTTP do
 
     * `:alpn_advertised_protocols` - managed by Mint. Cannot be overridden.
 
-    * `:cacertfile` - if `:verify` is set to `:verify_peer` (the default) and
+    * `:cacerts` - certificates of types `:ssl.client_cacerts()`.
+      If `:verify` is set to `:verify_peer` (the default) and
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
       [CAStore](https://github.com/elixir-mint/castore) package or raise an
-      exception if this package is not available. Due to caching the
-      `:cacertfile` option is more efficient than `:cacerts`.
+      exception if this package is not available. It is reommended to set this
+      option to `:public_key.cacerts_get()`.
+
+    * `:cacertfile` - path to a file containing PEM-encoded CA certificates.
+      See the `:cacerts` option for the defaults to this value.
 
     * `:ciphers` - defaults to the lists returned by
       `:ssl.filter_cipher_suites(:ssl.cipher_suites(:all, version), [])`
