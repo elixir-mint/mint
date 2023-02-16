@@ -608,7 +608,7 @@ defmodule Mint.Core.Transport.SSL do
 
   defp decode_cacerts(certs) do
     Enum.map(certs, fn
-      cert when is_binary(cert) ->  :public_key.pkix_decode_cert(cert, :plain)
+      cert when is_binary(cert) -> :public_key.pkix_decode_cert(cert, :plain)
       {:cert, _, otp_certificate} -> otp_certificate
     end)
   end
