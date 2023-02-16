@@ -109,6 +109,35 @@ defmodule Mint.IntegrationTest do
                  transport_opts: [verify: :verify_none]
                )
     end
+
+    if List.to_integer(:erlang.system_info(:otp_release)) < 25 do
+      @tag :skip
+    end
+
+    @tag :capture_log
+    test "using :public_key.cacerts_get/0" do
+      cacerts = apply(:public_key, :cacerts_get, [])
+
+      assert {:error, %TransportError{}} =
+               HTTP.connect(
+                 :https,
+                 "untrusted-root.badssl.com",
+                 443,
+                 transport_opts: [
+                   log_alert: false,
+                   reuse_sessions: false,
+                   cacerts: cacerts
+                 ]
+               )
+
+      assert {:ok, _conn} =
+               HTTP.connect(
+                 :https,
+                 "nghttp2.org",
+                 443,
+                 transport_opts: [reuse_sessions: false, cacerts: cacerts]
+               )
+    end
   end
 
   describe "partial chain handling" do
