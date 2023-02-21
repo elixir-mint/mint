@@ -269,6 +269,10 @@ defmodule HTTP2.IntegrationTest do
   describe "www.shopify.com" do
     @describetag connect: {"www.shopify.com", 443}
 
+    if List.to_integer(:erlang.system_info(:otp_release)) < 23 do
+      @tag :skip
+    end
+
     # Informational responses were the issue.s
     # https://github.com/elixir-mint/mint/issues/349
     test "GET / with specific User-Agent header - regression for #349", %{conn: conn} do
