@@ -9,8 +9,7 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }}, OTP ${{ matrix.erlang }})
-    # We need Ubuntu 18.04 for older OTP versions.
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +25,7 @@ jobs:
           - erlang: "23.3.1"
             elixir: "1.11.4"
             dialyzer: true
-          - erlang: "18.3"
+          - erlang: "20.3.8"
             elixir: "1.5.3"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
