@@ -1650,6 +1650,10 @@ defmodule Mint.HTTP2Test do
 
       refute HTTP2.open?(conn)
     end
+
+    test "get_client_setting/2", %{conn: conn} do
+      assert HTTP2.get_client_setting(conn, :max_concurrent_streams) == 100
+    end
   end
 
   describe "stream_request_body/3" do
@@ -1874,9 +1878,36 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [mode: :passive]
-    test "protocol errors are bubbled up in recv/3", %{conn: conn} do
+    test "timeouts are bubbled up in recv/3", %{conn: conn} do
       assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 0)
       assert_transport_error error, :timeout
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "socket errors are bubbled up in recv/3", %{conn: conn} do
+      Mox.verify_on_exit!()
+      conn = %{conn | transport: TransportMock}
+      Mox.expect(TransportMock, :recv, fn _socket, 0, 1000 -> {:error, :econnrefused} end)
+      HTTP2.recv(conn, 0, 1000)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "protocol errors are bubbled up in recv/3", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers()]
+
+      # Payload should be 8 bytes long, but is empty here.
+      data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<>>))
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.recv(conn, 0, 1000)
+
+      assert_http2_error error, {:frame_size_error, debug_data}
+      assert debug_data =~ "error with size of frame: :ping"
+
+      assert_recv_frames [goaway(error_code: :frame_size_error)]
       refute HTTP2.open?(conn)
     end
   end
