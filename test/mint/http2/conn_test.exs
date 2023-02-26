@@ -1554,10 +1554,11 @@ defmodule Mint.HTTP2Test do
 
   describe "settings" do
     test "put_settings/2 can be used to send settings to server", %{conn: conn} do
-      {:ok, conn} = HTTP2.put_settings(conn, max_concurrent_streams: 123)
+      {:ok, conn} =
+        HTTP2.put_settings(conn, max_concurrent_streams: 123, initial_window_size: 1_000)
 
       assert_recv_frames [settings() = frame]
-      assert settings(frame, :params) == [max_concurrent_streams: 123]
+      assert settings(frame, :params) == [max_concurrent_streams: 123, initial_window_size: 1_000]
       assert settings(frame, :flags) == set_flags(:settings, [])
 
       assert {:ok, %HTTP2{} = conn, []} =
@@ -1565,16 +1566,21 @@ defmodule Mint.HTTP2Test do
                  settings(flags: set_flags(:settings, [:ack]), params: [])
                ])
 
+      assert HTTP2.get_client_setting(conn, :initial_window_size) == 1_000
       assert HTTP2.open?(conn)
     end
 
-    test "put_settings/2 fails with unknown settings", %{conn: conn} do
+    test "put_settings/2 fails with unknown or invalid settings", %{conn: conn} do
       assert_raise ArgumentError, ":header_table_size must be an integer, got: :oops", fn ->
         HTTP2.put_settings(conn, header_table_size: :oops)
       end
 
       assert_raise ArgumentError, "unknown setting parameter :oops", fn ->
         HTTP2.put_settings(conn, oops: 1)
+      end
+
+      assert_raise ArgumentError, ~r/:enable_connect_protocol is only valid for server/, fn ->
+        HTTP2.put_settings(conn, enable_connect_protocol: true)
       end
     end
 
@@ -1616,6 +1622,18 @@ defmodule Mint.HTTP2Test do
     # An example of an invalid setting is "max_frame_size: 1".
     @tag :skip
     test "protocol error when server sends an invalid setting"
+
+    test "client ignores settings ACKs if client settings queue is empty", %{conn: conn} do
+      log =
+        capture_log(fn ->
+          assert {:ok, %HTTP2{} = conn, []} =
+                   stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+          assert HTTP2.open?(conn)
+        end)
+
+      assert log =~ "Received SETTINGS ACK but client is not waiting for any ACK"
+    end
   end
 
   describe "stream_request_body/3" do

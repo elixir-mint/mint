@@ -149,6 +149,14 @@ defmodule Mint.HTTP2 do
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
 
+  @valid_client_settings [
+    :max_concurrent_streams,
+    :initial_window_size,
+    :max_frame_size,
+    :enable_push,
+    :max_header_list_size
+  ]
+
   @user_agent "mint/" <> Mix.Project.config()[:version]
 
   # HTTP/2 connection struct.
@@ -199,6 +207,8 @@ defmodule Mint.HTTP2 do
     # Settings that the client communicates to the server.
     client_settings: %{
       max_concurrent_streams: 100,
+      initial_window_size: @default_window_size,
+      max_header_list_size: :infinity,
       max_frame_size: @default_max_frame_size,
       enable_push: true
     },
@@ -574,7 +584,7 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  Communicates the given client settings to the server.
+  Communicates the given **client settings** to the server.
 
   This function is HTTP/2-specific.
 
@@ -587,7 +597,7 @@ defmodule Mint.HTTP2 do
   function returns `{:error, conn, reason}` with `conn` being the updated connection
   and `reason` being the reason of the error.
 
-  ## Supported settings
+  ## Supported Settings
 
   See `t:setting/0` for the supported settings. You can see the meaning
   of these settings [in the corresponding section in the HTTP/2
@@ -932,7 +942,7 @@ defmodule Mint.HTTP2 do
     transport = scheme_to_transport(scheme)
     mode = Keyword.get(opts, :mode, :active)
     client_settings_params = Keyword.get(opts, :client_settings, [])
-    validate_settings!(client_settings_params)
+    validate_client_settings!(client_settings_params)
 
     unless mode in [:active, :passive] do
       raise ArgumentError,
@@ -1274,14 +1284,14 @@ defmodule Mint.HTTP2 do
   end
 
   defp send_settings(conn, settings) do
-    validate_settings!(settings)
+    validate_client_settings!(settings)
     frame = settings(stream_id: 0, params: settings)
     conn = send!(conn, Frame.encode(frame))
     conn = update_in(conn.client_settings_queue, &:queue.in(settings, &1))
     conn
   end
 
-  defp validate_settings!(settings) do
+  defp validate_client_settings!(settings) do
     unless Keyword.keyword?(settings) do
       raise ArgumentError, "settings must be a keyword list"
     end
@@ -1322,11 +1332,8 @@ defmodule Mint.HTTP2 do
           raise ArgumentError, ":max_header_list_size must be an integer, got: #{inspect(value)}"
         end
 
-      {:enable_connect_protocol, value} ->
-        unless is_boolean(value) do
-          raise ArgumentError,
-                ":enable_connect_protocol must be a boolean, got: #{inspect(value)}"
-        end
+      {:enable_connect_protocol, _value} ->
+        raise ArgumentError, ":enable_connect_protocol is only valid for server settings"
 
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
@@ -1760,8 +1767,7 @@ defmodule Mint.HTTP2 do
     settings(flags: flags, params: params) = frame
 
     if flag_set?(flags, :settings, :ack) do
-      {{:value, params}, conn} = get_and_update_in(conn.client_settings_queue, &:queue.out/1)
-      conn = apply_client_settings(conn, params)
+      conn = apply_client_settings(conn)
       {conn, responses}
     else
       conn = apply_server_settings(conn, params)
@@ -1806,16 +1812,24 @@ defmodule Mint.HTTP2 do
     end)
   end
 
+  defp apply_client_settings(conn) do
+    case get_and_update_in(conn.client_settings_queue, &:queue.out/1) do
+      {{:value, params}, conn} ->
+        apply_client_settings(conn, params)
+
+      {:empty, conn} ->
+        Logger.warn("Received SETTINGS ACK but client is not waiting for any ACK; ignoring it")
+        conn
+    end
+  end
+
   defp apply_client_settings(conn, client_settings) do
     Enum.reduce(client_settings, conn, fn
-      {:max_frame_size, value}, conn ->
-        put_in(conn.client_settings.max_frame_size, value)
+      {setting, value}, conn when setting in @valid_client_settings ->
+        update_in(conn.client_settings, &%{&1 | setting => value})
 
-      {:max_concurrent_streams, value}, conn ->
-        put_in(conn.client_settings.max_concurrent_streams, value)
-
-      {:enable_push, value}, conn ->
-        put_in(conn.client_settings.enable_push, value)
+      {setting, _value}, _conn ->
+        raise "received ack from server for invalid client setting: #{inspect(setting)}}"
     end)
   end
 
