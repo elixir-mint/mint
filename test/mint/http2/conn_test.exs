@@ -1570,6 +1570,12 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    test "put_settings/2 raises an error if the argument is not a keyword list", %{conn: conn} do
+      assert_raise ArgumentError, "settings must be a keyword list", fn ->
+        HTTP2.put_settings(conn, [:setting1, :setting2])
+      end
+    end
+
     test "put_settings/2 fails with unknown or invalid settings", %{conn: conn} do
       assert_raise ArgumentError, ":header_table_size must be an integer, got: :oops", fn ->
         HTTP2.put_settings(conn, header_table_size: :oops)
