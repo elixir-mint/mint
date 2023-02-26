@@ -406,10 +406,7 @@ defmodule Mint.HTTP2Test do
       assert :erlang.port_info(port) == :undefined
     end
 
-    test "close/1 properly closes socket on errornous connection", %{conn: conn} do
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
-
+    test "close/1 properly closes socket on erroneous connection", %{conn: conn} do
       # Check port status, before close it should be opened
       port = conn |> HTTP2.get_socket() |> extract_port
       refute :erlang.port_info(port) == :undefined
@@ -442,12 +439,20 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when an ssl timeout is triggered on request", %{conn: conn} do
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+      Mox.verify_on_exit!()
+
+      # Force the transport to one that always times out on send
+      conn = %{conn | transport: TransportMock}
+      Mox.stub_with(TransportMock, Mint.Core.Transport.SSL)
 
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        Mox.expect(TransportMock, :send, fn _socket, data ->
+          assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
+          {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+        end)
+
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
         assert_transport_error error, :timeout
 
@@ -459,15 +464,22 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
+      Mox.verify_on_exit!()
+
       # open a streaming request.
       {conn, ref} = open_request(conn, :stream)
 
       assert_recv_frames [headers()]
 
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+      # Force the transport to one that always times out on send
+      conn = %{conn | transport: TransportMock}
 
       expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      Mox.expect(TransportMock, :send, fn _socket, data ->
+        assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
+        {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+      end)
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
