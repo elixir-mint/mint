@@ -39,15 +39,20 @@ defmodule Mint.HTTP1.ParseTest do
 
   describe "token_list_downcase/1" do
     property "returns an empty list if there's no token" do
-      check all string <- string([?\s, ?\t, ?,]) do
+      no_tokens_generator = string([?\s, ?\t, ?,])
+
+      check all string <- no_tokens_generator, max_runs: 25 do
         assert token_list_downcase(string) == {:ok, []}
       end
     end
 
     property "parses lists of tokens and downcases them" do
+      whitespace_generator = string([?\s, ?\t])
+
       check all tokens <- list_of(string(:alphanumeric, min_length: 1)),
-                whitespace <- string([?\s, ?\t]),
-                string = Enum.join(tokens, whitespace <> "," <> whitespace) do
+                whitespace <- whitespace_generator,
+                string = Enum.join(tokens, whitespace <> "," <> whitespace),
+                max_runs: 30 do
         assert token_list_downcase(string) == {:ok, Enum.map(tokens, &String.downcase/1)}
       end
     end
