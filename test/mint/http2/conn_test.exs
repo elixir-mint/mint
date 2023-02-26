@@ -1616,6 +1616,40 @@ defmodule Mint.HTTP2Test do
     # An example of an invalid setting is "max_frame_size: 1".
     @tag :skip
     test "protocol error when server sends an invalid setting"
+
+    test "server can send the :enable_push setting", %{conn: conn} do
+      {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: false])])
+      assert HTTP2.get_server_setting(conn, :enable_push) == false
+
+      {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: true])])
+      assert HTTP2.get_server_setting(conn, :enable_push) == true
+    end
+
+    test "if server sends an invalid :initial_window_size, we send a connection error",
+         %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [
+                 settings(params: [initial_window_size: 1_000_000_000_000_000])
+               ])
+
+      assert responses == []
+      assert_http2_error error, {:flow_control_error, message}
+      assert message =~ ~r/INITIAL_WINDOW_SIZE setting of \d+ is too big/
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "if server sends an invalid :max_frame_size, we send a connection error",
+         %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [settings(params: [max_frame_size: 0])])
+
+      assert responses == []
+      assert_http2_error error, {:protocol_error, message}
+      assert message == "MAX_FRAME_SIZE setting parameter outside of allowed range"
+
+      refute HTTP2.open?(conn)
+    end
   end
 
   describe "stream_request_body/3" do
@@ -1831,6 +1865,20 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    @tag connect_options: [mode: :passive]
+    test "closed socket is handled in recv/3", %{conn: conn} do
+      :ok = :ssl.shutdown(conn.socket, :read)
+      assert {:ok, conn, _responses = []} = HTTP2.recv(conn, 0, 1)
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "protocol errors are bubbled up in recv/3", %{conn: conn} do
+      assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 0)
+      assert_transport_error error, :timeout
+      refute HTTP2.open?(conn)
+    end
   end
 
   describe "ping" do
@@ -1945,6 +1993,23 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+  end
+
+  test "put_private/3, get_private/3, and delete_private/2", %{conn: conn} do
+    assert HTTP2.get_private(conn, :my_key) == nil
+    assert HTTP2.get_private(conn, :my_key, :default) == :default
+
+    # Setting the key.
+    assert %HTTP2{} = conn = HTTP2.put_private(conn, :my_key, :my_value)
+    assert HTTP2.get_private(conn, :my_key) == :my_value
+
+    # Overriding the same key.
+    assert %HTTP2{} = conn = HTTP2.put_private(conn, :my_key, :my_new_value)
+    assert HTTP2.get_private(conn, :my_key) == :my_new_value
+
+    # Deleting the key.
+    assert %HTTP2{} = conn = HTTP2.delete_private(conn, :my_key)
+    assert HTTP2.get_private(conn, :my_key) == nil
   end
 
   @pdict_key {__MODULE__, :http2_test_server}
