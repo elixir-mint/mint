@@ -12,7 +12,7 @@ defmodule Mint.HTTP2 do
   `Mint.HTTP` deals seamlessly with HTTP/1.1 and HTTP/2. For more information on
   how to use the data structure and client architecture, see `Mint.HTTP`.
 
-  ## HTTP/2 streams and requests
+  ## HTTP/2 Streams and Requests
 
   HTTP/2 introduces the concept of **streams**. A stream is an isolated conversation
   between the client and the server. Each stream is unique and identified by a unique
@@ -25,7 +25,7 @@ defmodule Mint.HTTP2 do
   This is why we identify each request with a unique reference returned by `request/5`.
   See `request/5` for more information.
 
-  ## Closed connection
+  ## Closed Connection
 
   In HTTP/2, the connection can either be open, closed, or only closed for writing.
   When a connection is closed for writing, the client cannot send requests or stream
@@ -35,7 +35,7 @@ defmodule Mint.HTTP2 do
   processed by the server, with the reason of `error` being `:unprocessed`.
   These requests are safe to retry.
 
-  ## HTTP/2 settings
+  ## HTTP/2 Settings
 
   HTTP/2 supports settings negotiation between servers and clients. The server advertises
   its settings to the client and the client advertises its settings to the server. A peer
@@ -61,7 +61,7 @@ defmodule Mint.HTTP2 do
   the server acknowledges the new settings, the updated value will be returned by
   `get_client_setting/2`.
 
-  ## Server push
+  ## Server Push
 
   HTTP/2 supports [server push](https://en.wikipedia.org/wiki/HTTP/2_Server_Push), which
   is a way for a server to send a response to a client without the client needing to make
@@ -118,11 +118,11 @@ defmodule Mint.HTTP2 do
 
   The response to a promised request is like a response to any normal request.
 
-  ### Disabling server pushes
-
-  HTTP/2 exposes a boolean setting for enabling or disabling server pushes with `:enable_push`.
-  You can pass this option when connecting or in `put_settings/2`. By default server push
-  is enabled.
+  > #### Disabling Server Pushes {: .tip}
+  >
+  > HTTP/2 exposes a boolean setting for enabling or disabling server pushes with `:enable_push`.
+  > You can pass this option when connecting or in `put_settings/2`. By default server push
+  > is enabled.
   """
 
   import Mint.Core.Util
@@ -235,36 +235,36 @@ defmodule Mint.HTTP2 do
 
   The supported settings are the following:
 
-    * `:header_table_size` - (integer) corresponds to `SETTINGS_HEADER_TABLE_SIZE`.
+    * `:header_table_size` - corresponds to `SETTINGS_HEADER_TABLE_SIZE`.
 
-    * `:enable_push` - (boolean) corresponds to `SETTINGS_ENABLE_PUSH`. Sets whether
+    * `:enable_push` - corresponds to `SETTINGS_ENABLE_PUSH`. Sets whether
       push promises are supported. If you don't want to support push promises,
       use `put_settings/2` to tell the server that your client doesn't want push promises.
 
-    * `:max_concurrent_streams` - (integer) corresponds to `SETTINGS_MAX_CONCURRENT_STREAMS`.
+    * `:max_concurrent_streams` - corresponds to `SETTINGS_MAX_CONCURRENT_STREAMS`.
       Tells what is the maximum number of streams that the peer sending this (client or server)
       supports. As mentioned in the module documentation, HTTP/2 streams are equivalent to
       requests, so knowing the maximum number of streams that the server supports can be useful
       to know how many concurrent requests can be open at any time. Use `get_server_setting/2`
       to find out how many concurrent streams the server supports.
 
-    * `:initial_window_size` - (integer smaller than `#{inspect(@max_window_size)}`)
-      corresponds to `SETTINGS_INITIAL_WINDOW_SIZE`. Tells what is the value of
-      the initial HTTP/2 window size for the peer that sends this setting.
+    * `:initial_window_size` -  corresponds to `SETTINGS_INITIAL_WINDOW_SIZE`.
+      Tells what is the value of the initial HTTP/2 window size for the peer
+      that sends this setting.
 
-    * `:max_frame_size` - (integer in the range `#{inspect(@valid_max_frame_size_range)}`)
-      corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the maximum size of an HTTP/2
-      frame for the peer that sends this setting.
+    * `:max_frame_size` - corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the
+      maximum size of an HTTP/2 frame for the peer that sends this setting.
 
-    * `:max_header_list_size` - (integer) corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
+    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
 
-    * `:enable_connect_protocol` - (boolean) corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
+    * `:enable_connect_protocol` - corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
       Sets whether the client may invoke the extended connect protocol which is used to
       bootstrap WebSocket connections.
 
   """
   @type setting() ::
           {:enable_push, boolean()}
+          | {:header_table_size, non_neg_integer()}
           | {:max_concurrent_streams, pos_integer()}
           | {:initial_window_size, 1..2_147_483_647}
           | {:max_frame_size, 16_384..16_777_215}
@@ -728,7 +728,7 @@ defmodule Mint.HTTP2 do
   For more information on flow control and window sizes in HTTP/2, see the section
   below.
 
-  ## HTTP/2 flow control
+  ## HTTP/2 Flow Control
 
   In HTTP/2, flow control is implemented through a
   window size. When the client sends data to the server, the window size is decreased
@@ -991,13 +991,10 @@ defmodule Mint.HTTP2 do
   @doc """
   See `Mint.HTTP.get_proxy_headers/1`.
   """
-  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
-    @doc since: "1.4.0"
-  end
-
+  @doc since: "1.4.0"
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
-  def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers}), do: proxy_headers
+  def get_proxy_headers(%__MODULE__{proxy_headers: proxy_headers} = _conn), do: proxy_headers
 
   # Made public since the %Mint.HTTP2{} struct is opaque.
   @doc false
