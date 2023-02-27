@@ -22,7 +22,15 @@ defmodule Mint.HTTP2Test do
   setup :maybe_set_transport_mock
 
   defmacrop assert_recv_frames([]) do
-    quote do: refute_receive({:ssl, _socket, _data})
+    quote do
+      receive do
+        {:ssl, _socket, data} ->
+          result = Mint.HTTP2.Frame.decode_next(data)
+          flunk("Expected no frames, but got data that decodes to: #{inspect(result)}")
+      after
+        100 -> :ok
+      end
+    end
   end
 
   defmacrop assert_recv_frames(frames) when is_list(frames) do
@@ -72,6 +80,29 @@ defmodule Mint.HTTP2Test do
         assert is_connection_message(%{socket: conn.socket}, {:tcp, conn.socket, "foo"}) == false
         assert is_connection_message(%URI{}, {:tcp, conn.socket, "foo"}) == false
       end
+    end
+  end
+
+  describe "performing the initial handshake" do
+    @tag options: [first_server_frame: :goaway], connect_options: [mode: :passive]
+    test "client deals with server sending GOAWAY as the first frame", %{conn: conn} do
+      assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 1000)
+      assert_http2_error error, {:server_closed_connection, :internal_error, "Some error"}
+      refute HTTP2.open?(conn)
+    end
+
+    @tag options: [first_server_frame: :ping], connect_options: [mode: :passive]
+    test "client deals with server sending PING as the first frame", %{conn: conn} do
+      assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 1000)
+      assert_http2_error error, {:protocol_error, "received invalid frame ping during handshake"}
+      refute HTTP2.open?(conn)
+    end
+  end
+
+  describe "open?/1" do
+    test "returns true if the state is :open or :handshaking", %{conn: conn} do
+      assert HTTP2.open?(%{conn | state: :open})
+      assert HTTP2.open?(%{conn | state: :handshaking})
     end
   end
 
@@ -2120,7 +2151,9 @@ defmodule Mint.HTTP2Test do
   defp start_connection(context) do
     default_options = [transport_opts: [verify: :verify_none]]
     options = Keyword.merge(default_options, context[:connect_options] || [])
-    {conn, server} = TestServer.connect(options, context[:server_settings] || [])
+
+    {conn, server} =
+      TestServer.connect(options, context[:server_settings] || [], context[:options] || [])
 
     Process.put(@pdict_key, server)
 
