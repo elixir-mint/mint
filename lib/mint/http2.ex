@@ -126,8 +126,8 @@ defmodule Mint.HTTP2 do
 
   ## Logging
 
-  `Mint.HTTP2` uses the `Logger` module to log information about the connection. Logs are emitted
-  *since version 1.5.0*. For the time being, Mint only logs messages at the `:debug` level.
+  `Mint.HTTP2` uses the `Logger` module to log information about the connection. Most logs are
+  emitted *since version 1.5.0*.
 
   > #### Changes to the Format of Logs {: .warning}
   >
