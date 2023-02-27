@@ -123,10 +123,21 @@ defmodule Mint.HTTP2 do
   > HTTP/2 exposes a boolean setting for enabling or disabling server pushes with `:enable_push`.
   > You can pass this option when connecting or in `put_settings/2`. By default server push
   > is enabled.
+
+  ## Logging
+
+  `Mint.HTTP2` uses the `Logger` module to log information about the connection. Logs are emitted
+  *since version 1.5.0*. For the time being, Mint only logs messages at the `:debug` level.
+
+  > #### Changes to the Format of Logs {: .warning}
+  >
+  > The format of logs emitted by Mint might change without notice between any versions,
+  > without it being considered a breaking change. You are only meant to control what
+  > gets logged by using the `Logger` API and Erlang's `:logger` module.
   """
 
   import Mint.Core.Util
-  import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1]
+  import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
 
   alias Mint.{HTTPError, TransportError}
   alias Mint.Types
@@ -1353,6 +1364,7 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
+        Logger.debug("Received frame: #{Frame.inspect(frame)}")
         conn = validate_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
