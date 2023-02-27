@@ -4,8 +4,10 @@ defmodule Mint.HTTP2Test do
   import Mint.HTTP2.Frame
   import Mint.HTTP2.TestHelpers, only: [extract_port: 1]
   import ExUnit.CaptureLog
+  import Mox
 
   alias Mint.{
+    Core.Transport,
     HTTPError,
     HTTP2,
     HTTP2.TestServer,
@@ -17,6 +19,7 @@ defmodule Mint.HTTP2Test do
   @moduletag :capture_log
 
   setup :start_connection
+  setup :maybe_set_transport_mock
 
   defmacrop assert_recv_frames([]) do
     quote do: refute_receive({:ssl, _socket, _data})
@@ -346,14 +349,28 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [goaway(error_code: :no_error)]
 
       refute HTTP2.open?(conn)
+
+      # We can close the connection again and it's a no-op.
+      assert {:ok, ^conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
     end
 
-    test "close/1 an already closed connection with default inet_backend does not cause error", %{
-      conn: conn
-    } do
+    test "close/1 an already closed connection with default inet_backend does not cause error",
+         %{conn: conn} do
       assert HTTP2.open?(conn)
       # ignore the returned conn, otherwise transport.close/1 will not be called
       assert {:ok, _conn} = HTTP2.close(conn)
+      assert {:ok, conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+    end
+
+    @tag :with_transport_mock
+    test "close/1 still succeeds if the transport returns an error when sending the GOAWAY frame",
+         %{conn: conn} do
+      TransportMock
+      |> expect(:send, fn _socket, _data -> {:error, Transport.SSL.wrap_error(:timeout)} end)
+      |> expect(:close, fn _socket -> :ok end)
+
       assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
     end
@@ -438,19 +455,16 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
-    test "when an ssl timeout is triggered on request", %{conn: conn} do
-      Mox.verify_on_exit!()
-
-      # Force the transport to one that always times out on send
-      conn = %{conn | transport: TransportMock}
-      Mox.stub_with(TransportMock, Mint.Core.Transport.SSL)
+    @tag :with_transport_mock
+    test "when an SSL timeout is triggered on request", %{conn: conn} do
+      stub_with(TransportMock, Transport.SSL)
 
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
-        Mox.expect(TransportMock, :send, fn _socket, data ->
-          assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
-          {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+        expect(TransportMock, :send, fn _socket, data ->
+          assert :ok = Transport.SSL.send(conn.socket, data)
+          {:error, Transport.SSL.wrap_error(:timeout)}
         end)
 
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
@@ -463,22 +477,20 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
-    test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
-      Mox.verify_on_exit!()
+    @tag :with_transport_mock
+    test "when an SSL timeout is triggered on stream request body", %{conn: conn} do
+      stub_with(TransportMock, Transport.SSL)
 
-      # open a streaming request.
+      # Open a streaming request.
       {conn, ref} = open_request(conn, :stream)
 
       assert_recv_frames [headers()]
 
-      # Force the transport to one that always times out on send
-      conn = %{conn | transport: TransportMock}
-
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
-      Mox.expect(TransportMock, :send, fn _socket, data ->
+      expect(TransportMock, :send, fn _socket, data ->
         assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
-        {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+        {:error, Transport.SSL.wrap_error(:timeout)}
       end)
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
@@ -1602,6 +1614,20 @@ defmodule Mint.HTTP2Test do
       end
     end
 
+    @tag :with_transport_mock
+    test "put_settings/2 returns an error if sending the SETTINGS frame returns an error",
+         %{conn: conn} do
+      expect(TransportMock, :send, fn _socket, _data ->
+        {:error, Transport.SSL.wrap_error(:timeout)}
+      end)
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.put_settings(conn, max_concurrent_streams: 10)
+
+      assert_transport_error error, :timeout
+      assert HTTP2.open?(conn)
+    end
+
     test "get_server_setting/2 can be used to read server settings", %{conn: conn} do
       assert HTTP2.get_server_setting(conn, :max_concurrent_streams) == 100
       assert HTTP2.get_server_setting(conn, :enable_push) == true
@@ -1921,10 +1947,9 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [mode: :passive]
+    @tag :with_transport_mock
     test "socket errors are bubbled up in recv/3", %{conn: conn} do
-      Mox.verify_on_exit!()
-      conn = %{conn | transport: TransportMock}
-      Mox.expect(TransportMock, :recv, fn _socket, 0, 1000 -> {:error, :econnrefused} end)
+      expect(TransportMock, :recv, fn _socket, 0, 1000 -> {:error, :econnrefused} end)
       HTTP2.recv(conn, 0, 1000)
     end
 
@@ -1993,6 +2018,17 @@ defmodule Mint.HTTP2Test do
                           ping(opaque_data: opaque_data, flags: set_flags(:ping, [:ack]))
                         ])
              end) =~ "Received PING ack that doesn't match next PING request in the queue"
+    end
+
+    @tag :with_transport_mock
+    test "if the transport returns an error then ping/2 returns that error", %{conn: conn} do
+      expect(TransportMock, :send, fn _socket, _data ->
+        {:error, Transport.SSL.wrap_error(:econnrefused)}
+      end)
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.ping(conn)
+      assert_transport_error error, :econnrefused
+      assert HTTP2.open?(conn)
     end
   end
 
@@ -2089,6 +2125,15 @@ defmodule Mint.HTTP2Test do
     Process.put(@pdict_key, server)
 
     [conn: conn]
+  end
+
+  defp maybe_set_transport_mock(%{conn: conn} = context) do
+    if context[:with_transport_mock] do
+      verify_on_exit!()
+      [conn: %{conn | transport: TransportMock}]
+    else
+      []
+    end
   end
 
   defp recv_next_frames(n) do
