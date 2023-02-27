@@ -32,7 +32,8 @@ jobs:
       MIX_ENV: test
 
     steps:
-      - uses: actions/checkout@v1
+      - name: Checkout this repository
+        uses: actions/checkout@v3
 
       - name: Install OTP and Elixir
         uses: erlef/setup-beam@v1
@@ -42,7 +43,7 @@ jobs:
 
       - name: Cache dependencies
         id: cache-deps
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             deps
