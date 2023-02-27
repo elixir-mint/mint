@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - erlang: "25.0"
-            elixir: "1.13"
+          - erlang: "25.2"
+            elixir: "1.14"
             lint: true
             coverage: true
             dialyzer: true
@@ -23,10 +23,10 @@ jobs:
             elixir: "1.12"
             dialyzer: true
           - erlang: "23.3.1"
-            elixir: "1.11.4"
+            elixir: "1.11"
             dialyzer: true
-          - erlang: "20.3.8"
-            elixir: "1.5.3"
+          - erlang: "21.3"
+            elixir: "1.10"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIX_ENV: test
