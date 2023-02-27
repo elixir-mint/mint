@@ -504,12 +504,8 @@ defmodule Mint.Core.Transport.SSL do
   # therefore the only pattern used in commercially issued certificates.
   defp match_fun({:dns_id, reference}, {:dNSName, [?*, ?. | presented]}) do
     case domain_without_host(reference) do
-      '' ->
-        :default
-
-      domain ->
-        # TODO: replace with `:string.casefold/1` eventually
-        :string.to_lower(domain) == :string.to_lower(presented)
+      '' -> :default
+      domain -> :string.casefold(domain) == :string.casefold(presented)
     end
   end
 

@@ -108,12 +108,9 @@ defmodule Mint.HTTP1.IntegrationTest do
                HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 0])
     end
 
-    # TODO: remove check once we depend on OTP 19+
-    if System.otp_release() >= "19" do
-      test "timeout with https" do
-        assert {:error, %TransportError{reason: :timeout}} =
-                 HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
-      end
+    test "timeout with https" do
+      assert {:error, %TransportError{reason: :timeout}} =
+               HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
     end
 
     test "keep alive" do
