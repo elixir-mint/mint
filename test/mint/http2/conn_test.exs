@@ -406,10 +406,7 @@ defmodule Mint.HTTP2Test do
       assert :erlang.port_info(port) == :undefined
     end
 
-    test "close/1 properly closes socket on errornous connection", %{conn: conn} do
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
-
+    test "close/1 properly closes socket on erroneous connection", %{conn: conn} do
       # Check port status, before close it should be opened
       port = conn |> HTTP2.get_socket() |> extract_port
       refute :erlang.port_info(port) == :undefined
@@ -442,12 +439,20 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when an ssl timeout is triggered on request", %{conn: conn} do
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+      Mox.verify_on_exit!()
+
+      # Force the transport to one that always times out on send
+      conn = %{conn | transport: TransportMock}
+      Mox.stub_with(TransportMock, Mint.Core.Transport.SSL)
 
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
       Enum.reduce([nil, :stream, "XX"], conn, fn body, conn ->
+        Mox.expect(TransportMock, :send, fn _socket, data ->
+          assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
+          {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+        end)
+
         assert {:error, %HTTP2{} = conn, error} = HTTP2.request(conn, "GET", "/", [], body)
         assert_transport_error error, :timeout
 
@@ -459,15 +464,22 @@ defmodule Mint.HTTP2Test do
     end
 
     test "when an ssl timeout is triggered on stream request body", %{conn: conn} do
+      Mox.verify_on_exit!()
+
       # open a streaming request.
       {conn, ref} = open_request(conn, :stream)
 
       assert_recv_frames [headers()]
 
-      # force the transport to one that always times out on send
-      conn = %{conn | transport: Mint.HTTP2.TestTransportSendTimeout}
+      # Force the transport to one that always times out on send
+      conn = %{conn | transport: TransportMock}
 
       expected_window_size = HTTP2.get_window_size(conn, :connection)
+
+      Mox.expect(TransportMock, :send, fn _socket, data ->
+        assert :ok = Mint.Core.Transport.SSL.send(conn.socket, data)
+        {:error, Mint.Core.Transport.SSL.wrap_error(:timeout)}
+      end)
 
       data = :binary.copy(<<0>>, HTTP2.get_window_size(conn, {:request, ref}))
       assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, data)
@@ -1639,6 +1651,44 @@ defmodule Mint.HTTP2Test do
         end)
 
       assert log =~ "Received SETTINGS ACK but client is not waiting for any ACK"
+     end
+
+    test "server can send the :enable_push setting", %{conn: conn} do
+      {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: false])])
+      assert HTTP2.get_server_setting(conn, :enable_push) == false
+
+      {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: true])])
+      assert HTTP2.get_server_setting(conn, :enable_push) == true
+    end
+
+    test "if server sends an invalid :initial_window_size, we send a connection error",
+         %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [
+                 settings(params: [initial_window_size: 1_000_000_000_000_000])
+               ])
+
+      assert responses == []
+      assert_http2_error error, {:flow_control_error, message}
+      assert message =~ ~r/INITIAL_WINDOW_SIZE setting of \d+ is too big/
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "if server sends an invalid :max_frame_size, we send a connection error",
+         %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, responses} =
+               stream_frames(conn, [settings(params: [max_frame_size: 0])])
+
+      assert responses == []
+      assert_http2_error error, {:protocol_error, message}
+      assert message == "MAX_FRAME_SIZE setting parameter outside of allowed range"
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "get_client_setting/2", %{conn: conn} do
+      assert HTTP2.get_client_setting(conn, :max_concurrent_streams) == 100
     end
   end
 
@@ -1855,6 +1905,47 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    @tag connect_options: [mode: :passive]
+    test "closed socket is handled in recv/3", %{conn: conn} do
+      :ok = :ssl.shutdown(conn.socket, :read)
+      assert {:ok, conn, _responses = []} = HTTP2.recv(conn, 0, 1)
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "timeouts are bubbled up in recv/3", %{conn: conn} do
+      assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 0)
+      assert_transport_error error, :timeout
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "socket errors are bubbled up in recv/3", %{conn: conn} do
+      Mox.verify_on_exit!()
+      conn = %{conn | transport: TransportMock}
+      Mox.expect(TransportMock, :recv, fn _socket, 0, 1000 -> {:error, :econnrefused} end)
+      HTTP2.recv(conn, 0, 1000)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "protocol errors are bubbled up in recv/3", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers()]
+
+      # Payload should be 8 bytes long, but is empty here.
+      data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<>>))
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.recv(conn, 0, 1000)
+
+      assert_http2_error error, {:frame_size_error, debug_data}
+      assert debug_data =~ "error with size of frame: :ping"
+
+      assert_recv_frames [goaway(error_code: :frame_size_error)]
+      refute HTTP2.open?(conn)
+    end
   end
 
   describe "ping" do
@@ -1969,6 +2060,23 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+  end
+
+  test "put_private/3, get_private/3, and delete_private/2", %{conn: conn} do
+    assert HTTP2.get_private(conn, :my_key) == nil
+    assert HTTP2.get_private(conn, :my_key, :default) == :default
+
+    # Setting the key.
+    assert %HTTP2{} = conn = HTTP2.put_private(conn, :my_key, :my_value)
+    assert HTTP2.get_private(conn, :my_key) == :my_value
+
+    # Overriding the same key.
+    assert %HTTP2{} = conn = HTTP2.put_private(conn, :my_key, :my_new_value)
+    assert HTTP2.get_private(conn, :my_key) == :my_new_value
+
+    # Deleting the key.
+    assert %HTTP2{} = conn = HTTP2.delete_private(conn, :my_key)
+    assert HTTP2.get_private(conn, :my_key) == nil
   end
 
   @pdict_key {__MODULE__, :http2_test_server}
