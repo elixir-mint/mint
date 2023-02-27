@@ -37,7 +37,7 @@ defmodule Mint.HTTPError do
   If you want to convert an error reason to a human-friendly message (for example
   for using in logs), you can use `Exception.message/1`:
 
-      iex> {:error, %Mint.HTTPError{} = error} = Mint.HTTP.connect(:http, "badresponse.com", 80)
+      iex> {:error, %Mint.HTTPError{} = error} = Mint.HTTP.connect(:http, "bad-response.com", 80)
       iex> Exception.message(error)
       "the response contains two or more Content-Length headers"
 

@@ -1,6 +1,6 @@
 defmodule Mint.HTTP1 do
   @moduledoc """
-  Processless HTTP client with support for HTTP/1 and HTTP/1.1.
+  Process-less HTTP/1.1 client connection.
 
   This module provides a data structure that represents an HTTP/1 or HTTP/1.1 connection to
   a given server. The connection is represented as an opaque struct `%Mint.HTTP1{}`.

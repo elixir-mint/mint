@@ -1,6 +1,6 @@
 defmodule Mint.HTTP2 do
   @moduledoc """
-  Processless HTTP client with support for HTTP/2.
+  Process-less HTTP/2 client connection.
 
   This module provides a data structure that represents an HTTP/2 connection to
   a given server. The connection is represented as an opaque struct `%Mint.HTTP2{}`.
