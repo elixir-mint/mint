@@ -266,7 +266,7 @@ defmodule Mint.HTTP2.Frame do
        when is_flag_set(flags, unquote(@flags[:data][:padded])) do
     if pad_length >= byte_size(payload) do
       debug_data =
-        "the padding length of a #{inspect(frame)} frame is bigger than the payload length"
+        "the padding length of a #{Kernel.inspect(frame)} frame is bigger than the payload length"
 
       throw({:mint, {:protocol_error, debug_data}})
     else
