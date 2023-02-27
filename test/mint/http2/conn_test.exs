@@ -1651,7 +1651,7 @@ defmodule Mint.HTTP2Test do
         end)
 
       assert log =~ "Received SETTINGS ACK but client is not waiting for any ACK"
-     end
+    end
 
     test "server can send the :enable_push setting", %{conn: conn} do
       {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: false])])
