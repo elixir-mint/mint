@@ -429,6 +429,7 @@ defmodule Mint.HTTP2 do
   def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_write)
       when type in [:read, :write, :read_write] do
     case state do
+      :handshaking -> true
       :open -> true
       {:goaway, _error_code, _debug_data} -> type == :read
       :closed -> false
@@ -956,7 +957,7 @@ defmodule Mint.HTTP2 do
       socket: socket,
       mode: mode,
       scheme: Atom.to_string(scheme),
-      state: :open
+      state: :handshaking
     }
 
     with :ok <- inet_opts(transport, socket),
@@ -964,13 +965,7 @@ defmodule Mint.HTTP2 do
          preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
-         {:ok, server_settings, buffer, socket} <- receive_server_settings(transport, socket),
-         server_settings_ack =
-           settings(stream_id: 0, params: [], flags: set_flags(:settings, [:ack])),
-         :ok <- transport.send(socket, Frame.encode(server_settings_ack)),
-         conn = put_in(conn.buffer, buffer),
          conn = put_in(conn.socket, socket),
-         conn = apply_server_settings(conn, settings(server_settings, :params)),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
     else
@@ -1041,40 +1036,6 @@ defmodule Mint.HTTP2 do
       else
         {:error, transport.wrap_error({:bad_alpn_protocol, protocol})}
       end
-    end
-  end
-
-  defp receive_server_settings(transport, socket) do
-    case recv_next_frame(transport, socket, _buffer = "") do
-      {:ok, settings(), _buffer, _socket} = result ->
-        result
-
-      {:ok, goaway(error_code: error_code, debug_data: debug_data), _buffer, _socket} ->
-        error = wrap_error({:server_closed_connection, error_code, debug_data})
-        {:error, error}
-
-      {:ok, frame, _buffer, _socket} ->
-        debug_data = "received invalid frame #{elem(frame, 0)} during handshake"
-        {:error, wrap_error({:protocol_error, debug_data})}
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  defp recv_next_frame(transport, socket, buffer) do
-    case Frame.decode_next(buffer, @default_max_frame_size) do
-      {:ok, frame, rest} ->
-        {:ok, frame, rest, socket}
-
-      :more ->
-        with {:ok, data} <- transport.recv(socket, 0, _timeout = 10_000) do
-          data = maybe_concat(buffer, data)
-          recv_next_frame(transport, socket, data)
-        end
-
-      {:error, {kind, _info} = reason} when kind in [:frame_size_error, :protocol_error] ->
-        {:error, wrap_error(reason)}
     end
   end
 
@@ -1395,7 +1356,7 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
-        assert_valid_frame(conn, frame)
+        conn = assert_valid_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
 
@@ -1438,18 +1399,42 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp assert_valid_frame(_conn, unknown()) do
+  defp assert_valid_frame(conn, unknown()) do
     # Unknown frames MUST be ignored:
     # https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
-    :ok
+    conn
   end
 
   defp assert_valid_frame(conn, frame) do
+    type = elem(frame, 0)
     stream_id = elem(frame, 1)
+
+    # The SETTINGS frame MUST be the first frame that the server sends.
+    # https://www.rfc-editor.org/rfc/rfc7540#section-3.5
+    # > The server connection preface consists of a potentially empty SETTINGS frame
+    # > that MUST be the first frame the server sends in the HTTP/2 connection.
+    conn =
+      cond do
+        conn.state == :handshaking and type == :goaway ->
+          goaway(error_code: error_code, debug_data: debug_data) = frame
+          error = wrap_error({:server_closed_connection, error_code, debug_data})
+          throw({:mint, %{conn | state: :closed}, error, []})
+
+        conn.state == :handshaking and type != :settings ->
+          debug_data = "received invalid frame #{type} during handshake"
+          send_connection_error!(conn, :protocol_error, debug_data)
+
+        conn.state == :handshaking ->
+          %__MODULE__{conn | state: :open}
+
+        true ->
+          conn
+      end
 
     assert_frame_on_right_level(conn, elem(frame, 0), stream_id)
     assert_stream_id_is_allowed(conn, stream_id)
     assert_frame_doesnt_interrupt_header_streaming(conn, frame)
+    conn
   end
 
   # http://httpwg.org/specs/rfc7540.html#HttpSequence

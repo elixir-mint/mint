@@ -1,5 +1,6 @@
 defmodule Mint.HTTP2.TestServer do
   import ExUnit.Assertions
+  import Mint.HTTP2.Frame, only: [settings: 1, goaway: 1, ping: 1]
 
   alias Mint.{HTTP2, HTTP2.Frame}
 
@@ -16,28 +17,61 @@ defmodule Mint.HTTP2.TestServer do
     keyfile: Path.absname("../key.pem", __DIR__)
   ]
 
+  @recv_timeout 300
+
   @spec connect(keyword(), keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
-  def connect(options, server_settings) do
+  def connect(conn_options, server_settings, options \\ [])
+      when is_list(conn_options) and is_list(server_settings) and is_list(options) do
     ref = make_ref()
     parent = self()
+    ack_flags = Frame.set_flags(:settings, [:ack])
 
-    task = Task.async(fn -> start_socket_and_accept(parent, ref, server_settings) end)
+    task = Task.async(fn -> start_socket_and_accept(parent, ref) end)
     assert_receive {^ref, port}, 100
 
-    assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, options)
+    assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, conn_options)
     assert %HTTP2{} = conn
 
     {:ok, server_socket} = Task.await(task)
 
-    # SETTINGS here.
     conn =
-      if options[:mode] == :passive do
-        assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, 100)
-        conn
-      else
-        assert_receive message, 100
-        assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
-        conn
+      case Keyword.get(options, :first_server_frame, :settings) do
+        # We send server settings, ack client settings, and wait for the client's ack
+        # to the server settings.
+        :settings ->
+          :ok =
+            :ssl.send(server_socket, [
+              Frame.encode(settings(params: server_settings)),
+              Frame.encode(settings(flags: ack_flags, params: []))
+            ])
+
+          # We let the client process server settings and the ack here.
+          conn =
+            if conn_options[:mode] == :passive do
+              assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, @recv_timeout)
+              conn
+            else
+              assert_receive message, @recv_timeout
+              assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
+              conn
+            end
+
+          # Before moving on, we await the SETTINGS ack from the client.
+          {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
+          assert {:ok, frame, ""} = Frame.decode_next(data)
+          assert settings(flags: ^ack_flags, params: []) = frame
+
+          conn
+
+        :goaway ->
+          frame = goaway(last_stream_id: 0, error_code: :internal_error, debug_data: "Some error")
+          :ok = :ssl.send(server_socket, [Frame.encode(frame)])
+          conn
+
+        :ping ->
+          frame = ping(opaque_data: :binary.copy(<<0>>, 8))
+          :ok = :ssl.send(server_socket, [Frame.encode(frame)])
+          conn
       end
 
     :ok = :ssl.setopts(server_socket, active: true)
@@ -60,12 +94,18 @@ defmodule Mint.HTTP2.TestServer do
     if buffer == "" do
       Enum.reverse(frames)
     else
-      flunk("Expected no more data, got: #{inspect(buffer)}")
+      flunk("""
+      Expected no more data, got: #{inspect(buffer)}
+      This decodes to: #{inspect(Frame.decode_next(buffer))}}
+      """)
     end
   end
 
   defp recv_next_frames(%{socket: server_socket} = server, n, frames, buffer) do
-    assert_receive {:ssl, ^server_socket, data}, 100
+    assert_receive {:ssl, ^server_socket, data},
+                   @recv_timeout,
+                   "Expected to receive another #{n} frames from the server, but got no data after #{@recv_timeout}ms"
+
     decode_next_frames(server, n, frames, buffer <> data)
   end
 
@@ -73,7 +113,10 @@ defmodule Mint.HTTP2.TestServer do
     if buffer == "" do
       Enum.reverse(frames)
     else
-      flunk("Expected no more data, got: #{inspect(buffer)}")
+      flunk("""
+      Expected no more data, got: #{inspect(buffer)}
+      This decodes to: #{inspect(Frame.decode_next(buffer))}}
+      """)
     end
   end
 
@@ -130,7 +173,7 @@ defmodule Mint.HTTP2.TestServer do
     server.socket
   end
 
-  defp start_socket_and_accept(parent, ref, server_settings) do
+  defp start_socket_and_accept(parent, ref) do
     {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
     send(parent, {ref, port})
@@ -144,7 +187,7 @@ defmodule Mint.HTTP2.TestServer do
       :ok = apply(:ssl, :ssl_accept, [socket])
     end
 
-    :ok = perform_http2_handshake(socket, server_settings)
+    :ok = perform_http2_handshake(socket)
 
     # We transfer ownership of the socket to the parent so that this task can die.
     :ok = :ssl.controlling_process(socket, parent)
@@ -153,11 +196,8 @@ defmodule Mint.HTTP2.TestServer do
 
   connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  defp perform_http2_handshake(socket, server_settings) do
-    import Mint.HTTP2.Frame, only: [settings: 1]
-
+  defp perform_http2_handshake(socket) do
     no_flags = Frame.set_flags(:settings, [])
-    ack_flags = Frame.set_flags(:settings, [:ack])
 
     # First we get the connection preface.
     {:ok, unquote(connection_preface) <> rest} = :ssl.recv(socket, 0, 100)
@@ -165,17 +205,6 @@ defmodule Mint.HTTP2.TestServer do
     # Then we get a SETTINGS frame.
     assert {:ok, frame, ""} = Frame.decode_next(rest)
     assert settings(flags: ^no_flags, params: _params) = frame
-
-    # We reply with our SETTINGS.
-    :ok = :ssl.send(socket, Frame.encode(settings(params: server_settings)))
-
-    # We get the SETTINGS ack.
-    {:ok, data} = :ssl.recv(socket, 0, 100)
-    assert {:ok, frame, ""} = Frame.decode_next(data)
-    assert settings(flags: ^ack_flags, params: []) = frame
-
-    # We send the SETTINGS ack back.
-    :ok = :ssl.send(socket, Frame.encode(settings(flags: ack_flags, params: [])))
 
     :ok
   end
