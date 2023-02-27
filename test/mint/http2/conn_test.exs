@@ -96,6 +96,13 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "open?/1" do
+    test "returns true if the state is :open or :handshaking", %{conn: conn} do
+      assert HTTP2.open?(%{conn | state: :open})
+      assert HTTP2.open?(%{conn | state: :handshaking})
+    end
+  end
+
   describe "handling unknown frames from the server" do
     test "handle origin frame from the server", %{conn: conn} do
       {conn, ref} = open_request(conn)
