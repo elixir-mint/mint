@@ -1356,7 +1356,7 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
-        conn = assert_valid_frame(conn, frame)
+        conn = validate_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
 
@@ -1399,13 +1399,13 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp assert_valid_frame(conn, unknown()) do
+  defp validate_frame(conn, unknown()) do
     # Unknown frames MUST be ignored:
     # https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
     conn
   end
 
-  defp assert_valid_frame(conn, frame) do
+  defp validate_frame(conn, frame) do
     type = elem(frame, 0)
     stream_id = elem(frame, 1)
 
