@@ -46,20 +46,32 @@ defmodule Mint.HTTP2.TestServer do
             ])
 
           # We let the client process server settings and the ack here.
-          conn =
+          response =
             if conn_options[:mode] == :passive do
-              assert {:ok, %HTTP2{} = conn, []} = HTTP2.recv(conn, 0, @recv_timeout)
-              conn
+              HTTP2.recv(conn, 0, @recv_timeout)
             else
               assert_receive message, @recv_timeout
-              assert {:ok, %HTTP2{} = conn, []} = HTTP2.stream(conn, message)
-              conn
+              HTTP2.stream(conn, message)
             end
 
-          # Before moving on, we await the SETTINGS ack from the client.
-          {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
-          assert {:ok, frame, ""} = Frame.decode_next(data)
-          assert settings(flags: ^ack_flags, params: []) = frame
+          conn =
+            if Keyword.get(options, :invalid_server_settings, false) do
+              assert {:error, %HTTP2{} = conn, error, []} = response
+              assert %Mint.HTTPError{reason: reason} = error
+
+              assert reason ==
+                       {:protocol_error,
+                        "MAX_FRAME_SIZE setting parameter outside of allowed range"}
+
+              conn
+            else
+              {:ok, %HTTP2{} = conn, []} = response
+              # Before moving on, we await the SETTINGS ack from the client.
+              {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
+              assert {:ok, frame, ""} = Frame.decode_next(data)
+              assert settings(flags: ^ack_flags, params: []) = frame
+              conn
+            end
 
           conn
 

@@ -1687,13 +1687,11 @@ defmodule Mint.HTTP2Test do
       assert flags == set_flags(:settings, [:ack])
     end
 
-    # TODO: We're skipping this test for now because we need to find a good way
-    # to assert on the errors that might be returned by HTTP2.connect/4. Right
-    # now the connect/4 calls happens when setting up the connection to the test
-    # server and we assert that a successful connection is established in that code.
-    # An example of an invalid setting is "max_frame_size: 1".
-    @tag :skip
-    test "protocol error when server sends an invalid setting"
+    @tag options: [invalid_server_settings: true]
+    @tag server_settings: [max_frame_size: 1]
+    test "protocol error when server sends an invalid setting", %{conn: conn} do
+      refute HTTP2.open?(conn)
+    end
 
     test "client ignores settings ACKs if client settings queue is empty", %{conn: conn} do
       log =
