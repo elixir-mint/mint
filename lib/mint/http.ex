@@ -134,7 +134,7 @@ defmodule Mint.HTTP do
   if not macro_exported?(Kernel, :is_struct, 2) do
     defguardp is_struct(struct, module)
               when is_map(struct) and is_atom(module) and is_map_key(conn, :__struct__) and
-                     :erlang.map_get(:__struct__, conn) == module
+                     :erlang.map_get(:__struct__, struct) == module
   end
 
   defguardp is_data_message(message)
