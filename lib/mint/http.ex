@@ -442,12 +442,12 @@ defmodule Mint.HTTP do
 
       iex> Mint.HTTP.protocol(%Mint.HTTP2{})
       :http2
-  """
-  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
-    @doc since: "1.4.0"
-  end
 
+  """
+  @doc since: "1.4.0"
   @spec protocol(t()) :: :http1 | :http2
+  def protocol(conn)
+
   def protocol(%Mint.HTTP1{}), do: :http1
   def protocol(%Mint.HTTP2{}), do: :http2
   def protocol(%Mint.UnsafeProxy{state: internal_conn}), do: protocol(internal_conn)
@@ -1012,10 +1012,7 @@ defmodule Mint.HTTP do
   When using tunnel proxy and HTTPs, the only way to exchange data with
   the proxy is through headers in the `CONNECT` method.
   """
-  if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
-    @doc since: "1.4.0"
-  end
-
+  @doc since: "1.4.0"
   @impl true
   @spec get_proxy_headers(t()) :: Mint.Types.headers()
   def get_proxy_headers(conn), do: conn_module(conn).get_proxy_headers(conn)
