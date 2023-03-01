@@ -1395,9 +1395,6 @@ defmodule Mint.HTTP2 do
         handle_consumed_all_frames(conn, responses)
 
       {:error, :payload_too_big} ->
-        # TODO: sometimes, this could be handled with RST_STREAM instead of a GOAWAY frame (for
-        # example, if the payload of a DATA frame is too big).
-        # http://httpwg.org/specs/rfc7540.html#rfc.section.4.2
         debug_data = "frame payload exceeds connection's max frame size"
         send_connection_error!(conn, :frame_size_error, debug_data)
 
