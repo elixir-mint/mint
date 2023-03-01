@@ -21,7 +21,6 @@ jobs:
             dialyzer: true
           - erlang: "24.3"
             elixir: "1.12"
-            dialyzer: true
           - erlang: "23.3.1"
             elixir: "1.11"
             dialyzer: true
@@ -38,8 +37,8 @@ jobs:
       - name: Install OTP and Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{matrix.erlang}}
-          elixir-version: ${{matrix.elixir}}
+          otp-version: ${{ matrix.erlang }}
+          elixir-version: ${{ matrix.elixir }}
 
       - name: Cache dependencies
         id: cache-deps
@@ -73,15 +72,15 @@ jobs:
 
       - name: Check for unused dependencies
         run: mix do deps.get, deps.unlock --check-unused
-        if: ${{matrix.lint && steps.cache-deps.outputs.cache-hit != 'true'}}
+        if: ${{ matrix.lint && steps.cache-deps.outputs.cache-hit != 'true'}}
 
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
-        if: ${{matrix.lint}}
+        if: ${{ matrix.lint }}
 
       - name: Check mix format
         run: mix format --check-formatted
-        if: ${{matrix.lint}}
+        if: ${{ matrix.lint }}
 
       - name: Run tests
         run: mix test --trace --include proxy
