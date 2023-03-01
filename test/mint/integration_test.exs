@@ -7,30 +7,6 @@ defmodule Mint.IntegrationTest do
 
   @moduletag :requires_internet_connection
 
-  describe "httpstat.us" do
-    test "SSL - select HTTP1" do
-      assert {:ok, conn} =
-               HTTP.connect(
-                 :https,
-                 "httpstat.us",
-                 443,
-                 transport_opts: [versions: [:"tlsv1.2"]]
-               )
-
-      assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/200", [], nil)
-
-      assert {:ok, _conn, responses} = receive_stream(conn)
-
-      assert [
-               {:status, ^request, 200},
-               {:headers, ^request, _},
-               {:data, ^request, "200 OK"},
-               {:done, ^request}
-             ] = responses
-    end
-  end
-
   describe "nghttp2.org" do
     test "SSL - select HTTP1" do
       assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443, protocols: [:http1])
