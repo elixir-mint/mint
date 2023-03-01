@@ -123,17 +123,6 @@ defmodule Mint.HTTP2 do
   > HTTP/2 exposes a boolean setting for enabling or disabling server pushes with `:enable_push`.
   > You can pass this option when connecting or in `put_settings/2`. By default server push
   > is enabled.
-
-  ## Logging
-
-  `Mint.HTTP2` uses the `Logger` module to log information about the connection. Most logs are
-  emitted *since version 1.5.0*.
-
-  > #### Changes to the Format of Logs {: .warning}
-  >
-  > The format of logs emitted by Mint might change without notice between any versions,
-  > without it being considered a breaking change. You are only meant to control what
-  > gets logged by using the `Logger` API and Erlang's `:logger` module.
   """
 
   import Mint.Core.Util
@@ -232,8 +221,23 @@ defmodule Mint.HTTP2 do
     proxy_headers: [],
 
     # Private store.
-    private: %{}
+    private: %{},
+
+    # Logging
+    log: false
   ]
+
+  defmacrop log(conn, level, message) do
+    quote do
+      conn = unquote(conn)
+
+      if conn.log do
+        Logger.log(unquote(level), unquote(message))
+      else
+        :ok
+      end
+    end
+  end
 
   ## Types
 
@@ -939,6 +943,16 @@ defmodule Mint.HTTP2 do
     %{conn | private: Map.delete(private, key)}
   end
 
+  @doc """
+  See `Mint.HTTP.put_log/2`.
+  """
+  @doc since: "1.5.0"
+  @impl true
+  @spec put_log(t(), boolean()) :: t()
+  def put_log(%Mint.HTTP2{} = conn, log?) when is_boolean(log?) do
+    %{conn | log: log?}
+  end
+
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   @doc false
@@ -953,12 +967,18 @@ defmodule Mint.HTTP2 do
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
     mode = Keyword.get(opts, :mode, :active)
+    log? = Keyword.get(opts, :log, false)
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_client_settings!(client_settings_params)
 
     unless mode in [:active, :passive] do
       raise ArgumentError,
             "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
+
+    unless is_boolean(log?) do
+      raise ArgumentError,
+            "the :log option must be a boolean, got: #{inspect(log?)}"
     end
 
     conn = %Mint.HTTP2{
@@ -968,7 +988,8 @@ defmodule Mint.HTTP2 do
       socket: socket,
       mode: mode,
       scheme: Atom.to_string(scheme),
-      state: :handshaking
+      state: :handshaking,
+      log: log?
     }
 
     with :ok <- inet_opts(transport, socket),
@@ -1364,7 +1385,7 @@ defmodule Mint.HTTP2 do
   defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
-        _ = Logger.debug("Received frame: #{Frame.inspect(frame)}")
+        log(conn, :debug, "Received frame: #{Frame.inspect(frame)}")
         conn = validate_frame(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
@@ -1540,7 +1561,7 @@ defmodule Mint.HTTP2 do
         end
 
       :error ->
-        _ = Logger.debug(fn -> "Received DATA frame on closed stream ID #{stream_id}" end)
+        log(conn, :debug, "Received DATA frame on closed stream ID #{stream_id}")
         {conn, responses}
     end
   end
@@ -1586,7 +1607,7 @@ defmodule Mint.HTTP2 do
     if stream do
       handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?)
     else
-      _ = Logger.debug(fn -> "Received HEADERS frame on closed stream ID" end)
+      log(conn, :debug, "Received HEADERS frame on closed stream ID")
       {conn, responses}
     end
   end
@@ -1726,7 +1747,7 @@ defmodule Mint.HTTP2 do
 
   # For now we ignore all PRIORITY frames. This shouldn't cause practical trouble.
   defp handle_priority(conn, frame, responses) do
-    _ = Logger.warn(fn -> "Ignoring PRIORITY frame: #{inspect(frame)}" end)
+    log(conn, :warn, "Ignoring PRIORITY frame: #{inspect(frame)}")
     {conn, responses}
   end
 
@@ -1812,7 +1833,7 @@ defmodule Mint.HTTP2 do
         apply_client_settings(conn, params)
 
       {:empty, conn} ->
-        Logger.warn("Received SETTINGS ACK but client is not waiting for any ACK; ignoring it")
+        log(conn, :warn, "Received SETTINGS ACK but client is not waiting for ACKs; ignoring it")
         conn
     end
   end
@@ -1951,11 +1972,11 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {:value, _} ->
-        _ = Logger.warn("Received PING ack that doesn't match next PING request in the queue")
+        log(conn, :warn, "Received PING ack that doesn't match next PING request in the queue")
         {conn, responses}
 
       :empty ->
-        _ = Logger.warn("Received PING ack but no PING requests are pending")
+        log(conn, :warn, "Received PING ack but no PING requests are pending")
         {conn, responses}
     end
   end

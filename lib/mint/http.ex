@@ -1,6 +1,6 @@
 defmodule Mint.HTTP do
   @moduledoc """
-  Processless HTTP connection data structure and functions.
+  Process-less HTTP connection data structure and functions.
 
   Single interface for `Mint.HTTP1` and `Mint.HTTP2` with support for version
   negotiation and proxies.
@@ -106,6 +106,19 @@ defmodule Mint.HTTP do
   The mode can be controlled at connection time through the `:mode` option in `connect/4`
   or changed dynamically through `set_mode/2`. Passive mode is generally only recommended
   for special use cases.
+
+  ## Logging
+
+  Mint uses the `Logger` module to log information about the connection. Most logs are
+  emitted *since version 1.5.0*. The logs are not emitted by default, since we consider
+  Mint to be too low level. However, you can enable logging by passing `log: true` to
+  `connect/4`.
+
+  > #### Changes to the Format of Logs {: .warning}
+  >
+  > The format of logs emitted by Mint might change without notice between any versions,
+  > without it being considered a breaking change. You are only meant to control what
+  > gets logged by using the `Logger` API and Erlang's `:logger` module.
   """
 
   import Mint.Core.Util
@@ -209,6 +222,10 @@ defmodule Mint.HTTP do
     * `:proxy_headers` - a list of headers (`t:Mint.Types.headers/0`) to pass when using
       a proxy. They will be used for the `CONNECT` request in tunnel proxies or merged
       with every request for forward proxies.
+
+    * `:log` - (boolean) whether this connection logs or not. See the ["Logging"
+      section](#module-logging) in the module documentation. Defaults to `false`.
+      *Available since v1.5.0*.
 
   The following options are HTTP/1-specific and will force the connection
   to be an HTTP/1 connection.
@@ -978,6 +995,16 @@ defmodule Mint.HTTP do
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
   def get_socket(conn), do: conn_module(conn).get_socket(conn)
+
+  @doc """
+  Sets whether the connection should log information or not.
+
+  See the ["Logging" section](#module-logging) in the module documentation for more information.
+  """
+  @doc since: "1.5.0"
+  @impl true
+  @spec put_log(t(), boolean()) :: t()
+  def put_log(conn, level), do: conn_module(conn).put_log(conn, level)
 
   @doc """
   Gets the proxy headers associated with the connection in the `CONNECT` method.

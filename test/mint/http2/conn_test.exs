@@ -1704,7 +1704,7 @@ defmodule Mint.HTTP2Test do
           assert HTTP2.open?(conn)
         end)
 
-      assert log =~ "Received SETTINGS ACK but client is not waiting for any ACK"
+      assert log =~ "Received SETTINGS ACK but client is not waiting for ACKs"
     end
 
     test "server can send the :enable_push setting", %{conn: conn} do
@@ -2166,11 +2166,13 @@ defmodule Mint.HTTP2Test do
   @pdict_key {__MODULE__, :http2_test_server}
 
   defp start_connection(context) do
-    default_options = [transport_opts: [verify: :verify_none]]
-    options = Keyword.merge(default_options, context[:connect_options] || [])
+    conn_options =
+      [transport_opts: [verify: :verify_none]]
+      |> Keyword.merge(context[:connect_options] || [])
+      |> Keyword.put_new(:log, true)
 
     {conn, server} =
-      TestServer.connect(options, context[:server_settings] || [], context[:options] || [])
+      TestServer.connect(conn_options, context[:server_settings] || [], context[:options] || [])
 
     Process.put(@pdict_key, server)
 
