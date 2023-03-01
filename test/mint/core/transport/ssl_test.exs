@@ -218,15 +218,16 @@ defmodule Mint.Core.Transport.SSLTest do
       # it actually arrives and we can set the socket back to active: :once.
       :ok = SSL.setopts(socket, active: :once)
       :ok = :ssl.send(server_socket, "some data 1")
-      :ok = Process.sleep(100)
+      Process.sleep(100)
 
       :ok = SSL.setopts(socket, active: :once)
       :ok = :ssl.send(server_socket, "some data 2")
-      :ok = Process.sleep(100)
 
-      {:messages, messages} = Process.info(self(), :messages)
-      assert {:ssl, socket, "some data 1"} in messages
-      assert {:ssl, socket, "some data 2"} in messages
+      wait_until_passes(500, fn ->
+        {:messages, messages} = Process.info(self(), :messages)
+        assert {:ssl, socket, "some data 1"} in messages
+        assert {:ssl, socket, "some data 2"} in messages
+      end)
 
       other_process = spawn_link(fn -> process_mirror(parent, ref) end)
 
@@ -235,7 +236,7 @@ defmodule Mint.Core.Transport.SSLTest do
       assert_receive {^ref, {:ssl, ^socket, "some data 1"}}
       assert_receive {^ref, {:ssl, ^socket, "some data 2"}}
 
-      refute_receive _message, 1
+      refute_received _message
     end
 
     test "changing the controlling process of a passive socket",
@@ -257,7 +258,7 @@ defmodule Mint.Core.Transport.SSLTest do
 
       assert_receive {^ref, {:ssl, ^socket, "some data"}}, 500
 
-      refute_receive _message, 1
+      refute_received _message
     end
 
     test "changing the controlling process of a closed socket",
@@ -311,5 +312,17 @@ defmodule Mint.Core.Transport.SSLTest do
         send(parent, {ref, message})
         process_mirror(parent, ref)
     end
+  end
+
+  defp wait_until_passes(time_left, fun) when time_left <= 0 do
+    fun.()
+  end
+
+  defp wait_until_passes(time_left, fun) do
+    fun.()
+  rescue
+    _exception ->
+      Process.sleep(10)
+      wait_until_passes(time_left - 10, fun)
   end
 end
