@@ -441,7 +441,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec open?(t(), :read | :write | :read_write) :: boolean()
-  def open?(%Mint.HTTP2{state: state} = _conn, type \\ :read_write)
+  def open?(%__MODULE__{state: state} = _conn, type \\ :read_write)
       when type in [:read, :write, :read_write] do
     case state do
       :handshaking -> true
@@ -494,12 +494,12 @@ defmodule Mint.HTTP2 do
           | {:error, t(), Types.error()}
   def request(conn, method, path, headers, body)
 
-  def request(%Mint.HTTP2{state: :closed} = conn, _method, _path, _headers, _body) do
+  def request(%__MODULE__{state: :closed} = conn, _method, _path, _headers, _body) do
     {:error, conn, wrap_error(:closed)}
   end
 
   def request(
-        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        %__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn,
         _method,
         _path,
         _headers,
@@ -508,7 +508,7 @@ defmodule Mint.HTTP2 do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
-  def request(%Mint.HTTP2{} = conn, method, path, headers, body)
+  def request(%__MODULE__{} = conn, method, path, headers, body)
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers =
       headers
@@ -538,19 +538,19 @@ defmodule Mint.HTTP2 do
         ) :: {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, request_ref, chunk)
 
-  def stream_request_body(%Mint.HTTP2{state: :closed} = conn, _request_ref, _chunk) do
+  def stream_request_body(%__MODULE__{state: :closed} = conn, _request_ref, _chunk) do
     {:error, conn, wrap_error(:closed)}
   end
 
   def stream_request_body(
-        %Mint.HTTP2{state: {:goaway, _error_code, _debug_data}} = conn,
+        %__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn,
         _request_ref,
         _chunk
       ) do
     {:error, conn, wrap_error(:closed_for_writing)}
   end
 
-  def stream_request_body(%Mint.HTTP2{} = conn, request_ref, chunk)
+  def stream_request_body(%__MODULE__{} = conn, request_ref, chunk)
       when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
@@ -591,7 +591,7 @@ defmodule Mint.HTTP2 do
 
   """
   @spec ping(t(), <<_::8>>) :: {:ok, t(), Types.request_ref()} | {:error, t(), Types.error()}
-  def ping(%Mint.HTTP2{} = conn, payload \\ :binary.copy(<<0>>, 8))
+  def ping(%__MODULE__{} = conn, payload \\ :binary.copy(<<0>>, 8))
       when byte_size(payload) == 8 do
     {conn, ref} = send_ping(conn, payload)
     {:ok, conn, ref}
@@ -627,7 +627,7 @@ defmodule Mint.HTTP2 do
 
   """
   @spec put_settings(t(), settings()) :: {:ok, t()} | {:error, t(), Types.error()}
-  def put_settings(%Mint.HTTP2{} = conn, settings) when is_list(settings) do
+  def put_settings(%__MODULE__{} = conn, settings) when is_list(settings) do
     conn = send_settings(conn, settings)
     {:ok, conn}
   catch
@@ -656,7 +656,7 @@ defmodule Mint.HTTP2 do
 
   """
   @spec get_server_setting(t(), atom()) :: term()
-  def get_server_setting(%Mint.HTTP2{} = conn, name) when is_atom(name) do
+  def get_server_setting(%__MODULE__{} = conn, name) when is_atom(name) do
     get_setting(conn.server_settings, name)
   end
 
@@ -686,7 +686,7 @@ defmodule Mint.HTTP2 do
 
   """
   @spec get_client_setting(t(), atom()) :: term()
-  def get_client_setting(%Mint.HTTP2{} = conn, name) when is_atom(name) do
+  def get_client_setting(%__MODULE__{} = conn, name) when is_atom(name) do
     get_setting(conn.client_settings, name)
   end
 
@@ -716,7 +716,7 @@ defmodule Mint.HTTP2 do
 
   """
   @spec cancel_request(t(), Types.request_ref()) :: {:ok, t()} | {:error, t(), Types.error()}
-  def cancel_request(%Mint.HTTP2{} = conn, request_ref) when is_reference(request_ref) do
+  def cancel_request(%__MODULE__{} = conn, request_ref) when is_reference(request_ref) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
         conn = close_stream!(conn, stream_id, _error_code = :cancel)
@@ -783,11 +783,11 @@ defmodule Mint.HTTP2 do
   @spec get_window_size(t(), :connection | {:request, Types.request_ref()}) :: non_neg_integer()
   def get_window_size(conn, connection_or_request)
 
-  def get_window_size(%Mint.HTTP2{} = conn, :connection) do
+  def get_window_size(%__MODULE__{} = conn, :connection) do
     conn.window_size
   end
 
-  def get_window_size(%Mint.HTTP2{} = conn, {:request, request_ref}) do
+  def get_window_size(%__MODULE__{} = conn, {:request, request_ref}) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
         conn.streams[stream_id].window_size
@@ -808,18 +808,18 @@ defmodule Mint.HTTP2 do
           | :unknown
   def stream(conn, message)
 
-  def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket, reason})
+  def stream(%__MODULE__{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
     error = conn.transport.wrap_error(reason)
     {:error, %{conn | state: :closed}, error, _responses = []}
   end
 
-  def stream(%Mint.HTTP2{socket: socket} = conn, {tag, socket})
+  def stream(%__MODULE__{socket: socket} = conn, {tag, socket})
       when tag in [:tcp_closed, :ssl_closed] do
     handle_closed(conn)
   end
 
-  def stream(%Mint.HTTP2{transport: transport, socket: socket} = conn, {tag, socket, data})
+  def stream(%__MODULE__{transport: transport, socket: socket} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
     case maybe_concat_and_handle_new_data(conn, data) do
       {:ok, %{mode: mode, state: state} = conn, responses}
@@ -836,7 +836,7 @@ defmodule Mint.HTTP2 do
     :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
   end
 
-  def stream(%Mint.HTTP2{}, _message) do
+  def stream(%__MODULE__{}, _message) do
     :unknown
   end
 
@@ -854,7 +854,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec open_request_count(t()) :: non_neg_integer()
-  def open_request_count(%Mint.HTTP2{} = conn) do
+  def open_request_count(%__MODULE__{} = conn) do
     conn.open_client_stream_count
   end
 
@@ -921,7 +921,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec put_private(t(), atom(), term()) :: t()
-  def put_private(%Mint.HTTP2{private: private} = conn, key, value) when is_atom(key) do
+  def put_private(%__MODULE__{private: private} = conn, key, value) when is_atom(key) do
     %{conn | private: Map.put(private, key, value)}
   end
 
@@ -930,7 +930,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec get_private(t(), atom(), term()) :: term()
-  def get_private(%Mint.HTTP2{private: private} = _conn, key, default \\ nil) when is_atom(key) do
+  def get_private(%__MODULE__{private: private} = _conn, key, default \\ nil) when is_atom(key) do
     Map.get(private, key, default)
   end
 
@@ -939,7 +939,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec delete_private(t(), atom()) :: t()
-  def delete_private(%Mint.HTTP2{private: private} = conn, key) when is_atom(key) do
+  def delete_private(%__MODULE__{private: private} = conn, key) when is_atom(key) do
     %{conn | private: Map.delete(private, key)}
   end
 
@@ -949,7 +949,7 @@ defmodule Mint.HTTP2 do
   @doc since: "1.5.0"
   @impl true
   @spec put_log(t(), boolean()) :: t()
-  def put_log(%Mint.HTTP2{} = conn, log?) when is_boolean(log?) do
+  def put_log(%__MODULE__{} = conn, log?) when is_boolean(log?) do
     %{conn | log: log?}
   end
 
@@ -981,7 +981,7 @@ defmodule Mint.HTTP2 do
             "the :log option must be a boolean, got: #{inspect(log?)}"
     end
 
-    conn = %Mint.HTTP2{
+    conn = %__MODULE__{
       hostname: hostname,
       port: port,
       transport: scheme_to_transport(scheme),
@@ -1016,7 +1016,7 @@ defmodule Mint.HTTP2 do
   """
   @impl true
   @spec get_socket(t()) :: Mint.Types.socket()
-  def get_socket(%Mint.HTTP2{socket: socket} = _conn) do
+  def get_socket(%__MODULE__{socket: socket} = _conn) do
     socket
   end
 
@@ -1382,7 +1382,7 @@ defmodule Mint.HTTP2 do
     {:ok, conn, Enum.reverse(responses)}
   end
 
-  defp handle_new_data(%Mint.HTTP2{} = conn, data, responses) do
+  defp handle_new_data(%__MODULE__{} = conn, data, responses) do
     case Frame.decode_next(data, conn.client_settings.max_frame_size) do
       {:ok, frame, rest} ->
         log(conn, :debug, "Received frame: #{Frame.inspect(frame)}")
@@ -1875,7 +1875,7 @@ defmodule Mint.HTTP2 do
   # PUSH_PROMISE
 
   defp handle_push_promise(
-         %Mint.HTTP2{client_settings: %{enable_push: false}} = conn,
+         %__MODULE__{client_settings: %{enable_push: false}} = conn,
          push_promise(),
          _responses
        ) do
@@ -2135,7 +2135,7 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp send!(%Mint.HTTP2{transport: transport, socket: socket} = conn, bytes) do
+  defp send!(%__MODULE__{transport: transport, socket: socket} = conn, bytes) do
     case transport.send(socket, bytes) do
       :ok ->
         conn
