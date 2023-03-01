@@ -1413,8 +1413,9 @@ defmodule Mint.HTTP2 do
 
   defp handle_consumed_all_frames(%{state: state} = conn, responses) do
     case state do
-      # TODO: should we do something with the debug data here, like logging it?
-      {:goaway, :no_error, _debug_data} ->
+      {:goaway, :no_error, debug_data} ->
+        message = "Server closed connection normally (with debug data: #{inspect(debug_data)})"
+        log(conn, :debug, message)
         {conn, responses}
 
       {:goaway, error_code, debug_data} ->
