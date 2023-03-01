@@ -97,8 +97,21 @@ defmodule Mint.HTTP1 do
     state: :closed,
     buffer: "",
     proxy_headers: [],
-    private: %{}
+    private: %{},
+    log: false
   ]
+
+  defmacrop log(conn, level, message) do
+    quote do
+      conn = unquote(conn)
+
+      if conn.log do
+        Logger.log(unquote(level), unquote(message))
+      else
+        :ok
+      end
+    end
+  end
 
   @doc """
   Same as `Mint.HTTP.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
@@ -157,10 +170,16 @@ defmodule Mint.HTTP1 do
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
     mode = Keyword.get(opts, :mode, :active)
+    log? = Keyword.get(opts, :log, false)
 
     unless mode in [:active, :passive] do
       raise ArgumentError,
             "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
+
+    unless is_boolean(log?) do
+      raise ArgumentError,
+            "the :log option must be a boolean, got: #{inspect(log?)}"
     end
 
     with :ok <- inet_opts(transport, socket),
@@ -172,7 +191,8 @@ defmodule Mint.HTTP1 do
         host: hostname,
         port: port,
         scheme_as_string: Atom.to_string(scheme),
-        state: :open
+        state: :open,
+        log: log?
       }
 
       {:ok, conn}
@@ -571,6 +591,16 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
+  See `Mint.HTTP.put_log/2`.
+  """
+  @doc since: "1.5.0"
+  @impl true
+  @spec put_log(t(), boolean()) :: t()
+  def put_log(%__MODULE__{} = conn, log?) when is_boolean(log?) do
+    %{conn | log: log?}
+  end
+
+  @doc """
   See `Mint.HTTP.get_proxy_headers/1`.
   """
   if Version.compare(System.version(), "1.7.0") in [:eq, :gt] do
@@ -875,7 +905,7 @@ defmodule Mint.HTTP1 do
 
   defp internal_close(conn) do
     if conn.buffer != "" do
-      _ = Logger.debug(["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
+      log(conn, :debug, ["Connection closed with data left in the buffer: ", inspect(conn.buffer)])
     end
 
     _ = conn.transport.close(conn.socket)

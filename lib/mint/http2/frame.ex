@@ -2,6 +2,7 @@ defmodule Mint.HTTP2.Frame do
   @moduledoc false
 
   import Bitwise, only: [band: 2, bor: 2]
+  import Kernel, except: [inspect: 1]
   import Record
 
   shared_stream = [:stream_id, {:flags, 0x00}]
@@ -31,6 +32,16 @@ defmodule Mint.HTTP2.Frame do
     window_update: 0x08,
     continuation: 0x09
   }
+
+  ## Inspecting
+
+  @spec inspect(tuple()) :: String.t()
+
+  for {type, _code} <- @types do
+    def inspect(frame) when is_record(frame, unquote(type)) do
+      unquote(String.upcase(Atom.to_string(type))) <> Kernel.inspect(unquote(type)(frame))
+    end
+  end
 
   ## Flag handling
 
@@ -255,7 +266,7 @@ defmodule Mint.HTTP2.Frame do
        when is_flag_set(flags, unquote(@flags[:data][:padded])) do
     if pad_length >= byte_size(payload) do
       debug_data =
-        "the padding length of a #{inspect(frame)} frame is bigger than the payload length"
+        "the padding length of a #{Kernel.inspect(frame)} frame is bigger than the payload length"
 
       throw({:mint, {:protocol_error, debug_data}})
     else

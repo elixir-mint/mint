@@ -1,7 +1,7 @@
 defmodule Mint.HTTP2Test do
   use ExUnit.Case, async: true
 
-  import Mint.HTTP2.Frame
+  import Mint.HTTP2.Frame, except: [inspect: 1]
   import Mint.HTTP2.TestHelpers, only: [extract_port: 1]
   import ExUnit.CaptureLog
   import Mox
@@ -1704,7 +1704,7 @@ defmodule Mint.HTTP2Test do
           assert HTTP2.open?(conn)
         end)
 
-      assert log =~ "Received SETTINGS ACK but client is not waiting for any ACK"
+      assert log =~ "Received SETTINGS ACK but client is not waiting for ACKs"
     end
 
     test "server can send the :enable_push setting", %{conn: conn} do
@@ -2143,14 +2143,36 @@ defmodule Mint.HTTP2Test do
     assert HTTP2.get_private(conn, :my_key) == nil
   end
 
+  describe "logging" do
+    @describetag capture_log: false
+
+    test "logs debug messages for inbound frames", %{conn: conn} do
+      previous_level = Logger.level()
+      on_exit(fn -> Logger.configure(level: previous_level) end)
+
+      Logger.configure(level: :debug)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %HTTP2{} = _conn, []} =
+                   stream_frames(conn, [ping(opaque_data: <<1, 2, 3, 4, 5, 6, 7, 8>>)])
+        end)
+
+      assert log =~
+               "Received frame: PING[stream_id: 0, flags: 0, opaque_data: <<1, 2, 3, 4, 5, 6, 7, 8>>]"
+    end
+  end
+
   @pdict_key {__MODULE__, :http2_test_server}
 
   defp start_connection(context) do
-    default_options = [transport_opts: [verify: :verify_none]]
-    options = Keyword.merge(default_options, context[:connect_options] || [])
+    conn_options =
+      [transport_opts: [verify: :verify_none]]
+      |> Keyword.merge(context[:connect_options] || [])
+      |> Keyword.put_new(:log, true)
 
     {conn, server} =
-      TestServer.connect(options, context[:server_settings] || [], context[:options] || [])
+      TestServer.connect(conn_options, context[:server_settings] || [], context[:options] || [])
 
     Process.put(@pdict_key, server)
 
