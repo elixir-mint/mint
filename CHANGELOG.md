@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.5.0
+
+### Bug fixes and improvements
+
+  * Properly close sockets on erroneous connections.
+  * Fix `Mint.HTTP.is_connection_message/2` to support proxy connections.
+  * Add support for CAStore v1.0.0+.
+  * Support all HTTP/2 settings for clients as well (see
+    `Mint.HTTP2.put_settings/2`).
+  * Handle the first `SETTINGS` frame sent by the server *asynchronously* in
+    HTTP/2. This means lower latency between connecting to a server and being
+    able to send data to it.
+  * Add more logging and make logging configurable through the `:log` option
+    (see `Mint.HTTP.connect/4`, `Mint.HTTP1.connect/4`, `Mint.HTTP2.connect/4`).
+
 ## v1.4.2
 
 ### Bug fixes and improvements
