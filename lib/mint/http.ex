@@ -1004,7 +1004,7 @@ defmodule Mint.HTTP do
   @doc since: "1.5.0"
   @impl true
   @spec put_log(t(), boolean()) :: t()
-  def put_log(conn, level), do: conn_module(conn).put_log(conn, level)
+  def put_log(conn, log?), do: conn_module(conn).put_log(conn, log?)
 
   @doc """
   Gets the proxy headers associated with the connection in the `CONNECT` method.
