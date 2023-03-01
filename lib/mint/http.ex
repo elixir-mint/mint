@@ -130,23 +130,31 @@ defmodule Mint.HTTP do
 
   @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
 
-  # TODO: Use is_struct/2 and map.field access when we depend on Elixir 1.11+
-  defguardp is_non_proxy_connection_message(conn, message)
-            when is_map(conn) and
-                   is_tuple(message) and
-                   is_map_key(conn, :__struct__) and
-                   is_map_key(conn, :socket) and
-                   is_atom(:erlang.map_get(:__struct__, conn)) and
-                   elem(message, 1) == :erlang.map_get(:socket, conn) and
-                   ((elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3) or
-                      (elem(message, 0) in [:ssl_closed, :tcp_closed] and
-                         tuple_size(message) == 2) or
-                      (elem(message, 0) in [:ssl_error, :tcp_error] and
-                         tuple_size(message) == 3))
+  # TODO: Remove once we depend on Elixir 1.11+, which defines is_struct/2
+  if not macro_exported?(Kernel, :is_struct, 2) do
+    defguardp is_struct(struct, module)
+              when is_map(struct) and is_atom(module) and is_map_key(conn, :__struct__) and
+                     :erlang.map_get(:__struct__, conn) == module
+  end
 
-  defguardp is_proxy_conn(conn)
-            when is_map(conn) and is_map_key(conn, :__struct__) and
-                   :erlang.map_get(:__struct__, conn) == Mint.UnsafeProxy
+  defguardp is_data_message(message)
+            when elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3
+
+  defguardp is_closed_message(message)
+            when elem(message, 0) in [:ssl_closed, :tcp_closed] and tuple_size(message) == 2
+
+  defguardp is_error_message(message)
+            when elem(message, 0) in [:ssl_error, :tcp_error] and tuple_size(message) == 3
+
+  defguardp is_non_proxy_connection_message(conn, message)
+            when is_struct(conn) and
+                   is_tuple(message) and
+                   is_map_key(conn, :socket) and
+                   elem(message, 1) == :erlang.map_get(:socket, conn) and
+                   (is_data_message(message) or is_closed_message(message) or
+                      is_error_message(message))
+
+  defguardp is_proxy_conn(conn) when is_struct(conn, Mint.UnsafeProxy)
 
   @doc """
   Macro to check that a given received `message` is intended for the given connection `conn`.
