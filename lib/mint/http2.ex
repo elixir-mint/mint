@@ -432,6 +432,11 @@ defmodule Mint.HTTP2 do
     {:ok, put_in(conn.state, :closed)}
   end
 
+  def close(%__MODULE__{state: :handshaking} = conn) do
+    _ = conn.transport.close(conn.socket)
+    {:ok, put_in(conn.state, :closed)}
+  end
+
   def close(%__MODULE__{state: :closed} = conn) do
     {:ok, conn}
   end

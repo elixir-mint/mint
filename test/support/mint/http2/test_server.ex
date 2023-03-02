@@ -22,17 +22,14 @@ defmodule Mint.HTTP2.TestServer do
   @spec connect(keyword(), keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
   def connect(conn_options, server_settings, options \\ [])
       when is_list(conn_options) and is_list(server_settings) and is_list(options) do
-    ref = make_ref()
-    parent = self()
     ack_flags = Frame.set_flags(:settings, [:ack])
 
-    task = Task.async(fn -> start_socket_and_accept(parent, ref) end)
-    assert_receive {^ref, port}, 100
+    assert {:ok, port, server_socket_task} = listen_and_accept()
 
-    assert {:ok, conn} = HTTP2.connect(:https, "localhost", port, conn_options)
-    assert %HTTP2{} = conn
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", port, conn_options)
 
-    {:ok, server_socket} = Task.await(task)
+    {:ok, server_socket} = Task.await(server_socket_task)
+    assert :ok = perform_http2_handshake(server_socket)
 
     conn =
       case Keyword.get(options, :first_server_frame, :settings) do
@@ -185,25 +182,28 @@ defmodule Mint.HTTP2.TestServer do
     server.socket
   end
 
-  defp start_socket_and_accept(parent, ref) do
+  @spec listen_and_accept() :: {:ok, :inet.port_number(), Task.t()}
+  def listen_and_accept do
     {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
-    send(parent, {ref, port})
+    parent = self()
 
-    # Let's accept a new connection.
-    {:ok, socket} = :ssl.transport_accept(listen_socket)
+    task =
+      Task.async(fn ->
+        # Let's accept a new connection.
+        {:ok, socket} = :ssl.transport_accept(listen_socket)
 
-    if function_exported?(:ssl, :handshake, 1) do
-      {:ok, _} = apply(:ssl, :handshake, [socket])
-    else
-      :ok = apply(:ssl, :ssl_accept, [socket])
-    end
+        if function_exported?(:ssl, :handshake, 1) do
+          {:ok, _} = apply(:ssl, :handshake, [socket])
+        else
+          :ok = apply(:ssl, :ssl_accept, [socket])
+        end
 
-    :ok = perform_http2_handshake(socket)
+        :ok = :ssl.controlling_process(socket, parent)
+        {:ok, socket}
+      end)
 
-    # We transfer ownership of the socket to the parent so that this task can die.
-    :ok = :ssl.controlling_process(socket, parent)
-    {:ok, socket}
+    {:ok, port, task}
   end
 
   connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"

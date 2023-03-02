@@ -463,6 +463,24 @@ defmodule Mint.HTTP2Test do
       # Check port status again, after close it should be closed
       assert :erlang.port_info(port) == :undefined
     end
+
+    test "close/1 can close the connection right after starting" do
+      {:ok, port, server_socket_task} = TestServer.listen_and_accept()
+
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", port,
+                 transport_opts: [verify: :verify_none],
+                 mode: :passive
+               )
+
+      assert {:ok, server_socket} = Task.await(server_socket_task)
+      :ok = :ssl.setopts(server_socket, active: true)
+
+      assert {:ok, %HTTP2{} = conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+
+      assert_receive {:ssl_closed, ^server_socket}
+    end
   end
 
   describe "client errors" do
