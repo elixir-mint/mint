@@ -1010,10 +1010,6 @@ defmodule Mint.HTTP2 do
         transport.close(socket)
         error
     end
-  catch
-    {:mint, conn, error} ->
-      {:ok, _conn} = close(conn)
-      {:error, error}
   end
 
   @doc """

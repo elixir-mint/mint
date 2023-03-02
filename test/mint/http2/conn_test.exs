@@ -139,6 +139,45 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "connect/4" do
+    @describetag :no_connection
+
+    test "raises an error if the :log option is not a boolean", %{server_port: port} do
+      message = "the :log option must be a boolean, got: \"not a boolean\""
+
+      assert_raise ArgumentError, message, fn ->
+        HTTP2.connect(:https, "localhost", port,
+          log: "not a boolean",
+          transport_opts: [verify: :verify_none]
+        )
+      end
+    end
+
+    test "raises an error if the :mode option is not :active or :passive", %{server_port: port} do
+      message = "the :mode option must be either :active or :passive, got: :invalid"
+
+      assert_raise ArgumentError, message, fn ->
+        HTTP2.connect(:https, "localhost", port,
+          mode: :invalid,
+          transport_opts: [verify: :verify_none]
+        )
+      end
+    end
+
+    @tag :no_connection
+    test "closes the transport socket if anything goes wrong during the setup",
+         %{server_port: port} do
+      {:ok, socket} = :ssl.connect('localhost', port, verify: :verify_none)
+
+      TransportMock
+      |> expect(:getopts, fn ^socket, _opts -> {:error, Transport.SSL.wrap_error(:einval)} end)
+      |> expect(:close, fn ^socket -> :ok end)
+
+      assert {:error, error} = HTTP2.initiate(TransportMock, socket, "localhost", port, [])
+      assert_transport_error error, :einval
+    end
+  end
+
   describe "handling unknown frames from the server" do
     test "handle origin frame from the server", %{conn: conn} do
       {conn, ref} = open_request(conn)
