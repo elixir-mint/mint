@@ -554,6 +554,16 @@ defmodule Mint.HTTP2Test do
 
       assert_receive {:ssl_closed, ^server_socket}
     end
+
+    @tag :with_transport_mock
+    test "close/1 works just fine if sending the GOAWAY errors out", %{conn: conn} do
+      TransportMock
+      |> expect(:send, fn _socket, _data -> {:error, Transport.SSL.wrap_error(:closed)} end)
+      |> expect(:close, fn _socket -> :ok end)
+
+      assert {:ok, %HTTP2{} = conn} = HTTP2.close(conn)
+      refute HTTP2.open?(conn)
+    end
   end
 
   describe "client errors" do

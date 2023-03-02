@@ -419,12 +419,6 @@ defmodule Mint.HTTP2 do
   catch
     {:mint, conn, %HTTPError{reason: {:no_error, _}}} ->
       {:ok, conn}
-
-    # We could have an error sending the GOAWAY frame, but we want to ignore that since
-    # we're closing the connection anyways.
-    {:mint, conn, %TransportError{}} ->
-      conn = put_in(conn.state, :closed)
-      {:ok, conn}
   end
 
   def close(%__MODULE__{state: {:goaway, _error_code, _debug_data}} = conn) do
