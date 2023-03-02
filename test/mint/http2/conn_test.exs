@@ -2,7 +2,6 @@ defmodule Mint.HTTP2Test do
   use ExUnit.Case, async: true
 
   import Mint.HTTP2.Frame, except: [inspect: 1]
-  import Mint.HTTP2.TestHelpers, only: [extract_port: 1]
   import ExUnit.CaptureLog
   import Mox
 
@@ -439,29 +438,27 @@ defmodule Mint.HTTP2Test do
     end
 
     test "close/1 properly closes socket on active connection", %{conn: conn} do
-      # Check port status, before close it should be opened
-      port = conn |> HTTP2.get_socket() |> extract_port
-      refute :erlang.port_info(port) == :undefined
+      # Check socket status, before close it should be opened
+      assert {:ok, _info} = conn |> HTTP2.get_socket() |> :ssl.connection_information()
 
       # Closed successfully
       assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
 
-      # Check port status again, after close it should be closed
-      assert :erlang.port_info(port) == :undefined
+      # Check socket status again, after close it should be closed
+      assert {:error, :closed} = conn |> HTTP2.get_socket() |> :ssl.connection_information()
     end
 
     test "close/1 properly closes socket on erroneous connection", %{conn: conn} do
-      # Check port status, before close it should be opened
-      port = conn |> HTTP2.get_socket() |> extract_port
-      refute :erlang.port_info(port) == :undefined
+      # Check socket status, before close it should be opened
+      assert {:ok, _info} = conn |> HTTP2.get_socket() |> :ssl.connection_information()
 
       # Closed successfully
       assert {:ok, conn} = HTTP2.close(conn)
       refute HTTP2.open?(conn)
 
-      # Check port status again, after close it should be closed
-      assert :erlang.port_info(port) == :undefined
+      # Check socket status again, after close it should be closed
+      assert {:error, :closed} = conn |> HTTP2.get_socket() |> :ssl.connection_information()
     end
 
     test "close/1 can close the connection right after starting" do

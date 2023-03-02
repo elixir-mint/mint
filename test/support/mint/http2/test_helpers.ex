@@ -27,7 +27,7 @@ defmodule Mint.HTTP2.TestHelpers do
     end
   end
 
-  def maybe_done(conn, [{:done, _} = done | rest], acc) do
+  defp maybe_done(conn, [{:done, _} = done | rest], acc) do
     if rest != [] do
       send(self(), {:rest, conn, rest})
     end
@@ -35,7 +35,7 @@ defmodule Mint.HTTP2.TestHelpers do
     {:ok, conn, acc ++ [done]}
   end
 
-  def maybe_done(conn, [{:pong, _} = pong_resp | rest], acc) do
+  defp maybe_done(conn, [{:pong, _} = pong_resp | rest], acc) do
     if rest != [] do
       send(self(), {:rest, conn, rest})
     end
@@ -43,18 +43,11 @@ defmodule Mint.HTTP2.TestHelpers do
     {:ok, conn, acc ++ [pong_resp]}
   end
 
-  def maybe_done(conn, [resp | rest], acc) do
+  defp maybe_done(conn, [resp | rest], acc) do
     maybe_done(conn, rest, acc ++ [resp])
   end
 
-  def maybe_done(conn, [], acc) do
+  defp maybe_done(conn, [], acc) do
     receive_stream(conn, acc)
-  end
-
-  @doc """
-  Extracts port from ssl socket
-  """
-  def extract_port({:sslsocket, {_, port, _, _}, _} = _ssl_socket) do
-    port
   end
 end
