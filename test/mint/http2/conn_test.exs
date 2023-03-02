@@ -9,6 +9,7 @@ defmodule Mint.HTTP2Test do
     Core.Transport,
     HTTPError,
     HTTP2,
+    HTTP2.Frame,
     HTTP2.TestServer,
     TransportError
   }
@@ -17,6 +18,10 @@ defmodule Mint.HTTP2Test do
 
   @moduletag :capture_log
 
+  @recv_timeout 300
+  @server_pdict_key {__MODULE__, :http2_test_server}
+
+  setup :start_server_async
   setup :start_connection
   setup :maybe_set_transport_mock
 
@@ -80,15 +85,47 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "performing the initial handshake" do
-    @tag options: [first_server_frame: :goaway], connect_options: [mode: :passive]
-    test "client deals with server sending GOAWAY as the first frame", %{conn: conn} do
+    @tag :no_connection
+    test "client deals with server sending GOAWAY as the first frame",
+         %{server_port: port, server_socket_task: server_socket_task} do
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", port,
+                 transport_opts: [verify: :verify_none],
+                 mode: :passive
+               )
+
+      assert {:ok, server_socket} = Task.await(server_socket_task)
+      assert :ok = TestServer.perform_http2_handshake(server_socket)
+      # :ok = :ssl.setopts(server_socket, active: true)
+
+      frame = goaway(last_stream_id: 0, error_code: :internal_error, debug_data: "Some error")
+      :ok = :ssl.send(server_socket, [Frame.encode(frame)])
+
+      # :ping ->
+      #   frame = ping(opaque_data: :binary.copy(<<0>>, 8))
+      #   :ok = :ssl.send(server_socket, [Frame.encode(frame)])
+      #   conn
+
       assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 1000)
       assert_http2_error error, {:server_closed_connection, :internal_error, "Some error"}
       refute HTTP2.open?(conn)
     end
 
-    @tag options: [first_server_frame: :ping], connect_options: [mode: :passive]
-    test "client deals with server sending PING as the first frame", %{conn: conn} do
+    @tag :no_connection
+    test "client deals with server sending PING as the first frame",
+         %{server_port: port, server_socket_task: server_socket_task} do
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", port,
+                 transport_opts: [verify: :verify_none],
+                 mode: :passive
+               )
+
+      assert {:ok, server_socket} = Task.await(server_socket_task)
+      assert :ok = TestServer.perform_http2_handshake(server_socket)
+
+      frame = ping(opaque_data: :binary.copy(<<0>>, 8))
+      :ok = :ssl.send(server_socket, [Frame.encode(frame)])
+
       assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 1000)
       assert_http2_error error, {:protocol_error, "received invalid frame ping during handshake"}
       refute HTTP2.open?(conn)
@@ -461,9 +498,9 @@ defmodule Mint.HTTP2Test do
       assert {:error, :closed} = conn |> HTTP2.get_socket() |> :ssl.connection_information()
     end
 
-    test "close/1 can close the connection right after starting" do
-      {:ok, port, server_socket_task} = TestServer.listen_and_accept()
-
+    @tag :no_connection
+    test "close/1 can close the connection right after starting",
+         %{server_port: port, server_socket_task: server_socket_task} do
       assert {:ok, %HTTP2{} = conn} =
                HTTP2.connect(:https, "localhost", port,
                  transport_opts: [verify: :verify_none],
@@ -1702,9 +1739,33 @@ defmodule Mint.HTTP2Test do
       assert flags == set_flags(:settings, [:ack])
     end
 
-    @tag options: [invalid_server_settings: true]
-    @tag server_settings: [max_frame_size: 1]
-    test "protocol error when server sends an invalid setting", %{conn: conn} do
+    @tag :no_connection
+    test "protocol error when server sends an invalid setting",
+         %{server_port: server_port, server_socket_task: server_socket_task} do
+      ack_flags = Frame.set_flags(:settings, [:ack])
+
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.connect(:https, "localhost", server_port,
+                 transport_opts: [verify: :verify_none]
+               )
+
+      {:ok, server_socket} = Task.await(server_socket_task)
+      :ok = TestServer.perform_http2_handshake(server_socket)
+
+      server = TestServer.new(server_socket)
+      Process.put(@server_pdict_key, server)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 settings(params: [max_frame_size: 1]),
+                 settings(flags: ack_flags, params: [])
+               ])
+
+      assert %Mint.HTTPError{reason: reason} = error
+
+      assert reason ==
+               {:protocol_error, "MAX_FRAME_SIZE setting parameter outside of allowed range"}
+
       refute HTTP2.open?(conn)
     end
 
@@ -2176,33 +2237,66 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  @pdict_key {__MODULE__, :http2_test_server}
+  defp start_server_async(_context) do
+    {:ok, port, server_socket_task} = TestServer.listen_and_accept()
+    %{server_port: port, server_socket_task: server_socket_task}
+  end
 
-  defp start_connection(context) do
+  defp start_connection(%{no_connection: true} = _context) do
+    :ok
+  end
+
+  defp start_connection(%{server_port: port, server_socket_task: server_socket_task} = context) do
+    ack_flags = Frame.set_flags(:settings, [:ack])
+
     conn_options =
       [transport_opts: [verify: :verify_none]]
       |> Keyword.merge(context[:connect_options] || [])
       |> Keyword.put_new(:log, true)
 
-    {conn, server} =
-      TestServer.connect(conn_options, context[:server_settings] || [], context[:options] || [])
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", port, conn_options)
+    {:ok, server_socket} = Task.await(server_socket_task)
+    assert :ok = TestServer.perform_http2_handshake(server_socket)
 
-    Process.put(@pdict_key, server)
+    :ok =
+      :ssl.send(server_socket, [
+        Frame.encode(settings(params: context[:server_settings] || [])),
+        Frame.encode(settings(flags: ack_flags, params: []))
+      ])
+
+    # We let the client process server settings and the ack here.
+    assert {:ok, %HTTP2{} = conn, []} =
+             (if conn_options[:mode] == :passive do
+                HTTP2.recv(conn, 0, @recv_timeout)
+              else
+                assert_receive message, @recv_timeout
+                HTTP2.stream(conn, message)
+              end)
+
+    # Before moving on, we await the SETTINGS ack from the client.
+    {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
+    assert {:ok, frame, ""} = Frame.decode_next(data)
+    assert settings(flags: ^ack_flags, params: []) = frame
+
+    :ok = :ssl.setopts(server_socket, active: true)
+
+    server = TestServer.new(server_socket)
+    Process.put(@server_pdict_key, server)
 
     [conn: conn]
   end
 
-  defp maybe_set_transport_mock(%{conn: conn} = context) do
-    if context[:with_transport_mock] do
-      verify_on_exit!()
-      [conn: %{conn | transport: TransportMock}]
-    else
-      []
-    end
+  defp maybe_set_transport_mock(%{conn: conn, with_transport_mock: _}) do
+    verify_on_exit!()
+    [conn: %{conn | transport: TransportMock}]
+  end
+
+  defp maybe_set_transport_mock(_context) do
+    %{}
   end
 
   defp recv_next_frames(n) do
-    server = Process.get(@pdict_key)
+    server = Process.get(@server_pdict_key)
     TestServer.recv_next_frames(server, n)
   end
 
@@ -2212,28 +2306,28 @@ defmodule Mint.HTTP2Test do
   end
 
   defp server_get_socket() do
-    server = Process.get(@pdict_key)
-    TestServer.get_socket(server)
+    server = Process.get(@server_pdict_key)
+    server.socket
   end
 
   defp server_encode_frames(frames) do
-    server = Process.get(@pdict_key)
+    server = Process.get(@server_pdict_key)
     {server, data} = TestServer.encode_frames(server, frames)
-    Process.put(@pdict_key, server)
+    Process.put(@server_pdict_key, server)
     data
   end
 
   defp server_encode_headers(headers) do
-    server = Process.get(@pdict_key)
+    server = Process.get(@server_pdict_key)
     {server, hbf} = TestServer.encode_headers(server, headers)
-    Process.put(@pdict_key, server)
+    Process.put(@server_pdict_key, server)
     hbf
   end
 
   defp server_decode_headers(hbf) do
-    server = Process.get(@pdict_key)
+    server = Process.get(@server_pdict_key)
     {server, headers} = TestServer.decode_headers(server, hbf)
-    Process.put(@pdict_key, server)
+    Process.put(@server_pdict_key, server)
     headers
   end
 

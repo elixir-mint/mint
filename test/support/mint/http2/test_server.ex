@@ -2,7 +2,7 @@ defmodule Mint.HTTP2.TestServer do
   import ExUnit.Assertions
   import Mint.HTTP2.Frame, only: [settings: 1, goaway: 1, ping: 1]
 
-  alias Mint.{HTTP2, HTTP2.Frame}
+  alias Mint.HTTP2.Frame
 
   defstruct [:socket, :encode_table, :decode_table]
 
@@ -19,79 +19,13 @@ defmodule Mint.HTTP2.TestServer do
 
   @recv_timeout 300
 
-  @spec connect(keyword(), keyword()) :: {Mint.HTTP2.t(), %__MODULE__{}}
-  def connect(conn_options, server_settings, options \\ [])
-      when is_list(conn_options) and is_list(server_settings) and is_list(options) do
-    ack_flags = Frame.set_flags(:settings, [:ack])
-
-    assert {:ok, port, server_socket_task} = listen_and_accept()
-
-    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:https, "localhost", port, conn_options)
-
-    {:ok, server_socket} = Task.await(server_socket_task)
-    assert :ok = perform_http2_handshake(server_socket)
-
-    conn =
-      case Keyword.get(options, :first_server_frame, :settings) do
-        # We send server settings, ack client settings, and wait for the client's ack
-        # to the server settings.
-        :settings ->
-          :ok =
-            :ssl.send(server_socket, [
-              Frame.encode(settings(params: server_settings)),
-              Frame.encode(settings(flags: ack_flags, params: []))
-            ])
-
-          # We let the client process server settings and the ack here.
-          response =
-            if conn_options[:mode] == :passive do
-              HTTP2.recv(conn, 0, @recv_timeout)
-            else
-              assert_receive message, @recv_timeout
-              HTTP2.stream(conn, message)
-            end
-
-          conn =
-            if Keyword.get(options, :invalid_server_settings, false) do
-              assert {:error, %HTTP2{} = conn, error, []} = response
-              assert %Mint.HTTPError{reason: reason} = error
-
-              assert reason ==
-                       {:protocol_error,
-                        "MAX_FRAME_SIZE setting parameter outside of allowed range"}
-
-              conn
-            else
-              {:ok, %HTTP2{} = conn, []} = response
-              # Before moving on, we await the SETTINGS ack from the client.
-              {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
-              assert {:ok, frame, ""} = Frame.decode_next(data)
-              assert settings(flags: ^ack_flags, params: []) = frame
-              conn
-            end
-
-          conn
-
-        :goaway ->
-          frame = goaway(last_stream_id: 0, error_code: :internal_error, debug_data: "Some error")
-          :ok = :ssl.send(server_socket, [Frame.encode(frame)])
-          conn
-
-        :ping ->
-          frame = ping(opaque_data: :binary.copy(<<0>>, 8))
-          :ok = :ssl.send(server_socket, [Frame.encode(frame)])
-          conn
-      end
-
-    :ok = :ssl.setopts(server_socket, active: true)
-
-    server = %__MODULE__{
-      socket: server_socket,
+  @spec new(:ssl.sslsocket()) :: %__MODULE__{}
+  def new(socket) do
+    %__MODULE__{
+      socket: socket,
       encode_table: HPAX.new(4096),
       decode_table: HPAX.new(4096)
     }
-
-    {conn, server}
   end
 
   @spec recv_next_frames(%__MODULE__{}, pos_integer()) :: [frame :: term(), ...]
@@ -177,11 +111,6 @@ defmodule Mint.HTTP2.TestServer do
     {server, headers}
   end
 
-  @spec get_socket(%__MODULE__{}) :: :ssl.sslsocket()
-  def get_socket(server) do
-    server.socket
-  end
-
   @spec listen_and_accept() :: {:ok, :inet.port_number(), Task.t()}
   def listen_and_accept do
     {:ok, listen_socket} = :ssl.listen(0, @ssl_opts)
@@ -208,7 +137,8 @@ defmodule Mint.HTTP2.TestServer do
 
   connection_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-  defp perform_http2_handshake(socket) do
+  @spec perform_http2_handshake(:ssl.sslsocket()) :: :ok
+  def perform_http2_handshake(socket) do
     no_flags = Frame.set_flags(:settings, [])
 
     # First we get the connection preface.
