@@ -1,11 +1,12 @@
 defmodule Mint.HTTP2.TestHelpers do
   import ExUnit.Assertions
 
-  def receive_stream(conn) do
+  @spec receive_stream(Mint.HTTP2.t()) :: {:ok, Mint.HTTP2.t(), [Mint.Types.response()]}
+  def receive_stream(%Mint.HTTP2{} = conn) do
     receive_stream(conn, [])
   end
 
-  def receive_stream(conn, responses) do
+  defp receive_stream(conn, responses) do
     assert_receive message, 10_000
 
     case message do
