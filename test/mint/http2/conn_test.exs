@@ -1622,6 +1622,17 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
+    test "server sends invalid WINDOW_UPDATE with 0 window size increment", %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, _responses = []} =
+               stream_frames(conn, [window_update(stream_id: 0, window_size_increment: 0)])
+
+      assert_http2_error error,
+                         {:protocol_error,
+                          "error when decoding frame: \"bad WINDOW_SIZE increment\""}
+
+      refute HTTP2.open?(conn)
+    end
+
     test "server violates client's max frame size", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
