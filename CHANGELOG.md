@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.1
+
+### Bug fixes and improvements
+
+  * Fix a `FunctionClauseError` that would happen when calling
+    `Mint.HTTP2.close/1` on an HTTP/2 connection that hadn't completed the
+    handshake yet. This bug was introduced in v1.5.0. See [issue
+    #392](https://github.com/elixir-mint/mint/issues/392).
+
 ## v1.5.0
 
 ### Bug fixes and improvements
