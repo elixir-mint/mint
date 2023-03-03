@@ -164,7 +164,6 @@ defmodule Mint.HTTP2Test do
       end
     end
 
-    @tag :no_connection
     test "closes the transport socket if anything goes wrong during the setup",
          %{server_port: port} do
       {:ok, socket} = :ssl.connect('localhost', port, verify: :verify_none)
@@ -175,6 +174,11 @@ defmodule Mint.HTTP2Test do
 
       assert {:error, error} = HTTP2.initiate(TransportMock, socket, "localhost", port, [])
       assert_transport_error error, :einval
+    end
+
+    test "bubbles up errors returned by negotiate/4" do
+      assert {:error, error} = HTTP2.connect(:http, "localhost", 65_535)
+      assert_transport_error error, :econnrefused
     end
   end
 
@@ -286,6 +290,21 @@ defmodule Mint.HTTP2Test do
                  data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
                ])
 
+      assert HTTP2.open?(conn)
+    end
+
+    @tag :with_transport_mock
+    test "cancel_request/2 bubbles up errors", %{conn: conn} do
+      stub_with(TransportMock, Transport.SSL)
+
+      {conn, ref} = open_request(conn)
+
+      expect(TransportMock, :send, fn _socket, _data ->
+        {:error, Transport.SSL.wrap_error(:einval)}
+      end)
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.cancel_request(conn, ref)
+      assert_transport_error error, :einval
       assert HTTP2.open?(conn)
     end
 

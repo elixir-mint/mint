@@ -46,7 +46,7 @@ defmodule Mint.Core.Util do
                                 "warning"
                               ])
 
-  def hostname(opts, address) do
+  def hostname(opts, address) when is_list(opts) do
     case Keyword.fetch(opts, :hostname) do
       {:ok, hostname} ->
         hostname

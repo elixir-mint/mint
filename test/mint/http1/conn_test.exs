@@ -434,8 +434,16 @@ defmodule Mint.HTTP1Test do
   end
 
   test "connect/4 raises if :mode is not :active/:passive", %{port: port} do
-    assert_raise ArgumentError, ~r/^the :mode option .* got: :something_else$/, fn ->
+    message = "the :mode option must be either :active or :passive, got: :something_else"
+
+    assert_raise ArgumentError, message, fn ->
       HTTP1.connect(:http, "localhost", port, mode: :something_else)
+    end
+  end
+
+  test "connect/4 raises if :log is not a boolean", %{port: port} do
+    assert_raise ArgumentError, "the :log option must be a boolean, got: :not_a_bool", fn ->
+      HTTP1.connect(:http, "localhost", port, log: :not_a_bool)
     end
   end
 
