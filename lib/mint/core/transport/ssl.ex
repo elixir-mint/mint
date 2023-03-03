@@ -335,7 +335,6 @@ defmodule Mint.Core.Transport.SSL do
           {:ok, sslsocket}
 
         _error ->
-          dbg()
           wrap_err(:ssl.connect(address, port, opts, timeout))
       end
     else
