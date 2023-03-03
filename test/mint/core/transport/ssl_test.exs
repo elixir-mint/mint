@@ -164,6 +164,48 @@ defmodule Mint.Core.Transport.SSLTest do
     end
   end
 
+  describe "connect/3" do
+    test "can connect to IPv6 addresses" do
+      ssl_opts = [
+        :inet6,
+        mode: :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        nodelay: true,
+        certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
+        keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
+      ]
+
+      {:ok, listen_socket} = :ssl.listen(0, ssl_opts)
+      {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+
+      task =
+        Task.async(fn ->
+          with {:ok, socket} <- :ssl.transport_accept(listen_socket) do
+            if function_exported?(:ssl, :handshake, 1) do
+              {:ok, _} = apply(:ssl, :handshake, [socket])
+            else
+              :ok = apply(:ssl, :ssl_accept, [socket])
+            end
+
+            {:ok, socket}
+          end
+        end)
+
+      assert {:ok, _socket} =
+               SSL.connect({0, 0, 0, 0, 0, 0, 0, 1}, port,
+                 active: false,
+                 inet6: true,
+                 hostname: "::1",
+                 timeout: 1000,
+                 verify: :verify_none
+               )
+
+      assert {:ok, _server_socket} = Task.await(task)
+    end
+  end
+
   describe "controlling_process/2" do
     @describetag :capture_log
 
@@ -268,6 +310,14 @@ defmodule Mint.Core.Transport.SSLTest do
       :ok = SSL.close(socket)
 
       assert {:error, _error} = SSL.controlling_process(socket, other_process)
+    end
+  end
+
+  describe "upgrade/4" do
+    test "raises an error if the scheme is :https" do
+      assert_raise RuntimeError, "nested SSL sessions are not supported", fn ->
+        SSL.upgrade(_fake_socket = nil, :https, 'localhost', _port = 0, _timeout = 5000)
+      end
     end
   end
 
