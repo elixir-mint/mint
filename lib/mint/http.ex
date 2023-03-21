@@ -96,7 +96,7 @@ defmodule Mint.HTTP do
   [`:public_key.cacerts_get/0`](https://www.erlang.org/doc/man/public_key.html#cacerts_get-0).
   If you are using OTP 25+ it is recommended to set this option.
 
-      Mint.connect(:https, host, port, transport_opts: [cacerts: :public_key.cacerts_get()])
+      Mint.HTTP.connect(:https, host, port, transport_opts: [cacerts: :public_key.cacerts_get()])
 
   ## Mode
 
