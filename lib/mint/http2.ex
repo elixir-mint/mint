@@ -1408,9 +1408,7 @@ defmodule Mint.HTTP2 do
 
   defp handle_consumed_all_frames(%{state: state} = conn, responses) do
     case state do
-      {:goaway, :no_error, debug_data} ->
-        message = "Server closed connection normally (with debug data: #{inspect(debug_data)})"
-        log(conn, :debug, message)
+      {:goaway, :no_error, _debug_data} ->
         {conn, responses}
 
       {:goaway, error_code, debug_data} ->
@@ -1994,6 +1992,14 @@ defmodule Mint.HTTP2 do
           conn_acc = delete_stream(conn_acc, stream)
           {[{:error, stream.ref, wrap_error(:unprocessed)}], conn_acc}
       end)
+
+    message =
+      case error_code do
+        :no_error -> "Server closed connection normally"
+        _other -> "Server closed connection with error #{inspect(error_code)}"
+      end
+
+    log(conn, :debug, "#{message} (with debug data: #{inspect(debug_data)})")
 
     conn = put_in(conn.state, {:goaway, error_code, debug_data})
     {conn, unprocessed_request_responses ++ responses}
