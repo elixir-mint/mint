@@ -1,12 +1,16 @@
 defmodule Mint.HTTP1.Headers do
   alias Mint.Core.Util
 
-  # format of headers is [{header_name, canonical_header_name, value}]
+  @type header() ::
+          {original_name :: String.t(), canonical_name :: String.t(), value :: String.t()}
+  @type raw_header() :: {original_name :: String.t(), value :: String.t()}
 
+  @spec from_raw_headers([raw_header()]) :: [header()]
   def from_raw_headers(headers) do
     for {name, value} <- headers, do: {name, Util.downcase_ascii(name), value}
   end
 
+  @spec to_raw_headers([header()], boolean()) :: [raw_header()]
   def to_raw_headers(headers, downcase_headers) do
     if downcase_headers do
       for {_name, canonical_name, value} <- headers do
