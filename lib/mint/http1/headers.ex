@@ -32,7 +32,7 @@ defmodule Mint.HTTP1.Headers do
   end
 
   # name is required to be downcase ascii
-  def contains_header(headers, name) do
+  def has_header?(headers, name) do
     List.keymember?(headers, name, 1)
   end
 

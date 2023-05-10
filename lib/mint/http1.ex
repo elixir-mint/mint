@@ -998,7 +998,7 @@ defmodule Mint.HTTP1 do
 
   defp add_content_length_or_transfer_encoding(headers, :stream) do
     cond do
-      Headers.contains_header(headers, "content-length") ->
+      Headers.has_header?(headers, "content-length") ->
         {:ok, headers, :identity}
 
       found = Headers.find_header(headers, "transfer-encoding") ->
