@@ -751,7 +751,7 @@ defmodule Mint.HTTP1Test do
           conn,
           "GET",
           "/",
-          [{"User-Agent", "myapp/1.0"}, {"Host", "localhost"}, {"Transfer-Encoding", "gzip"}],
+          [{"User-Agent", "myapp/1.0"}, {"Host", "localhost"}, {"TRANSFER-ENCODING", "gzip"}],
           :stream
         )
 
@@ -760,7 +760,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                User-Agent: myapp/1.0
                Host: localhost
-               Transfer-Encoding: gzip,chunked
+               TRANSFER-ENCODING: gzip,chunked
 
                """)
     end
