@@ -11,13 +11,13 @@ defmodule Mint.HTTP1.Headers do
   end
 
   @spec to_raw_headers([header()], boolean()) :: [raw_header()]
-  def to_raw_headers(headers, downcase_headers) do
-    if downcase_headers do
+  def to_raw_headers(headers, case_sensitive_headers) do
+    if case_sensitive_headers do
+      Enum.map(headers, fn {name, _canonical_name, value} -> {name, value} end)
+    else
       Enum.map(headers, fn {_name, canonical_name, value} ->
         {canonical_name, value}
       end)
-    else
-      Enum.map(headers, fn {name, _canonical_name, value} -> {name, value} end)
     end
   end
 

@@ -652,8 +652,7 @@ defmodule Mint.HTTP1Test do
     end
 
     test "non lower case headers", %{port: port, server_ref: server_ref} do
-      assert {:ok, conn} =
-               HTTP1.connect(:http, "localhost", port, downcase_request_headers: false)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
 
       assert_receive {^server_ref, server_socket}
       body = "body"
@@ -684,8 +683,7 @@ defmodule Mint.HTTP1Test do
     end
 
     test "non lower case headers using defaults", %{port: port, server_ref: server_ref} do
-      assert {:ok, conn} =
-               HTTP1.connect(:http, "localhost", port, downcase_request_headers: false)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
 
       assert_receive {^server_ref, server_socket}
       body = "body"
@@ -716,8 +714,7 @@ defmodule Mint.HTTP1Test do
       port: port,
       server_ref: server_ref
     } do
-      assert {:ok, conn} =
-               HTTP1.connect(:http, "localhost", port, downcase_request_headers: false)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
 
       assert_receive {^server_ref, server_socket}
 
@@ -741,8 +738,7 @@ defmodule Mint.HTTP1Test do
     end
 
     test "non lower case headers gzip encoding", %{port: port, server_ref: server_ref} do
-      assert {:ok, conn} =
-               HTTP1.connect(:http, "localhost", port, downcase_request_headers: false)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
 
       assert_receive {^server_ref, server_socket}
 

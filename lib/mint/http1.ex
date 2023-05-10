@@ -94,7 +94,7 @@ defmodule Mint.HTTP1 do
     :transport,
     :mode,
     :scheme_as_string,
-    :downcase_request_headers,
+    :case_sensitive_headers,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -119,6 +119,13 @@ defmodule Mint.HTTP1 do
   Same as `Mint.HTTP.connect/4`, but forces an HTTP/1 or HTTP/1.1 connection.
 
   This function doesn't support proxying.
+
+  ## Additional Options
+
+    * `:case_sensitive_headers` - (boolean) if set to true the case of the supplied
+       headers in requests will be preserved. The default is to lowercase the headers
+       because http/1.1 header names are not case-insensitive.
+
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
           {:ok, t()} | {:error, Types.error()}
@@ -195,7 +202,7 @@ defmodule Mint.HTTP1 do
         scheme_as_string: Atom.to_string(scheme),
         state: :open,
         log: log?,
-        downcase_request_headers: Keyword.get(opts, :downcase_request_headers, true)
+        case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false)
       }
 
       {:ok, conn}
@@ -273,7 +280,7 @@ defmodule Mint.HTTP1 do
            Request.encode(
              method,
              path,
-             Headers.to_raw_headers(headers, conn.downcase_request_headers),
+             Headers.to_raw_headers(headers, conn.case_sensitive_headers),
              body
            ),
          :ok <- transport.send(socket, iodata) do
