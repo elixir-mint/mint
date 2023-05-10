@@ -1009,7 +1009,7 @@ defmodule Mint.HTTP1 do
             {:ok, headers, :identity}
           else
             headers =
-              Headers.replace_header(headers, "transfer-encoding", raw_name, value <> ",chunked")
+              Headers.replace_header(headers, raw_name, "transfer-encoding", value <> ",chunked")
 
             {:ok, headers, :chunked}
           end

@@ -27,8 +27,8 @@ defmodule Mint.HTTP1.Headers do
 
   # name is required to be downcase ascii
   # downcase_ascii(new_name) == name
-  def replace_header(headers, name, new_name, value) do
-    List.keyreplace(headers, name, 1, {new_name, name, value})
+  def replace_header(headers, new_name, canonical_name, value) do
+    List.keyreplace(headers, canonical_name, 1, {new_name, canonical_name, value})
   end
 
   # name is required to be downcase ascii
