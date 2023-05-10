@@ -7,17 +7,17 @@ defmodule Mint.HTTP1.Headers do
 
   @spec from_raw_headers([raw_header()]) :: [header()]
   def from_raw_headers(headers) do
-    for {name, value} <- headers, do: {name, Util.downcase_ascii(name), value}
+    Enum.map(headers, fn {name, value} -> {name, Util.downcase_ascii(name), value} end)
   end
 
   @spec to_raw_headers([header()], boolean()) :: [raw_header()]
   def to_raw_headers(headers, downcase_headers) do
     if downcase_headers do
-      for {_name, canonical_name, value} <- headers do
+      Enum.map(headers, fn {_name, canonical_name, value} ->
         {canonical_name, value}
-      end
+      end)
     else
-      for {name, _canonical_name, value} <- headers, do: {name, value}
+      Enum.map(headers, fn {name, _canonical_name, value} -> {name, value} end)
     end
   end
 
