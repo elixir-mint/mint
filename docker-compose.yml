@@ -15,4 +15,11 @@ services:
     image: kennethreitz/httpbin:latest
     ports:
       - "8080:80"
-      - "8443:443"
+
+  caddyhttpbin:
+    image: caddy:2.6.4-alpine
+    volumes:
+      - "./caddy_storage:/caddy_storage"
+      - "./Caddyfile:/etc/caddy/Caddyfile"
+    ports:
+      - "8443:8443"

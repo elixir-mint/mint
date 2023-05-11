@@ -3,7 +3,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.{TransportError, HTTP1}
+  alias Mint.{TransportError, HTTP1, HttpBin}
 
   describe "local httpbin" do
     test "200 response" do
@@ -101,20 +101,25 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   describe "httpbin.org" do
-    @describetag :requires_internet_connection
-
     test "timeout with http" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, "httpbin.org", 80, transport_opts: [timeout: 0])
+               HTTP1.connect(:http, HttpBin.host(), HttpBin.http_port(),
+                 transport_opts: [timeout: 0]
+               )
     end
 
     test "timeout with https" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:https, "httpbin.org", 443, transport_opts: [timeout: 0])
+               HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: [timeout: 0]
+               )
     end
 
     test "keep alive" do
-      assert {:ok, conn} = HTTP1.connect(:https, "httpbin.org", 443)
+      assert {:ok, conn} =
+               HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: HttpBin.https_transport_opts()
+               )
 
       assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
@@ -125,7 +130,10 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert {:headers, ^request, _} = headers
       assert merge_body(responses, request) =~ "Other Utilities"
 
-      assert {:ok, conn} = HTTP1.connect(:https, "httpbin.org", 443)
+      assert {:ok, conn} =
+               HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: HttpBin.https_transport_opts()
+               )
 
       assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
@@ -141,8 +149,8 @@ defmodule Mint.HTTP1.IntegrationTest do
       assert {:error, %TransportError{reason: reason}} =
                HTTP1.connect(
                  :https,
-                 "httpbin.org",
-                 443,
+                 HttpBin.host(),
+                 HttpBin.https_port(),
                  transport_opts: [
                    cacertfile: "test/support/empty_cacerts.pem",
                    log_alert: false,
@@ -157,7 +165,10 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "SSL, path, long body" do
-      assert {:ok, conn} = HTTP1.connect(:https, "httpbin.org", 443)
+      assert {:ok, conn} =
+               HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: HttpBin.https_transport_opts()
+               )
 
       assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/bytes/50000", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)

@@ -4,6 +4,7 @@ defmodule HTTP2.IntegrationTest do
   import Mint.HTTP2.TestHelpers
 
   alias Mint.HTTP2
+  alias Mint.HttpBin
 
   @moduletag :requires_internet_connection
 
@@ -17,8 +18,12 @@ defmodule HTTP2.IntegrationTest do
 
     case Map.fetch(context, :connect) do
       {:ok, {host, port}} ->
+        extra_transport_opts = Map.get(context, :transport_opts, [])
+
         assert {:ok, %HTTP2{} = conn} =
-                 HTTP2.connect(:https, host, port, transport_opts: transport_opts)
+                 HTTP2.connect(:https, host, port,
+                   transport_opts: transport_opts ++ extra_transport_opts
+                 )
 
         [conn: conn]
 
@@ -45,7 +50,8 @@ defmodule HTTP2.IntegrationTest do
   end
 
   describe "httpbin.org" do
-    @describetag connect: {"httpbin.org", 443}
+    @describetag connect: {HttpBin.host(), HttpBin.https_port()},
+                 transport_opts: HttpBin.https_transport_opts()
 
     test "GET /user-agent", %{conn: conn} do
       assert {:ok, %HTTP2{} = conn, req_id} = HTTP2.request(conn, "GET", "/user-agent", [], nil)
@@ -56,7 +62,6 @@ defmodule HTTP2.IntegrationTest do
                {:status, ^req_id, 200},
                {:headers, ^req_id, headers},
                {:data, ^req_id, data},
-               {:data, ^req_id, ""},
                {:done, ^req_id}
              ] = responses
 

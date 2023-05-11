@@ -4,6 +4,7 @@ defmodule Mint.TunnelProxyTest do
   import Mint.HTTP1.TestHelpers
 
   alias Mint.HTTP
+  alias Mint.HttpBin
 
   @moduletag :proxy
   @moduletag :requires_internet_connection
@@ -15,7 +16,7 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:http, "httpbin.org", 80, []}
+               {:http, HttpBin.proxy_host(), HttpBin.http_port(), []}
              )
 
     assert conn.__struct__ == Mint.HTTP1
@@ -37,7 +38,8 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "httpbin.org", 443, []}
+               {:https, HttpBin.proxy_host(), HttpBin.https_port(),
+                transport_opts: HttpBin.https_transport_opts()}
              )
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -52,16 +54,20 @@ defmodule Mint.TunnelProxyTest do
 
   test "407 response - proxy with missing authentication" do
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 407}}}} =
-             Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8889, []})
+             Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
+               proxy: {:http, "localhost", 8889, []},
+               transport_opts: HttpBin.https_transport_opts()
+             )
   end
 
   test "401 response - proxy with invalid authentication" do
     invalid_auth64 = Base.encode64("test:wrong_password")
 
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 401}}}} =
-             Mint.HTTP.connect(:https, "httpbin.org", 443,
+             Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
                proxy: {:http, "localhost", 8889, []},
-               proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]
+               proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}],
+               transport_opts: HttpBin.https_transport_opts()
              )
   end
 
@@ -69,9 +75,10 @@ defmodule Mint.TunnelProxyTest do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
-             Mint.HTTP.connect(:https, "httpbin.org", 443,
+             Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
                proxy: {:http, "localhost", 8889, []},
-               proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
+               proxy_headers: [{"proxy-authorization", "basic #{auth64}"}],
+               transport_opts: HttpBin.https_transport_opts()
              )
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -88,7 +95,8 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "httpbin.org", 443, [protocols: [:http2]]}
+               {:https, HttpBin.proxy_host(), HttpBin.https_port(),
+                [protocols: [:http2], transport_opts: HttpBin.https_transport_opts()]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -110,7 +118,8 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:http, "localhost", 8888, []},
-               {:https, "httpbin.org", 443, [protocols: [:http1, :http2]]}
+               {:https, HttpBin.proxy_host(), HttpBin.https_port(),
+                [protocols: [:http1, :http2], transport_opts: HttpBin.https_transport_opts()]}
              )
 
     assert conn.__struct__ == Mint.HTTP2
@@ -133,7 +142,8 @@ defmodule Mint.TunnelProxyTest do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
                {:https, "localhost", 8888, []},
-               {:https, "httpbin.org", 443, []}
+               {:https, HttpBin.proxy_host(), HttpBin.https_port(),
+                [transport_opts: HttpBin.https_transport_opts()]}
              )
 
     assert conn.__struct__ == Mint.HTTP1
