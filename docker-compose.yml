@@ -22,7 +22,7 @@ services:
     # by caddy. however, in linux these end up being owned by root
     # because the container by defaults runs using the root user
     # and we are not root in the gh action so cannot access them
-    user: "${UID}:${GID}"
+    user: "${DOCKER_USER}"
     volumes:
       - "./caddy_storage:/caddy_storage"
       - "./Caddyfile:/etc/caddy/Caddyfile"
