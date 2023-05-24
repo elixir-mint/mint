@@ -18,6 +18,11 @@ services:
 
   caddyhttpbin:
     image: caddy:2.6.4-alpine
+    # in github actions we want to access the files created
+    # by caddy. however, in linux these end up being owned by root
+    # because the container by defaults runs using the root user
+    # and we are not root in the gh action so cannot access them
+    user: "${UID}:${GID}"
     volumes:
       - "./caddy_storage:/caddy_storage"
       - "./Caddyfile:/etc/caddy/Caddyfile"
