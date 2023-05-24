@@ -100,21 +100,19 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
   end
 
-  describe "httpbin.org" do
+  describe "twitter.com" do
     test "timeout with http" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, HttpBin.host(), HttpBin.http_port(),
-                 transport_opts: [timeout: 0]
-               )
+               HTTP1.connect(:http, "twitter.com", 80, transport_opts: [timeout: 0])
     end
 
     test "timeout with https" do
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
-                 transport_opts: [timeout: 0]
-               )
+               HTTP1.connect(:https, "twitter.com", 443, transport_opts: [timeout: 0])
     end
+  end
 
+  describe "httpbin.org" do
     test "keep alive" do
       assert {:ok, conn} =
                HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
