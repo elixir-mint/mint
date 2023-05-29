@@ -67,7 +67,7 @@ iex> receive do
 
 In the example above, we get all the responses as a single SSL message, but that might not always be the case. This means that `Mint.HTTP.stream/2` might not always return responses.
 
-The connection API is *stateless*, whihc means that you need to make sure to always save the connection that functions return:
+The connection API is *stateless*, which means that you need to make sure to always save the connection that functions return:
 
 ```elixir
 # Wrong ❌
