@@ -24,26 +24,27 @@ end
 
 This function handles the response back to the blocked process that's waiting for the HTTP response. You'll see that it returns `{:ok, response}` with `response` being a map with `:status`, `:headers`, and `:data` fields.
 
-We need to attempt to decompress the data if the `content-encoding` header is present. We're going to work with `content-encoding`, but the same applies if compression is used in  `transfer-encoding`. First, we're going to find the header. Let's add a function to do that:
+We need to attempt to decompress the data if the `content-encoding` header is present. We're going to work with `content-encoding`, but the same applies if compression is used in `transfer-encoding`. Let's add a function that finds all applied compression algorithms.
 
 ```elixir
 # Returns a list of found compressions or [] if none found.
 defp get_content_encoding_header(headers) do
-  Enum.find_value(headers, [], fn {name, value} ->
+  headers
+  |> Enum.flat_map([], fn {name, value} ->
     if String.downcase(name) == "content-encoding" do
       value
       |> String.downcase()
       |> String.split(",", trim: true)
       |> Stream.map(&String.trim/1)
-      |> Enum.reverse()
     else
-      nil
+      []
     end
   end)
+  |> Enum.reverse()
 end
 ```
 
-Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip and deflate algorithms.
+We use a combination of `Enum.flat_map/3` and `String.split/3` because the values can be comma-separated and spread over multiple headers. Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip and deflate algorithms.
 
 ```elixir
 defp decompress_data(data, algorithms) do
