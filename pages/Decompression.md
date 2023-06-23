@@ -10,7 +10,7 @@ Mint is a low-level client so it doesn't have built-in support for decompression
 
 ## Decompressing the response body
 
-Starting with the [architecture example](architecture.html#content), we're going add some logic to handle a finished request's compressed body. With some compression algorithms, it's possible to decompress body chunks as they come (in a streaming way), but let's look at an example that works for every compression algorithm by decompressing the whole response body when the response is done.
+Starting with the [architecture example](Architecture.md#content), we're going add some logic to handle a finished request's compressed body. With some compression algorithms, it's possible to decompress body chunks as they come (in a streaming way), but let's look at an example that works for every compression algorithm by decompressing the whole response body when the response is done.
 
 This is where we start:
 
