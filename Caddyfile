@@ -1,0 +1,21 @@
+{
+	local_certs
+	skip_install_trust
+	storage file_system /caddy_storage
+}
+
+https://localhost:8443 {
+	reverse_proxy httpbin:80
+}
+
+http://localhost:8080 {
+	reverse_proxy httpbin:80
+}
+
+https://caddyhttpbin:8443 {
+	reverse_proxy httpbin:80
+}
+
+http://caddyhttpbin:8080 {
+	reverse_proxy httpbin:80
+}

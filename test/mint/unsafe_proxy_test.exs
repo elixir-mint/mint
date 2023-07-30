@@ -3,13 +3,17 @@ defmodule Mint.UnsafeProxyTest do
   import Mint.HTTP1.TestHelpers
   alias Mint.UnsafeProxy
   alias Mint.HTTP
+  alias Mint.HttpBin
 
   @moduletag :proxy
   @moduletag :requires_internet_connection
 
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
-             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+             UnsafeProxy.connect(
+               {:http, "localhost", 8888},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+             )
 
     assert {:ok, conn, request} = UnsafeProxy.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
@@ -23,7 +27,9 @@ defmodule Mint.UnsafeProxyTest do
 
   test "407 response - proxy with missing authentication" do
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8889, []})
+             HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
+               proxy: {:http, "localhost", 8889, []}
+             )
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
     assert {:ok, _conn, responses} = receive_stream(conn)
@@ -35,7 +41,7 @@ defmodule Mint.UnsafeProxyTest do
     invalid_auth64 = Base.encode64("test:wrong_password")
 
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80,
+             HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
                proxy: {:http, "localhost", 8889, []},
                proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]
              )
@@ -50,7 +56,7 @@ defmodule Mint.UnsafeProxyTest do
     auth64 = Base.encode64("test:password")
 
     assert {:ok, conn} =
-             HTTP.connect(:http, "httpbin.org", 80,
+             HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
                proxy: {:http, "localhost", 8889, []},
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
@@ -66,7 +72,10 @@ defmodule Mint.UnsafeProxyTest do
 
   test "Mint.HTTP.protocol/1 on an unsafe proxy connection" do
     assert {:ok, %UnsafeProxy{} = conn} =
-             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+             UnsafeProxy.connect(
+               {:http, "localhost", 8888},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+             )
 
     assert Mint.HTTP.protocol(conn) == :http1
   end
@@ -76,7 +85,10 @@ defmodule Mint.UnsafeProxyTest do
     import Mint.HTTP, only: [is_connection_message: 2]
 
     assert {:ok, %UnsafeProxy{state: %{socket: socket}} = conn} =
-             UnsafeProxy.connect({:http, "localhost", 8888}, {:http, "httpbin.org", 80})
+             UnsafeProxy.connect(
+               {:http, "localhost", 8888},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+             )
 
     assert is_connection_message(conn, {:tcp, socket, "foo"}) == true
     assert is_connection_message(conn, {:tcp_closed, socket}) == true

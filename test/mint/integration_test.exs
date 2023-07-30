@@ -3,7 +3,7 @@ defmodule Mint.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.{TransportError, HTTP}
+  alias Mint.{TransportError, HTTP, HttpBin}
 
   @moduletag :requires_internet_connection
 
@@ -149,7 +149,9 @@ defmodule Mint.IntegrationTest do
 
     test "200 response - http://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:http, "httpbin.org", 80, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
+                 proxy: {:http, "localhost", 8888, []}
+               )
 
       assert conn.__struct__ == Mint.UnsafeProxy
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -164,7 +166,10 @@ defmodule Mint.IntegrationTest do
 
     test "200 response - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpbin.org", 443, proxy: {:http, "localhost", 8888, []})
+               HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
+                 proxy: {:http, "localhost", 8888, []},
+                 transport_opts: HttpBin.https_transport_opts()
+               )
 
       assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
@@ -178,9 +183,10 @@ defmodule Mint.IntegrationTest do
 
     test "200 response with explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpbin.org", 443,
+               HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
                  proxy: {:http, "localhost", 8888, []},
-                 protocols: [:http2]
+                 protocols: [:http2],
+                 transport_opts: HttpBin.https_transport_opts()
                )
 
       assert conn.__struct__ == Mint.HTTP2
@@ -196,9 +202,10 @@ defmodule Mint.IntegrationTest do
 
     test "200 response without explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
-               HTTP.connect(:https, "httpbin.org", 443,
+               HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
                  proxy: {:http, "localhost", 8888, []},
-                 protocols: [:http1, :http2]
+                 protocols: [:http1, :http2],
+                 transport_opts: HttpBin.https_transport_opts()
                )
 
       assert conn.__struct__ == Mint.HTTP2

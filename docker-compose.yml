@@ -15,4 +15,16 @@ services:
     image: kennethreitz/httpbin:latest
     ports:
       - "8080:80"
-      - "8443:443"
+
+  caddyhttpbin:
+    image: caddy:2.6.4-alpine
+    # in github actions we want to access the files created
+    # by caddy. however, in linux these end up being owned by root
+    # because the container by defaults runs using the root user
+    # and we are not root in the gh action so cannot access them
+    user: "${DOCKER_USER}"
+    volumes:
+      - "./caddy_storage:/caddy_storage"
+      - "./Caddyfile:/etc/caddy/Caddyfile"
+    ports:
+      - "8443:8443"
