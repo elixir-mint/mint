@@ -1,8 +1,8 @@
 # Decompression
 
-Many web servers use compression to reduce the size of the payload to speed up delivery to clients, expecting clients to decompress the body of the request. Some of the common compression algorithms used are [gzip], [brotli], [deflate], or no compression at all.
+Many web servers use compression to reduce the size of the payload to speed up delivery to clients, expecting clients to decompress the body of the request. Some of the common compression algorithms used are [gzip], [brotli], [zstd], or no compression at all.
 
-Clients may specify acceptable compression algorithms through the [`accept-encoding`][accept-encoding] request header. It's common for clients to supply one or more values in `accept-encoding`, for example `accept-encoding: gzip, deflate, identity` in the order of preference.
+Clients may specify acceptable compression algorithms through the [`accept-encoding`][accept-encoding] request header. It's common for clients to supply one or more values in `accept-encoding`, for example `accept-encoding: gzip, br` in the order of preference.
 
 Servers will read the `accept-encoding` and `TE` request headers, and respond appropriately indicating which compression is used in the response body through the [`content-encoding`][content-encoding] or [`transfer-encoding`][transfer-encoding] response headers respectively. It's not as common to use multiple compression algorithms, but it is possible: for example, `content-encoding: gzip` or `content-encoding: br, gzip` (meaning it was compressed with `br` first, and then `gzip`).
 
@@ -44,7 +44,7 @@ defp get_content_encoding_header(headers) do
 end
 ```
 
-We use a combination of `Enum.flat_map/3` and `String.split/3` because the values can be comma-separated and spread over multiple headers. Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip and deflate algorithms.
+We use a combination of `Enum.flat_map/3` and `String.split/3` because the values can be comma-separated and spread over multiple headers. Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip algorithm.
 
 ```elixir
 defp decompress_data(data, algorithms) do
@@ -53,9 +53,6 @@ end
 
 defp decompress_with_algorithm(gzip, data) when gzip in ["gzip", "x-gzip"],
   do: :zlib.gunzip(data)
-
-defp decompress_with_algorithm("deflate", data),
-  do: :zlib.unzip(data)
 
 defp decompress_with_algorithm("identity", data),
   do: data
@@ -87,7 +84,7 @@ Now you can decompress responses! Above is a simple approach to a potentially co
 
 [gzip]: https://tools.ietf.org/html/rfc1952
 [brotli]: https://tools.ietf.org/html/rfc7932
-[deflate]: https://tools.ietf.org/html/rfc1951
+[ztsd]: https://tools.ietf.org/html/rfc8478
 [accept-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
 [content-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Encoding
 [transfer-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding
