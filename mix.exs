@@ -75,7 +75,7 @@ defmodule Mint.MixProject do
       # Dev/test dependencies
       {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.20", only: :dev},
-      {:excoveralls, "~> 0.14.5", only: :test},
+      {:excoveralls, "~> 0.17.0", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 0.5.0", only: [:dev, :test]}
     ]
