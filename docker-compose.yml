@@ -24,7 +24,7 @@ services:
     # and we are not root in the gh action so cannot access them
     user: "${DOCKER_USER}"
     volumes:
-      - "./caddy_storage:/caddy_storage"
-      - "./Caddyfile:/etc/caddy/Caddyfile"
+      - "./caddy_storage:/caddy_storage:z"
+      - "./Caddyfile:/etc/caddy/Caddyfile:z"
     ports:
       - "8443:8443"
