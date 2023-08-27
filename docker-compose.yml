@@ -24,6 +24,8 @@ services:
     # and we are not root in the gh action so cannot access them
     user: "${DOCKER_USER}"
     volumes:
+      # The :z mount option solves issues with SELinux.
+      # See https://github.com/elixir-mint/mint/pull/406. 
       - "./caddy_storage:/caddy_storage:z"
       - "./Caddyfile:/etc/caddy/Caddyfile:z"
     ports:
