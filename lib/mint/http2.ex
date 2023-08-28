@@ -232,12 +232,21 @@ defmodule Mint.HTTP2 do
       conn = unquote(conn)
 
       if conn.log do
-        Logger.log(unquote(level), unquote(message))
+        Logger.log(normalize_logger_level(unquote(level)), unquote(message))
       else
         :ok
       end
     end
   end
+
+  # TODO: remove this once we depend on Elixir 1.11+.
+  if macro_exported?(Logger, :warning, 2) do
+    defp normalize_logger_level(:warning), do: :warning
+  else
+    defp normalize_logger_level(:warning), do: :warn
+  end
+
+  defp normalize_logger_level(level), do: level
 
   ## Types
 
@@ -1738,7 +1747,7 @@ defmodule Mint.HTTP2 do
 
   # For now we ignore all PRIORITY frames. This shouldn't cause practical trouble.
   defp handle_priority(conn, frame, responses) do
-    log(conn, :warn, "Ignoring PRIORITY frame: #{inspect(frame)}")
+    log(conn, :warning, "Ignoring PRIORITY frame: #{inspect(frame)}")
     {conn, responses}
   end
 
@@ -1824,7 +1833,12 @@ defmodule Mint.HTTP2 do
         apply_client_settings(conn, params)
 
       {:empty, conn} ->
-        log(conn, :warn, "Received SETTINGS ACK but client is not waiting for ACKs; ignoring it")
+        log(
+          conn,
+          :warning,
+          "Received SETTINGS ACK but client is not waiting for ACKs; ignoring it"
+        )
+
         conn
     end
   end
@@ -1963,11 +1977,11 @@ defmodule Mint.HTTP2 do
         {conn, [{:pong, ref} | responses]}
 
       {:value, _} ->
-        log(conn, :warn, "Received PING ack that doesn't match next PING request in the queue")
+        log(conn, :warning, "Received PING ack that doesn't match next PING request in the queue")
         {conn, responses}
 
       :empty ->
-        log(conn, :warn, "Received PING ack but no PING requests are pending")
+        log(conn, :warning, "Received PING ack but no PING requests are pending")
         {conn, responses}
     end
   end

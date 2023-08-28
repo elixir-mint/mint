@@ -24,7 +24,9 @@ defmodule Mint.MixProject do
 
       # Dialyxir
       dialyzer: [
-        plt_add_apps: [:castore]
+        plt_add_apps: [:castore],
+        plt_local_path: "plts",
+        plt_core_path: "plts"
       ],
 
       # Code coverage
@@ -73,9 +75,9 @@ defmodule Mint.MixProject do
       {:hpax, "~> 0.1.1"},
 
       # Dev/test dependencies
-      {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.3.0", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.20", only: :dev},
-      {:excoveralls, "~> 0.14.5", only: :test},
+      {:excoveralls, "~> 0.17.0", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 0.5.0", only: [:dev, :test]}
     ]

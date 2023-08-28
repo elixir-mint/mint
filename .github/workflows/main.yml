@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - erlang: "25.2"
-            elixir: "1.14"
+          - erlang: "26.0.2"
+            elixir: "1.15"
             lint: true
             coverage: true
             dialyzer: true
@@ -47,7 +47,10 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          key: |
+            ${{ runner.os }}-mix-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-
 
       - name: Install and compile dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
@@ -56,15 +59,18 @@ jobs:
       # Don't cache PLTs based on mix.lock hash, as Dialyzer can incrementally update even old ones
       # Cache key based on Elixir & Erlang version (also useful when running in matrix)
       - name: Cache Dialyzer's PLT
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-plt
         with:
-          path: priv/plts
-          key: ${{ runner.os }}-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}
+          path: plts
+          key: |
+            ${{ runner.os }}-plt-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-
 
       # Create PLTs if no cache was found
       - name: Create PLTs
-        if: ${{matrix.dialyzer && steps.cache-plt.outputs.cache-hit != 'true'}}
+        if: ${{ matrix.dialyzer && steps.cache-plt.outputs.cache-hit != 'true' }}
         run: mix dialyzer --plt
 
       - name: Start docker

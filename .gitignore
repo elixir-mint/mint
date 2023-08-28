@@ -24,3 +24,5 @@ mint-*.tar
 
 /caddy_storage
 
+/plts/*.plt
+/plts/*.plt.hash

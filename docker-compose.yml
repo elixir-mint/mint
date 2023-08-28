@@ -18,14 +18,14 @@ services:
 
   caddyhttpbin:
     image: caddy:2.6.4-alpine
-    # in github actions we want to access the files created
-    # by caddy. however, in linux these end up being owned by root
-    # because the container by defaults runs using the root user
-    # and we are not root in the gh action so cannot access them
+    # In GitHub Actions we want to access the files created
+    # by Caddy. However, in Linux these end up being owned by root
+    # because the container by default runs using the root user
+    # and we are not root in the GH action so we cannot access them.
     user: "${DOCKER_USER}"
     volumes:
       # The :z mount option solves issues with SELinux.
-      # See https://github.com/elixir-mint/mint/pull/406. 
+      # See https://github.com/elixir-mint/mint/pull/406.
       - "./caddy_storage:/caddy_storage:z"
       - "./Caddyfile:/etc/caddy/Caddyfile:z"
     ports:

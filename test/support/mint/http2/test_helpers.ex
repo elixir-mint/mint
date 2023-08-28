@@ -9,18 +9,24 @@ defmodule Mint.HTTP2.TestHelpers do
   defp receive_stream(conn, responses) do
     assert_receive message, 10_000
 
+    {tag, closed_tag, error_tag} =
+      case conn.transport do
+        Mint.Core.Transport.TCP -> {:tcp, :tcp_closed, :tcp_error}
+        Mint.Core.Transport.SSL -> {:ssl, :ssl_closed, :ssl_error}
+      end
+
     case message do
       {:rest, conn, rest_responses} ->
         maybe_done(conn, rest_responses, responses)
 
-      {tag, _socket, _data} = message when tag in [:tcp, :ssl] ->
+      {^tag, _socket, _data} = message ->
         assert {:ok, %Mint.HTTP2{} = conn, new_responses} = Mint.HTTP2.stream(conn, message)
         maybe_done(conn, new_responses, responses)
 
-      {tag, _socket} = message when tag in [:tcp_closed, :ssl_closed] ->
+      {^closed_tag, _socket} = message ->
         assert {:error, %Mint.HTTP2{}, :closed} = Mint.HTTP2.stream(conn, message)
 
-      {tag, _reason} = message when tag in [:tcp_error, :ssl_error] ->
+      {^error_tag, _reason} = message ->
         assert {:error, %Mint.HTTP2{}, _reason} = Mint.HTTP2.stream(conn, message)
 
       other ->
