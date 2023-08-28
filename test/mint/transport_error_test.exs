@@ -18,7 +18,7 @@ defmodule Mint.TransportErrorTest do
     test "with an SSL reason" do
       # OTP 21.3 changes the reasons used in :ssl.error_alert/0. For simplicity let's
       # just accept both ways.
-      error = %TransportError{reason: {:tls_alert, 'unknown ca'}}
+      error = %TransportError{reason: {:tls_alert, ~c"unknown ca"}}
       assert Exception.message(error) in ["TLS Alert: unknown ca", "{:tls_alert, 'unknown ca'}"]
     end
 

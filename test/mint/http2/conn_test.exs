@@ -166,7 +166,7 @@ defmodule Mint.HTTP2Test do
 
     test "closes the transport socket if anything goes wrong during the setup",
          %{server_port: port} do
-      {:ok, socket} = :ssl.connect('localhost', port, verify: :verify_none)
+      {:ok, socket} = :ssl.connect(~c"localhost", port, verify: :verify_none)
 
       TransportMock
       |> expect(:getopts, fn ^socket, _opts -> {:error, Transport.SSL.wrap_error(:einval)} end)

@@ -5,13 +5,13 @@ defmodule Mint.HTTP1.Parse do
 
   defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
   defmacro is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
-  defmacro is_whitespace(char), do: quote(do: unquote(char) in '\s\t')
+  defmacro is_whitespace(char), do: quote(do: unquote(char) in ~c"\s\t")
   defmacro is_comma(char), do: quote(do: unquote(char) == ?,)
   defmacro is_vchar(char), do: quote(do: unquote(char) in 33..126)
 
   defmacro is_tchar(char) do
     quote do
-      is_digit(unquote(char)) or is_alpha(unquote(char)) or unquote(char) in '!#$%&\'*+-.^_`|~'
+      is_digit(unquote(char)) or is_alpha(unquote(char)) or unquote(char) in ~c"!#$%&'*+-.^_`|~"
     end
   end
 

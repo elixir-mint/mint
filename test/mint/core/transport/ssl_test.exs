@@ -39,29 +39,29 @@ defmodule Mint.Core.Transport.SSLTest do
     setup [:wildcard_san_cert]
 
     test "custom match fun for wildcard in SAN", %{cert: cert} do
-      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: 'outlook.office365.com')
+      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: ~c"outlook.office365.com")
 
-      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: 'Outlook.office365.COM')
+      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: ~c"Outlook.office365.COM")
 
       assert {:valid, _} =
                SSL.verify_fun(
                  cert,
                  :valid_peer,
-                 dns_id: 'test.outlook.office365.com'
+                 dns_id: ~c"test.outlook.office365.com"
                )
 
       assert {:valid, _} =
                SSL.verify_fun(
                  cert,
                  :valid_peer,
-                 uri_id: 'https://outlook.office365.com'
+                 uri_id: ~c"https://outlook.office365.com"
                )
 
       assert {:fail, {:bad_cert, :hostname_check_failed}} =
-               SSL.verify_fun(cert, :valid_peer, dns_id: 'live.com')
+               SSL.verify_fun(cert, :valid_peer, dns_id: ~c"live.com")
 
       assert {:fail, {:bad_cert, :hostname_check_failed}} =
-               SSL.verify_fun(cert, :valid_peer, dns_id: 'out.look.office365.com')
+               SSL.verify_fun(cert, :valid_peer, dns_id: ~c"out.look.office365.com")
     end
   end
 
@@ -86,22 +86,22 @@ defmodule Mint.Core.Transport.SSLTest do
       #            3) a wildcard does not match more than one label
       refute :mint_shims.pkix_verify_hostname(
                cert,
-               dns_id: 'erlang.org',
-               dns_id: 'foo.EXAMPLE.com',
-               dns_id: 'b.a.foo.EXAMPLE.com'
+               dns_id: ~c"erlang.org",
+               dns_id: ~c"foo.EXAMPLE.com",
+               dns_id: ~c"b.a.foo.EXAMPLE.com"
              )
 
       # Check that a hostname is extracted from a https-uri and used for checking:
-      assert :mint_shims.pkix_verify_hostname(cert, uri_id: 'HTTPS://EXAMPLE.com')
+      assert :mint_shims.pkix_verify_hostname(cert, uri_id: ~c"HTTPS://EXAMPLE.com")
 
       # Check wildcard matching one label:
-      assert :mint_shims.pkix_verify_hostname(cert, dns_id: 'a.foo.EXAMPLE.com')
+      assert :mint_shims.pkix_verify_hostname(cert, dns_id: ~c"a.foo.EXAMPLE.com")
 
       # Check wildcard with surrounding chars matches one label:
-      assert :mint_shims.pkix_verify_hostname(cert, dns_id: 'accb.bar.EXAMPLE.com')
+      assert :mint_shims.pkix_verify_hostname(cert, dns_id: ~c"accb.bar.EXAMPLE.com")
 
       # Check that a wildcard with surrounding chars matches an empty string:
-      assert :mint_shims.pkix_verify_hostname(cert, uri_id: 'https://ab.bar.EXAMPLE.com')
+      assert :mint_shims.pkix_verify_hostname(cert, uri_id: ~c"https://ab.bar.EXAMPLE.com")
     end
   end
 
@@ -112,22 +112,22 @@ defmodule Mint.Core.Transport.SSLTest do
       # Check that neither a uri nor dns hostname matches a CN if subjAltName is present:
       refute :mint_shims.pkix_verify_hostname(
                cert,
-               uri_id: 'https://example.com',
-               dns_id: 'example.com'
+               uri_id: ~c"https://example.com",
+               dns_id: ~c"example.com"
              )
 
       # Check that a uri_id matches a URI subjAltName:
-      assert :mint_shims.pkix_verify_hostname(cert, uri_id: 'https://wws.example.org')
+      assert :mint_shims.pkix_verify_hostname(cert, uri_id: ~c"https://wws.example.org")
 
       # Check that a dns_id does not match a URI subjAltName:
       refute :mint_shims.pkix_verify_hostname(
                cert,
-               dns_id: 'www.example.org',
-               dns_id: 'wws.example.org'
+               dns_id: ~c"www.example.org",
+               dns_id: ~c"wws.example.org"
              )
 
       # Check that a dns_id matches a DNS subjAltName:
-      assert :mint_shims.pkix_verify_hostname(cert, dns_id: 'kb.example.org')
+      assert :mint_shims.pkix_verify_hostname(cert, dns_id: ~c"kb.example.org")
     end
   end
 
@@ -135,14 +135,14 @@ defmodule Mint.Core.Transport.SSLTest do
     setup [:subj_alt_name_ip_cert]
 
     test "OTP public_key test cases", %{cert: cert} do
-      refute :mint_shims.pkix_verify_hostname(cert, uri_id: 'https://1.2.3.4')
-      assert :mint_shims.pkix_verify_hostname(cert, uri_id: 'https://10.11.12.13')
-      assert :mint_shims.pkix_verify_hostname(cert, dns_id: '1.2.3.4')
+      refute :mint_shims.pkix_verify_hostname(cert, uri_id: ~c"https://1.2.3.4")
+      assert :mint_shims.pkix_verify_hostname(cert, uri_id: ~c"https://10.11.12.13")
+      assert :mint_shims.pkix_verify_hostname(cert, dns_id: ~c"1.2.3.4")
       assert :mint_shims.pkix_verify_hostname(cert, dns_id: "1.2.3.4")
-      refute :mint_shims.pkix_verify_hostname(cert, dns_id: '10.67.16.75')
-      assert :mint_shims.pkix_verify_hostname(cert, ip: 'aBcD:ef:0::0:1')
+      refute :mint_shims.pkix_verify_hostname(cert, dns_id: ~c"10.67.16.75")
+      assert :mint_shims.pkix_verify_hostname(cert, ip: ~c"aBcD:ef:0::0:1")
       assert :mint_shims.pkix_verify_hostname(cert, ip: {0xABCD, 0xEF, 0, 0, 0, 0, 0, 1})
-      assert :mint_shims.pkix_verify_hostname(cert, ip: '10.67.16.75')
+      assert :mint_shims.pkix_verify_hostname(cert, ip: ~c"10.67.16.75")
       assert :mint_shims.pkix_verify_hostname(cert, ip: "10.67.16.75")
       assert :mint_shims.pkix_verify_hostname(cert, ip: {10, 67, 16, 75})
       refute :mint_shims.pkix_verify_hostname(cert, ip: {1, 2, 3, 4})
@@ -316,7 +316,7 @@ defmodule Mint.Core.Transport.SSLTest do
   describe "upgrade/4" do
     test "raises an error if the scheme is :https" do
       assert_raise RuntimeError, "nested SSL sessions are not supported", fn ->
-        SSL.upgrade(_fake_socket = nil, :https, 'localhost', _port = 0, _timeout = 5000)
+        SSL.upgrade(_fake_socket = nil, :https, ~c"localhost", _port = 0, _timeout = 5000)
       end
     end
   end
