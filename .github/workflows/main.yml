@@ -74,7 +74,9 @@ jobs:
         run: mix dialyzer --plt
 
       - name: Start docker
-        run: docker-compose up --detach
+        run: |
+          mkdir caddy_storage
+          docker-compose up --detach
 
       - name: Check for unused dependencies
         run: mix do deps.get, deps.unlock --check-unused
