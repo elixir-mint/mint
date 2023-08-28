@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v3
         id: cache-plt
         with:
-          path: priv/plts
+          path: plts
           key: |
             ${{ runner.os }}-plt-otp${{ matrix.erlang }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
