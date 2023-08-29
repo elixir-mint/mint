@@ -115,7 +115,7 @@
   * Fix a small bug with double "wrapping" of some `Mint.TransportError`s.
   * Prevent unnecessary buffer allocations in the connections (less memory waste!).
   * Add support for chunked transfer-encoding in HTTP/1 requests when you don't use `content-encoding`/`transfer-encoding` yourself.
-  * Add support for trailing headers in HTTP/* requests through `stream_request_body/3`.
+  * Add support for trailer headers in HTTP/* requests through `stream_request_body/3`.
   * Add a page about decompressing responses in the guides.
 
 ## v0.3.0
@@ -136,7 +136,7 @@
 
   * Add `Mint.HTTP.controlling_process/2`, `Mint.HTTP1.controlling_process/2`, and `Mint.HTTP2.controlling_process/2` to change the controlling process of a connection.
 
-  * Support trailing response headers in HTTP/2 connections.
+  * Support trailer response headers in HTTP/2 connections.
 
 ## v0.2.1
 

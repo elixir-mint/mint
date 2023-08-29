@@ -606,32 +606,34 @@ defmodule Mint.HTTP do
     * `:eof` - signals the end of the streaming of the request body for the given
       request. Usually the server won't send any reply until this is sent.
 
-    * `{:eof, trailing_headers}` - sends **trailing headers** and signals the end
+    * `{:eof, trailer_headers}` - sends **trailer headers** and signals the end
       of the streaming of the request body for the given request. This behaves the
-      same way as `:eof` but first sends the trailing headers. See the "Trailing headers"
-      section below.
+      same way as `:eof` but first sends the trailer headers. See the
+      [*Trailer headers*](#module-trailer-headers) section below.
 
   This function always returns an updated connection to be stored over the old connection.
 
   For information about transfer encoding and content length in HTTP/1, see
   `Mint.HTTP1.stream_request_body/3`.
 
-  ## Trailing headers
+  ## Trailer headers
 
-  HTTP trailing headers can be sent after the body of a request. The behaviour is slightly
-  different for HTTP/1 and HTTP/2.
+  HTTP trailer headers can be sent after the body of a request. trailer headers are described
+  [in RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-6.5).
 
-  In HTTP/1, trailing headers are only supported if the transfer encoding is set to
-  `chunked`. See `Mint.HTTP1.stream_request_body/3` for more information on chunked
-  transfer encoding.
+  The behaviour is slightly different for HTTP/1 and HTTP/2:
 
-  In HTTP/2, trailing headers behave like normal headers. You don't need to care
-  about the transfer encoding.
+    * In HTTP/1, trailer headers are only supported if the transfer encoding is set to
+      `chunked`. See `Mint.HTTP1.stream_request_body/3` for more information on chunked
+      transfer encoding.
+
+    * In HTTP/2, trailer headers behave like normal headers. You don't need to care
+      about the transfer encoding.
 
   ### The `trailer` header
 
   As specified in [section 4.4 of RFC 7230](https://tools.ietf.org/html/rfc7230#section-4.4),
-  in HTTP/1 you need to specify which headers you're going to send as trailing
+  in HTTP/1 you need to specify which headers you're going to send as traoler
   headers using the `trailer` header. The `trailer` header applies to both HTTP/1
   and HTTP/2. See the examples below for more information.
 
@@ -639,8 +641,8 @@ defmodule Mint.HTTP do
 
   As specified in  [section 4.3 of RFC 7230](https://tools.ietf.org/html/rfc7230#section-4.3),
   the `te` (or `TE`) header is used to specify which transfer-encodings the client
-  is willing to accept (besides `chunked`). Mint supports decoding of trailing headers,
-  but if you want to notify the server that you are accepting trailing headers,
+  is willing to accept (besides `chunked`). Mint supports decoding of trailer headers,
+  but if you want to notify the server that you are accepting trailer headers,
   use the `trailers` value in the `te` header. For example:
 
       Mint.HTTP.request(conn, "GET", "/", [{"te", "trailers"}], "some body")
@@ -659,22 +661,22 @@ defmodule Mint.HTTP do
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "}")
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, :eof)
 
-  Here's an example of sending trailing headers:
+  Here's an example of sending trailer headers:
 
       headers = [{"content-type", "application/json"}, {"trailer", "my-trailer, x-expires"}]
       {:ok, conn, request_ref} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
 
       {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, "{}")
 
-      trailing_headers = [{"my-trailer", "xxx"}, {"x-expires", "10 days"}]
-      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, {:eof, trailing_headers})
+      trailer_headers = [{"my-trailer", "xxx"}, {"x-expires", "10 days"}]
+      {:ok, conn} = Mint.HTTP.stream_request_body(conn, request_ref, {:eof, trailer_headers})
 
   """
   @impl true
   @spec stream_request_body(
           t(),
           Types.request_ref(),
-          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+          iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, ref, body),
@@ -743,7 +745,7 @@ defmodule Mint.HTTP do
       with a list of headers. Headers are in the form `{header_name, header_value}`
       with `header_name` and `header_value` being strings. A single `:headers` response
       will come after the `:status` response. A single `:headers` response may come
-      after all the `:data` responses if **trailing headers** are present.
+      after all the `:data` responses if **trailer headers** are present.
 
     * `{:data, request_ref, binary}` - returned when the server replied with
       a chunk of response body (as a binary). The request shouldn't be considered done

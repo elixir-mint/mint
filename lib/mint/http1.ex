@@ -77,7 +77,7 @@ defmodule Mint.HTTP1 do
     * `{:invalid_token_list, string}` - when a header that is supposed to contain a list
       of tokens (such as the `connection` header) contains a malformed list of tokens.
 
-    * `:trailing_headers_but_not_chunked_encoding` - when you try to send trailing
+    * `:trailing_headers_but_not_chunked_encoding` - when you try to send trailer
       headers through `stream_request_body/3` but the transfer encoding of the request
       was not `chunked`.
 
@@ -320,7 +320,7 @@ defmodule Mint.HTTP1 do
   @spec stream_request_body(
           t(),
           Types.request_ref(),
-          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+          iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
@@ -336,7 +336,7 @@ defmodule Mint.HTTP1 do
   def stream_request_body(
         %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
         ref,
-        {:eof, _trailing_headers}
+        {:eof, _trailer_headers}
       ) do
     {:error, conn, wrap_error(:trailing_headers_but_not_chunked_encoding)}
   end
@@ -371,7 +371,7 @@ defmodule Mint.HTTP1 do
           conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
           {:ok, conn}
 
-        {:eof, _trailing_headers} ->
+        {:eof, _trailer_headers} ->
           request = %{conn.streaming_request | state: :status}
           conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
           {:ok, conn}
@@ -391,10 +391,10 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp validate_chunk({:eof, trailing_headers}) do
-    headers = lower_header_keys(trailing_headers)
+  defp validate_chunk({:eof, trailer_headers}) do
+    headers = lower_header_keys(trailer_headers)
 
-    if unallowed_header = find_unallowed_trailing_header(headers) do
+    if unallowed_header = find_unallowed_trailer_header(headers) do
       {:error, wrap_error({:unallowed_trailing_header, unallowed_header})}
     else
       {:ok, {:eof, headers}}
@@ -791,11 +791,11 @@ defmodule Mint.HTTP1 do
         decode_trailer_headers(conn, rest, responses, headers)
 
       {:ok, :eof, rest} ->
-        headers = Util.remove_unallowed_trailing_headers(headers)
+        headers = Util.remove_unallowed_trailer_headers(headers)
 
         responses = [
           {:done, conn.request.ref}
-          | add_trailing_headers(headers, conn.request.ref, responses)
+          | add_trailer_headers(headers, conn.request.ref, responses)
         ]
 
         conn = request_done(conn)
@@ -821,9 +821,9 @@ defmodule Mint.HTTP1 do
     decode(:status, %{conn | state: :status}, data, responses)
   end
 
-  defp add_trailing_headers([], _request_ref, responses), do: responses
+  defp add_trailer_headers([], _request_ref, responses), do: responses
 
-  defp add_trailing_headers(headers, request_ref, responses),
+  defp add_trailer_headers(headers, request_ref, responses),
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
   defp add_body(conn, data, responses) do
@@ -1095,10 +1095,10 @@ defmodule Mint.HTTP1 do
   end
 
   def format_error(:trailing_headers_but_not_chunked_encoding) do
-    "trailing headers can only be sent when using chunked transfer-encoding"
+    "trailer headers can only be sent when using chunked transfer-encoding"
   end
 
   def format_error({:unallowed_trailing_header, {name, value}}) do
-    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailer header"
   end
 end

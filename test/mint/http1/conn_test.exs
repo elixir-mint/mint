@@ -341,7 +341,7 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == <<>>
   end
 
-  test "unallowed trailing headers are removed from the trailing headers", %{conn: conn} do
+  test "unallowed trailer headers are removed from the trailer headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     response =
@@ -778,7 +778,7 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     end
 
-    test "sending trailing headers with implicit chunked transfer-encoding",
+    test "sending trailer headers with implicit chunked transfer-encoding",
          %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
 
@@ -792,40 +792,40 @@ defmodule Mint.HTTP1Test do
                \
                """)
 
-      # Trailing headers are also downcased.
-      trailing_headers = [
-        {"my-trailing", "some value"},
-        {"My-Other-Trailing", "some other value"}
+      # Trailer headers are also downcased.
+      trailer_headers = [
+        {"my-trailer", "some value"},
+        {"My-Other-Trailer", "some other value"}
       ]
 
-      assert {:ok, _conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
+      assert {:ok, _conn} = HTTP1.stream_request_body(conn, ref, {:eof, trailer_headers})
 
       assert receive_request_string(server_socket) ==
                request_string("""
                0
-               my-trailing: some value
-               my-other-trailing: some other value
+               my-trailer: some value
+               my-other-trailer: some other value
 
                \
                """)
     end
 
-    test "sending trailing headers with non-chunked transfer-encoding is an error", %{conn: conn} do
+    test "sending trailer headers with non-chunked transfer-encoding is an error", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "5"}], :stream)
 
       assert {:error, _conn, %HTTPError{reason: :trailing_headers_but_not_chunked_encoding}} =
                HTTP1.stream_request_body(conn, ref, {:eof, [{"my-trailer", "value"}]})
     end
 
-    test "sending unallowed trailing headers is an error", %{conn: conn} do
+    test "sending unallowed trailer headers is an error", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
 
       # The Host is an example of an unallowed header. It should be unallowed
       # regardless of its casing.
-      trailing_headers = [{"my-trailing", "value"}, {"Host", "example.com"}]
+      trailer_headers = [{"my-trailer", "value"}, {"Host", "example.com"}]
 
       assert {:error, _conn, error} =
-               HTTP1.stream_request_body(conn, ref, {:eof, trailing_headers})
+               HTTP1.stream_request_body(conn, ref, {:eof, trailer_headers})
 
       assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
     end

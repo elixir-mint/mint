@@ -93,7 +93,7 @@ defmodule Mint.UnsafeProxy do
   @spec stream_request_body(
           t(),
           Types.request_ref(),
-          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+          iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(%UnsafeProxy{module: module, state: state} = conn, ref, body) do

@@ -542,7 +542,7 @@ defmodule Mint.HTTP2 do
   @spec stream_request_body(
           t(),
           Types.request_ref(),
-          iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+          iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
         ) :: {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(conn, request_ref, chunk)
 
@@ -1097,15 +1097,15 @@ defmodule Mint.HTTP2 do
     encode_data(conn, stream_id, "", [:end_stream])
   end
 
-  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailing_headers}) do
-    lowered_headers = downcase_header_names(trailing_headers)
+  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailer_headers}) do
+    lowered_headers = downcase_header_names(trailer_headers)
 
-    if unallowed_trailing_header = Util.find_unallowed_trailing_header(lowered_headers) do
-      error = wrap_error({:unallowed_trailing_header, unallowed_trailing_header})
+    if unallowed_trailer_header = Util.find_unallowed_trailer_header(lowered_headers) do
+      error = wrap_error({:unallowed_trailing_header, unallowed_trailer_header})
       throw({:mint, conn, error})
     end
 
-    encode_headers(conn, stream_id, trailing_headers, [:end_headers, :end_stream])
+    encode_headers(conn, stream_id, trailer_headers, [:end_headers, :end_stream])
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, iodata) do
@@ -1680,24 +1680,24 @@ defmodule Mint.HTTP2 do
             {conn, new_responses}
         end
 
-      # Trailing headers. We don't care about the :status header here.
+      # Trailer headers. We don't care about the :status header here.
       headers when received_first_headers? ->
         if end_stream? do
           conn = close_stream!(conn, stream.id, :no_error)
-          headers = headers |> Util.remove_unallowed_trailing_headers() |> join_cookie_headers()
+          headers = headers |> Util.remove_unallowed_trailer_headers() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
-          # Trailing headers must set the END_STREAM flag because they're
+          # Trailer headers must set the END_STREAM flag because they're
           # the last thing allowed on the stream (other than RST_STREAM and
           # the usual frames).
           conn = close_stream!(conn, stream.id, :protocol_error)
-          debug_data = "trailing headers didn't set the END_STREAM flag"
+          debug_data = "trailer headers didn't set the END_STREAM flag"
           error = wrap_error({:protocol_error, debug_data})
           responses = [{:error, stream.ref, error} | responses]
           {conn, responses}
         end
 
-      # Non-trailing headers need to have a :status header, otherwise
+      # Non-trailer headers need to have a :status header, otherwise
       # it's a protocol error.
       _headers ->
         conn = close_stream!(conn, stream.id, :protocol_error)
@@ -2216,7 +2216,7 @@ defmodule Mint.HTTP2 do
   end
 
   def format_error({:unallowed_trailing_header, {name, value}}) do
-    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailing header"
+    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailer header"
   end
 
   def format_error(:missing_status_header) do

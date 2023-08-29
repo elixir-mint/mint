@@ -30,7 +30,7 @@ defmodule Mint.Core.Conn do
   @callback stream_request_body(
               conn(),
               Types.request_ref(),
-              body_chunk :: iodata() | :eof | {:eof, trailing_headers :: Types.headers()}
+              body_chunk :: iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
             ) ::
               {:ok, conn()} | {:error, conn(), Types.error()}
 

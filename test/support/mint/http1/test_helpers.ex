@@ -21,8 +21,8 @@ defmodule Mint.HTTP1.TestHelpers do
     merge_body_with_trailers(responses, request, body <> new_body)
   end
 
-  defp merge_body_with_trailers([{:headers, request, trailing}, {:done, request}], request, body) do
-    {body, trailing}
+  defp merge_body_with_trailers([{:headers, request, trailers}, {:done, request}], request, body) do
+    {body, trailers}
   end
 
   def merge_pipelined_body(responses, request) do

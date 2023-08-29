@@ -1100,7 +1100,7 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  describe "trailing headers" do
+  describe "trailer headers" do
     test "sent by the server with a normal response", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -1108,8 +1108,8 @@ defmodule Mint.HTTP2Test do
 
       hbf = server_encode_headers([{":status", "200"}])
 
-      <<trailing_hbf1::1-bytes, trailing_hbf2::binary>> =
-        server_encode_headers([{"x-trailing", "some value"}])
+      <<trailer_hbf1::1-bytes, trailer_hbf2::binary>> =
+        server_encode_headers([{"x-trailer", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1121,12 +1121,12 @@ defmodule Mint.HTTP2Test do
                  data(stream_id: stream_id, data: "some data", flags: set_flags(:data, [])),
                  headers(
                    stream_id: stream_id,
-                   hbf: trailing_hbf1,
+                   hbf: trailer_hbf1,
                    flags: set_flags(:headers, [:end_stream])
                  ),
                  continuation(
                    stream_id: stream_id,
-                   hbf: trailing_hbf2,
+                   hbf: trailer_hbf2,
                    flags: set_flags(:continuation, [:end_headers])
                  )
                ])
@@ -1135,11 +1135,11 @@ defmodule Mint.HTTP2Test do
                {:status, ^ref, 200},
                {:headers, ^ref, []},
                {:data, ^ref, "some data"},
-               {:headers, ^ref, trailing_headers},
+               {:headers, ^ref, trailer_headers},
                {:done, ^ref}
              ] = responses
 
-      assert trailing_headers == [{"x-trailing", "some value"}]
+      assert trailer_headers == [{"x-trailer", "some value"}]
       assert HTTP2.open?(conn)
     end
 
@@ -1150,7 +1150,7 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       hbf = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      trailer_hbf = server_encode_headers([{"x-trailer", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1161,7 +1161,7 @@ defmodule Mint.HTTP2Test do
                  ),
                  headers(
                    stream_id: stream_id,
-                   hbf: trailing_hbf,
+                   hbf: trailer_hbf,
                    flags: set_flags(:headers, [:end_stream, :end_headers])
                  )
                ])
@@ -1169,7 +1169,7 @@ defmodule Mint.HTTP2Test do
       assert [
                {:status, ^ref, 200},
                {:headers, ^ref, []},
-               {:headers, ^ref, [{"x-trailing", "some value"}]},
+               {:headers, ^ref, [{"x-trailer", "some value"}]},
                {:done, ^ref}
              ] = responses
 
@@ -1186,7 +1186,7 @@ defmodule Mint.HTTP2Test do
       promised_hbf = server_encode_headers([{":method", "GET"}])
       hbf1 = server_encode_headers([{":status", "200"}])
       hbf2 = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      trailer_hbf = server_encode_headers([{"x-trailer", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1201,7 +1201,7 @@ defmodule Mint.HTTP2Test do
                    hbf: hbf1,
                    flags: set_flags(:headers, [:end_stream, :end_headers])
                  ),
-                 # Promised stream with trailing headers.
+                 # Promised stream with trailer headers.
                  headers(
                    stream_id: promised_stream_id,
                    hbf: hbf2,
@@ -1209,7 +1209,7 @@ defmodule Mint.HTTP2Test do
                  ),
                  headers(
                    stream_id: promised_stream_id,
-                   hbf: trailing_hbf,
+                   hbf: trailer_hbf,
                    flags: set_flags(:headers, [:end_headers, :end_stream])
                  )
                ])
@@ -1221,20 +1221,20 @@ defmodule Mint.HTTP2Test do
                {:done, ^ref},
                {:status, promised_ref, 200},
                {:headers, promised_ref, []},
-               {:headers, promised_ref, [{"x-trailing", "some value"}]},
+               {:headers, promised_ref, [{"x-trailer", "some value"}]},
                {:done, promised_ref}
              ] = responses
 
       assert HTTP2.open?(conn)
     end
 
-    test "protocol error if trailing headers don't have END_STREAM set", %{conn: conn} do
+    test "protocol error if trailer headers don't have END_STREAM set", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
       hbf = server_encode_headers([{":status", "200"}])
-      trailing_hbf = server_encode_headers([{"x-trailing", "some value"}])
+      trailer_hbf = server_encode_headers([{"x-trailer", "some value"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1246,7 +1246,7 @@ defmodule Mint.HTTP2Test do
                  data(stream_id: stream_id, data: "some data", flags: set_flags(:data, [])),
                  headers(
                    stream_id: stream_id,
-                   hbf: trailing_hbf,
+                   hbf: trailer_hbf,
                    flags: set_flags(:headers, [:end_headers])
                  )
                ])
@@ -1259,7 +1259,7 @@ defmodule Mint.HTTP2Test do
              ] = responses
 
       assert_http2_error error, {:protocol_error, debug_data}
-      assert debug_data =~ "trailing headers didn't set the END_STREAM flag"
+      assert debug_data =~ "trailer headers didn't set the END_STREAM flag"
 
       assert HTTP2.open?(conn)
     end
@@ -1273,7 +1273,7 @@ defmodule Mint.HTTP2Test do
 
       # Note that headers are lowercase in HTTP/2 responses because the spec
       # says so.
-      trailing_hbf = server_encode_headers([{"x-trailing", "value"}, {"host", "example.com"}])
+      trailer_hbf = server_encode_headers([{"x-trailer", "value"}, {"host", "example.com"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -1284,7 +1284,7 @@ defmodule Mint.HTTP2Test do
                  ),
                  headers(
                    stream_id: stream_id,
-                   hbf: trailing_hbf,
+                   hbf: trailer_hbf,
                    flags: set_flags(:headers, [:end_headers, :end_stream])
                  )
                ])
@@ -1292,11 +1292,11 @@ defmodule Mint.HTTP2Test do
       assert [
                {:status, ^ref, 200},
                {:headers, ^ref, []},
-               {:headers, ^ref, trailing_headers},
+               {:headers, ^ref, trailer_headers},
                {:done, ^ref}
              ] = responses
 
-      assert trailing_headers == [{"x-trailing", "value"}]
+      assert trailer_headers == [{"x-trailer", "value"}]
       assert HTTP2.open?(conn)
     end
   end
@@ -1949,43 +1949,43 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "streaming a request with trailing headers", %{conn: conn} do
+    test "streaming a request with trailer headers", %{conn: conn} do
       {conn, ref} = open_request(conn, :stream)
 
       # Using 1000 headers will go over the default max_frame_size so that the
-      # HEADERS frame for the trailing headers will also be split into a HEADERS
+      # HEADERS frame for the trailer headers will also be split into a HEADERS
       # plus CONTINUATION frames.
-      trailing_headers = for index <- 1..1000, do: {"my-trailing-#{index}", "value"}
+      trailer_headers = for index <- 1..1000, do: {"my-trailer-#{index}", "value"}
 
-      assert {:ok, _conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
+      assert {:ok, _conn} = HTTP2.stream_request_body(conn, ref, {:eof, trailer_headers})
 
       assert_recv_frames [
         headers(stream_id: stream_id) = headers,
-        headers(stream_id: stream_id, hbf: trailing_hbf1) = trailing_headers1,
-        continuation(stream_id: stream_id, hbf: trailing_hbf2) = trailing_headers2
+        headers(stream_id: stream_id, hbf: trailer_hbf1) = trailer_headers1,
+        continuation(stream_id: stream_id, hbf: trailer_hbf2) = trailer_headers2
       ]
 
       assert flag_set?(headers(headers, :flags), :headers, :end_headers)
       refute flag_set?(headers(headers, :flags), :headers, :end_stream)
 
-      refute flag_set?(headers(trailing_headers1, :flags), :headers, :end_headers)
-      assert flag_set?(headers(trailing_headers1, :flags), :headers, :end_stream)
+      refute flag_set?(headers(trailer_headers1, :flags), :headers, :end_headers)
+      assert flag_set?(headers(trailer_headers1, :flags), :headers, :end_stream)
 
-      assert flag_set?(continuation(trailing_headers2, :flags), :continuation, :end_headers)
+      assert flag_set?(continuation(trailer_headers2, :flags), :continuation, :end_headers)
 
-      assert server_decode_headers(trailing_hbf1 <> trailing_hbf2) == trailing_headers
+      assert server_decode_headers(trailer_hbf1 <> trailer_hbf2) == trailer_headers
     end
 
-    test "unallowed trailing headers cause an error", %{conn: conn} do
+    test "unallowed trailer headers cause an error", %{conn: conn} do
       {conn, ref} = open_request(conn, :stream)
 
       assert HTTP2.open_request_count(conn) == 1
       expected_window_size = HTTP2.get_window_size(conn, :connection)
 
-      trailing_headers = [{"x-trailing", "value"}, {"Host", "example.com"}]
+      trailer_headers = [{"x-trailer", "value"}, {"Host", "example.com"}]
 
       assert {:error, %HTTP2{} = _conn, error} =
-               HTTP2.stream_request_body(conn, ref, {:eof, trailing_headers})
+               HTTP2.stream_request_body(conn, ref, {:eof, trailer_headers})
 
       assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
 

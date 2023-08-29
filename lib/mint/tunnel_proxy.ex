@@ -138,7 +138,7 @@ defmodule Mint.TunnelProxy do
         "expected tunnel proxy to return a status between 200 and 299, got: #{inspect(status)}"
 
       {:unexpected_trailing_responses, responses} ->
-        "tunnel proxy returned unexpected trailing responses: #{inspect(responses)}"
+        "tunnel proxy returned unexpected trailer responses: #{inspect(responses)}"
 
       http_reason ->
         "error when establishing the tunnel proxy connection: " <>
