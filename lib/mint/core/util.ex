@@ -1,6 +1,8 @@
 defmodule Mint.Core.Util do
   @moduledoc false
 
+  alias Mint.Types
+
   @unallowed_trailer_headers MapSet.new([
                                "content-encoding",
                                "content-length",
@@ -46,6 +48,7 @@ defmodule Mint.Core.Util do
                                "warning"
                              ])
 
+  @spec hostname(keyword(), String.t()) :: String.t()
   def hostname(opts, address) when is_list(opts) do
     case Keyword.fetch(opts, :hostname) do
       {:ok, hostname} ->
@@ -59,6 +62,7 @@ defmodule Mint.Core.Util do
     end
   end
 
+  @spec inet_opts(:gen_tcp | :ssl, :gen_tcp.socket() | :ssl.sslsocket()) :: :ok | {:error, term()}
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
          buffer = calculate_buffer(opts),
@@ -67,6 +71,7 @@ defmodule Mint.Core.Util do
     end
   end
 
+  @spec scheme_to_transport(atom()) :: module()
   def scheme_to_transport(:http), do: Mint.Core.Transport.TCP
   def scheme_to_transport(:https), do: Mint.Core.Transport.SSL
   def scheme_to_transport(module) when is_atom(module), do: module
@@ -78,6 +83,7 @@ defmodule Mint.Core.Util do
   end
 
   # Adds a header to the list of headers unless it's nil or it's already there.
+  @spec put_new_header(Types.headers(), String.t(), String.t() | nil) :: Types.headers()
   def put_new_header(headers, name, value)
 
   def put_new_header(headers, _name, nil) do
@@ -92,6 +98,7 @@ defmodule Mint.Core.Util do
     end
   end
 
+  @spec put_new_header_lazy(Types.headers(), String.t(), (-> String.t())) :: Types.headers()
   def put_new_header_lazy(headers, name, fun) do
     if List.keymember?(headers, name, 0) do
       headers
@@ -102,22 +109,28 @@ defmodule Mint.Core.Util do
 
   # Lowercases an ASCII string more efficiently than
   # String.downcase/1.
-  def downcase_ascii(string),
-    do: for(<<char <- string>>, do: <<downcase_ascii_char(char)>>, into: "")
+  @spec downcase_ascii(String.t()) :: String.t()
+  def downcase_ascii(string) do
+    for <<char <- string>>, do: <<downcase_ascii_char(char)>>, into: ""
+  end
 
+  @spec downcase_ascii_char(byte()) :: byte()
   def downcase_ascii_char(char) when char in ?A..?Z, do: char + 32
   def downcase_ascii_char(char) when char in 0..127, do: char
 
   # If the buffer is empty, reusing the incoming data saves
   # a potentially large allocation of memory.
   # This should be fixed in a subsequent OTP release.
+  @spec maybe_concat(binary(), binary()) :: binary()
   def maybe_concat(<<>>, data), do: data
   def maybe_concat(buffer, data) when is_binary(buffer), do: buffer <> data
 
+  @spec find_unallowed_trailer_header(Types.headers()) :: {String.t(), String.t()} | nil
   def find_unallowed_trailer_header(headers) do
     Enum.find(headers, fn {name, _value} -> name in @unallowed_trailer_headers end)
   end
 
+  @spec remove_unallowed_trailer_headers(Types.headers()) :: Types.headers()
   def remove_unallowed_trailer_headers(headers) do
     Enum.reject(headers, fn {name, _value} -> name in @unallowed_trailer_headers end)
   end
