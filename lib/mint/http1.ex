@@ -24,7 +24,7 @@ defmodule Mint.HTTP1 do
   @behaviour Mint.Core.Conn
 
   @typedoc """
-  A Mint HTTP/2 connection struct.
+  A Mint HTTP/1 connection struct.
 
   The struct's fields are private.
   """
