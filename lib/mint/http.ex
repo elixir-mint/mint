@@ -310,7 +310,7 @@ defmodule Mint.HTTP do
       no CA trust store is specified using the `:cacertfile` or `:cacerts`
       option, Mint will attempt to use the trust store from the
       [CAStore](https://github.com/elixir-mint/castore) package or raise an
-      exception if this package is not available. It is reommended to set this
+      exception if this package is not available. It is recommended to set this
       option to `:public_key.cacerts_get()`.
 
     * `:cacertfile` - path to a file containing PEM-encoded CA certificates.
