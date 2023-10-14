@@ -496,20 +496,28 @@ defmodule Mint.HTTP do
   @doc """
   Checks whether the connection is open.
 
-  This function returns `true` if the connection is open, `false` otherwise. It should
-  be used to check that a connection is open before sending requests or performing
-  operations that involve talking to the server.
+  This function returns `true` if the connection is open for the given `type`,
+  `false` otherwise. It should be used to check that a connection is open before
+  sending requests or performing operations that involve talking to the server.
 
-  The `type` argument can be used to tell whether the connection is closed only for reading,
-  only for writing, or for both. In HTTP/1, a closed connection is always closed for
-  both reading and writing. In HTTP/2, the connection can be closed only for writing but
-  not for reading, meaning that you cannot send any more data to the server but you can
-  still receive data from the server. See the "Closed connection" section in the module
-  documentation of `Mint.HTTP2`.
+  The `type` argument can be used to tell whether the connection is open for both, reading
+  and writing, only open for reading or closed for both. In HTTP/1, a connection is always
+  either open or closed for both reading and writing. In HTTP/2, the connection can be closed only
+  for writing but not for reading, meaning that you cannot send any more data to the
+  server but you can still receive data from the server. In this case, `Mint.HTTP.open?(conn, :read)`
+  would return `true` but `Mint.HTTP.open?(conn, :read_write)` would return `false`
+  See the "Closed connection" section in the module documentation of `Mint.HTTP2`.
 
-  If a connection is not open for reading and writing, it has become useless and you should
-  get rid of it. If you still need a connection to the server, start a new connection
-  with `connect/4`.
+  If a connection is completely closed (i.e. `Mint.HTTP.open?(conn, :read)` returns `false`),
+  it has become useless and you should get rid of it. If you still need a connection
+  to the server, start a new connection with `connect/4`.
+
+  > #### The default value of `type` is `:read_write` {: .warning}
+  >
+  > With the default value of `type` being `:read_write`, a call to
+  > `Mint.HTTP.open?(conn)` will return `false` if `conn` was closed for writing
+  > but is still open for reading. If you need to make sure the connection is
+  > completely closed, check for `Mint.HTTP.open?(conn, :read)` returning `false`
 
   ## Examples
 
