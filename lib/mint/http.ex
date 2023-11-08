@@ -855,6 +855,14 @@ defmodule Mint.HTTP do
 
   This function will raise an error if the socket is in active mode.
 
+  > #### Hanging Waiting for Bytes {: .warning}
+  >
+  > If `byte_count` is greater than `0` and the socket doesn't receive
+  > *at least* `byte_count` bytes withing the `timeout`, then the function
+  > will block for the duration of `timeout` and then return a timeout error.
+  > This behavior is the same as the `recv` function in [`:gen_tcp`](`:gen_tcp`)
+  > and [`:ssl`](`:ssl`).
+
   ## Examples
 
       {:ok, conn, responses} = Mint.HTTP.recv(conn, 0, 5000)
