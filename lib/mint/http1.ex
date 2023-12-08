@@ -445,7 +445,7 @@ defmodule Mint.HTTP1 do
 
   def stream(%__MODULE__{socket: socket} = conn, {tag, socket, reason})
       when tag in [:tcp_error, :ssl_error] do
-    handle_error(conn, conn.transport.wrap_error(reason))
+    handle_transport_error(conn, conn.transport.wrap_error(reason))
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -482,7 +482,11 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp handle_error(conn, error) do
+  defp handle_transport_error(conn, error) do
+    # The socket *should* be closed in this case, but it might not be, so let's still
+    # close it to make sure.
+    _ = conn.transport.close(conn.socket)
+
     conn = put_in(conn.state, :closed)
     {:error, conn, error, []}
   end
@@ -500,7 +504,7 @@ defmodule Mint.HTTP1 do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} -> handle_data(conn, data)
       {:error, %Mint.TransportError{reason: :closed}} -> handle_close(conn)
-      {:error, error} -> handle_error(conn, error)
+      {:error, error} -> handle_transport_error(conn, error)
     end
   end
 
