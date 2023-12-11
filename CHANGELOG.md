@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.2
+
+### Bug fixes and improvements
+
+  * Fix a memory leak with `Mint.HTTP1` connections which would stay open but
+    report as closed on timeouts.
+
 ## v1.5.1
 
 ### Bug fixes and improvements
