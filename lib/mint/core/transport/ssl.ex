@@ -509,6 +509,16 @@ defmodule Mint.Core.Transport.SSL do
     end
   end
 
+  # In case the hostname is an IP address:
+  defp match_fun({:dns_id, hostname}, {:iPAddress, ip}) do
+    with {:ok, ip_tuple} <- :inet.parse_address(hostname),
+         ^ip <- Tuple.to_list(ip_tuple) do
+      true
+    else
+      _ -> :default
+    end
+  end
+
   defp match_fun(_reference, _presented), do: :default
 
   defp domain_without_host([]), do: []
