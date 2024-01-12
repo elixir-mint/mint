@@ -148,6 +148,10 @@ defmodule Mint.Core.Transport.SSLTest do
       refute :mint_shims.pkix_verify_hostname(cert, ip: {1, 2, 3, 4})
       refute :mint_shims.pkix_verify_hostname(cert, ip: {10, 11, 12, 13})
     end
+
+    test "custom match fun for IP addresses as hostname", %{cert: cert} do
+      assert {:valid, _} = SSL.verify_fun(cert, :valid_peer, dns_id: ~c"10.67.16.75")
+    end
   end
 
   # Certificate chain rooted in an expired root CA, and CA store containing

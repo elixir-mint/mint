@@ -509,7 +509,11 @@ defmodule Mint.Core.Transport.SSL do
     end
   end
 
-  # In case the hostname is an IP address:
+  # Workaround for a bug that was fixed in OTP 27:
+  # Before OTP 27 when connecting to an IP address and the server offers a
+  # certificate with its IP address in the "subject alternate names" extension,
+  # the TLS handshake fails with a `{:bad_cert, :hostname_check_failed}`.
+  # This clause can be removed once we depend on OTP 27+.
   defp match_fun({:dns_id, hostname}, {:iPAddress, ip}) do
     with {:ok, ip_tuple} <- :inet.parse_address(hostname),
          ^ip <- Tuple.to_list(ip_tuple) do
