@@ -22,6 +22,7 @@ defmodule Mint.HTTP2Test do
   @server_pdict_key {__MODULE__, :http2_test_server}
 
   setup :start_server_async
+  setup :maybe_change_default_scheme_port
   setup :start_connection
   setup :maybe_set_transport_mock
 
@@ -841,29 +842,21 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    @tag :with_overridden_default_port
     test ":authority pseudo-header does not include port if it is the scheme's default",
          %{conn: conn} do
-      default_https_port = URI.default_port("https")
+      {conn, _ref} = open_request(conn)
 
-      try do
-        # Override default https port for this test
-        URI.default_port("https", conn.port)
+      assert_recv_frames [headers(hbf: hbf)]
 
-        {conn, _ref} = open_request(conn)
+      assert {":authority", authority} =
+               hbf
+               |> server_decode_headers()
+               |> List.keyfind(":authority", 0)
 
-        assert_recv_frames [headers(hbf: hbf)]
+      assert authority == conn.hostname
 
-        assert {":authority", authority} =
-                 hbf
-                 |> server_decode_headers()
-                 |> List.keyfind(":authority", 0)
-
-        assert authority == conn.hostname
-
-        assert HTTP2.open?(conn)
-      after
-        URI.default_port("https", default_https_port)
-      end
+      assert HTTP2.open?(conn)
     end
 
     test "when there's a request body, the content-length header is passed if not present",
@@ -2371,6 +2364,23 @@ defmodule Mint.HTTP2Test do
   end
 
   defp maybe_set_transport_mock(_context) do
+    %{}
+  end
+
+  defp maybe_change_default_scheme_port(%{
+         server_port: server_port,
+         with_overridden_default_port: _
+       }) do
+    default_https_port = URI.default_port("https")
+
+    on_exit(fn -> URI.default_port("https", default_https_port) end)
+
+    :ok = URI.default_port("https", server_port)
+
+    %{}
+  end
+
+  defp maybe_change_default_scheme_port(_context) do
     %{}
   end
 

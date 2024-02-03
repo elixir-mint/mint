@@ -170,6 +170,7 @@ defmodule Mint.HTTP2 do
     :hostname,
     :port,
     :scheme,
+    :authority,
 
     # Connection state (open, closed, and so on).
     :state,
@@ -974,10 +975,18 @@ defmodule Mint.HTTP2 do
         ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
     transport = scheme_to_transport(scheme)
+    scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_client_settings!(client_settings_params)
+    # If the port is the default for the scheme, don't add it to the :authority pseudo-header
+    authority =
+      if URI.default_port(scheme_string) == port do
+        hostname
+      else
+        "#{hostname}:#{port}"
+      end
 
     unless mode in [:active, :passive] do
       raise ArgumentError,
@@ -992,10 +1001,11 @@ defmodule Mint.HTTP2 do
     conn = %__MODULE__{
       hostname: hostname,
       port: port,
+      authority: authority,
       transport: scheme_to_transport(scheme),
       socket: socket,
       mode: mode,
-      scheme: Atom.to_string(scheme),
+      scheme: scheme_string,
       state: :handshaking,
       log: log?
     }
@@ -1358,7 +1368,7 @@ defmodule Mint.HTTP2 do
     if String.upcase(method) == "CONNECT" do
       [
         {":method", method},
-        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        {":authority", conn.authority}
         | headers
       ]
     else
@@ -1366,7 +1376,7 @@ defmodule Mint.HTTP2 do
         {":method", method},
         {":path", path},
         {":scheme", conn.scheme},
-        {":authority", authority_pseudo_header(conn.scheme, conn.port, conn.hostname)}
+        {":authority", conn.authority}
         | headers
       ]
     end
@@ -1716,15 +1726,6 @@ defmodule Mint.HTTP2 do
       {:error, reason} ->
         debug_data = "unable to decode headers: #{inspect(reason)}"
         send_connection_error!(conn, :compression_error, debug_data)
-    end
-  end
-
-  # If the port is the default for the scheme, don't add it to the :authority pseudo-header
-  defp authority_pseudo_header(scheme, port, hostname) do
-    if URI.default_port(scheme) == port do
-      hostname
-    else
-      "#{hostname}:#{port}"
     end
   end
 
