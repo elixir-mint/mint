@@ -1365,7 +1365,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp add_pseudo_headers(headers, conn, method, path) do
-    if String.upcase(method) == "CONNECT" do
+    if is_method?(method, ~c"CONNECT") do
       [
         {":method", method},
         {":authority", conn.authority}
@@ -1381,6 +1381,20 @@ defmodule Mint.HTTP2 do
       ]
     end
   end
+
+  @spec is_method?(proposed :: binary(), method :: charlist()) :: boolean()
+  defp is_method?(<<>>, []), do: true
+
+  defp is_method?(<<char, rest_bin::binary>>, [char | rest_list]) do
+    is_method?(rest_bin, rest_list)
+  end
+
+  defp is_method?(<<lower_char, rest_bin::binary>>, [char | rest_list])
+       when lower_char >= ?a and lower_char <= ?z and lower_char - 32 == char do
+    is_method?(rest_bin, rest_list)
+  end
+
+  defp is_method?(_proposed, _method), do: false
 
   defp sort_pseudo_headers_to_front(headers) do
     Enum.sort_by(headers, fn {key, _value} ->
