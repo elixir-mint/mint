@@ -1365,7 +1365,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp add_pseudo_headers(headers, conn, method, path) do
-    if is_method?(method, ~c"CONNECT") do
+    if same_method?(method, "CONNECT") do
       [
         {":method", method},
         {":authority", conn.authority}
@@ -1382,19 +1382,20 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  @spec is_method?(proposed :: binary(), method :: charlist()) :: boolean()
-  defp is_method?(<<>>, []), do: true
+  # same_method?/2 is pretty optimized, so bench before changing.
 
-  defp is_method?(<<char, rest_bin::binary>>, [char | rest_list]) do
-    is_method?(rest_bin, rest_list)
-  end
+  # Same binary, which is a common case.
+  defp same_method?(bin, bin), do: true
 
-  defp is_method?(<<lower_char, rest_bin::binary>>, [char | rest_list])
-       when lower_char >= ?a and lower_char <= ?z and lower_char - 32 == char do
-    is_method?(rest_bin, rest_list)
-  end
+  # Get out early if the size is different, these can't be the same.
+  defp same_method?(bin1, bin2) when byte_size(bin1) != byte_size(bin2), do: false
 
-  defp is_method?(_proposed, _method), do: false
+  defp same_method?(<<ch, rest1::binary>>, <<ch, rest2::binary>>), do: same_method?(rest1, rest2)
+
+  defp same_method?(<<lower, rest1::binary>>, <<char, rest2::binary>>) when lower - 32 == char,
+    do: same_method?(rest1, rest2)
+
+  defp same_method?(_method1, _method2), do: false
 
   defp sort_pseudo_headers_to_front(headers) do
     Enum.sort_by(headers, fn {key, _value} ->
