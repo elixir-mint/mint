@@ -66,7 +66,6 @@ defmodule Mint.HTTP2.Frame do
   for {frame, flags} <- @flags,
       {flag_name, flag_value} <- flags do
     defp set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
-    defp set_flag(unquote(frame), unquote(flag_name)), do: unquote(flag_value)
 
     def flag_set?(flags, unquote(frame), unquote(flag_name)),
       do: band(flags, unquote(flag_value)) == unquote(flag_value)
