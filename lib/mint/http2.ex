@@ -1335,7 +1335,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp downcase_header_names(headers) do
-    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
+    for {name, value} <- headers, do: {String.downcase(name, :ascii), value}
   end
 
   defp add_default_headers(headers, body) do
@@ -1730,7 +1730,7 @@ defmodule Mint.HTTP2 do
 
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
-    case Enum.split_with(headers, fn {name, _value} -> Util.downcase_ascii(name) == "cookie" end) do
+    case Enum.split_with(headers, fn {name, _value} -> String.downcase(name, :ascii) == "cookie" end) do
       {[], _headers} ->
         headers
 

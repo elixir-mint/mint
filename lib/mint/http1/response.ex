@@ -38,6 +38,11 @@ defmodule Mint.HTTP1.Response do
     end
   end
 
-  defp header_name(atom) when is_atom(atom), do: atom |> Atom.to_string() |> Util.downcase_ascii()
-  defp header_name(binary) when is_binary(binary), do: Util.downcase_ascii(binary)
+  defp header_name(atom) when is_atom(atom) do
+    atom
+    |> Atom.to_string()
+    |> String.downcase(:ascii)
+  end
+
+  defp header_name(binary) when is_binary(binary), do: String.downcase(binary, :ascii)
 end
