@@ -1,8 +1,6 @@
 defmodule Mint.HTTP1.Parse do
   @moduledoc false
 
-  alias Mint.Core.Util
-
   defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
   defmacro is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
   defmacro is_whitespace(char), do: quote(do: unquote(char) in ~c"\s\t")

@@ -521,7 +521,7 @@ defmodule Mint.HTTP2 do
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers =
       headers
-      |> downcase_header_names()
+      |> lower_header_keys()
       |> add_pseudo_headers(conn, method, path)
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
@@ -1108,7 +1108,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailer_headers}) do
-    lowered_headers = downcase_header_names(trailer_headers)
+    lowered_headers = lower_header_keys(trailer_headers)
 
     if unallowed_trailer_header = Util.find_unallowed_trailer_header(lowered_headers) do
       error = wrap_error({:unallowed_trailing_header, unallowed_trailer_header})
@@ -1342,10 +1342,6 @@ defmodule Mint.HTTP2 do
       {name, _value} ->
         raise ArgumentError, "unknown setting parameter #{inspect(name)}"
     end)
-  end
-
-  defp downcase_header_names(headers) do
-    for {name, value} <- headers, do: {String.downcase(name, :ascii), value}
   end
 
   defp add_default_headers(headers, body) do
@@ -1746,7 +1742,7 @@ defmodule Mint.HTTP2 do
 
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
-    case Enum.split_with(headers, fn {name, _value} -> String.downcase(name, :ascii) == "cookie" end) do
+    case Enum.split_with(headers, fn {name, _value} -> lower_header_name(name) == "cookie" end) do
       {[], _headers} ->
         headers
 

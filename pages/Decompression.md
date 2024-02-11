@@ -31,7 +31,7 @@ We need to attempt to decompress the data if the `content-encoding` header is pr
 defp get_content_encoding_header(headers) do
   headers
   |> Enum.flat_map([], fn {name, value} ->
-    if String.downcase(name) == "content-encoding" do
+    if String.downcase(name, :ascii) == "content-encoding" do
       value
       |> String.downcase()
       |> String.split(",", trim: true)

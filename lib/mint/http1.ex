@@ -972,10 +972,6 @@ defmodule Mint.HTTP1 do
     }
   end
 
-  defp lower_header_keys(headers) do
-    for {name, value} <- headers, do: {String.downcase(name, :ascii), value}
-  end
-
   defp add_default_headers(headers, conn) do
     headers
     |> Util.put_new_header("user-agent", @user_agent)

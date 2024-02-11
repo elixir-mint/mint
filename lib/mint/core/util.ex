@@ -114,6 +114,16 @@ defmodule Mint.Core.Util do
   def maybe_concat(<<>>, data), do: data
   def maybe_concat(buffer, data) when is_binary(buffer), do: buffer <> data
 
+  @spec lower_header_name(String.t()) :: String.t()
+  def lower_header_name(name) do
+    String.downcase(name, :ascii)
+  end
+
+  @spec lower_header_keys(Types.headers()) :: Types.headers()
+  def lower_header_keys(headers) do
+    :lists.map(fn {name, value} -> {lower_header_name(name), value} end, headers)
+  end
+
   @spec find_unallowed_trailer_header(Types.headers()) :: {String.t(), String.t()} | nil
   def find_unallowed_trailer_header(headers) do
     Enum.find(headers, fn {name, _value} -> name in @unallowed_trailer_headers end)
