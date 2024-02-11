@@ -107,17 +107,6 @@ defmodule Mint.Core.Util do
     end
   end
 
-  # Lowercases an ASCII string more efficiently than
-  # String.downcase/1.
-  @spec downcase_ascii(String.t()) :: String.t()
-  def downcase_ascii(string) do
-    for <<char <- string>>, do: <<downcase_ascii_char(char)>>, into: ""
-  end
-
-  @spec downcase_ascii_char(byte()) :: byte()
-  def downcase_ascii_char(char) when char in ?A..?Z, do: char + 32
-  def downcase_ascii_char(char) when char in 0..127, do: char
-
   # If the buffer is empty, reusing the incoming data saves
   # a potentially large allocation of memory.
   # This should be fixed in a subsequent OTP release.

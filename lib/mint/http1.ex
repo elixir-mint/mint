@@ -973,7 +973,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp lower_header_keys(headers) do
-    for {name, value} <- headers, do: {Util.downcase_ascii(name), value}
+    for {name, value} <- headers, do: {String.downcase(name, :ascii), value}
   end
 
   defp add_default_headers(headers, conn) do
