@@ -1980,7 +1980,7 @@ defmodule Mint.HTTP2Test do
       assert {:error, %HTTP2{} = _conn, error} =
                HTTP2.stream_request_body(conn, ref, {:eof, trailer_headers})
 
-      assert_http2_error error, {:unallowed_trailing_header, {"host", "example.com"}}
+      assert_http2_error error, {:unallowed_trailing_header, "Host"}
 
       assert HTTP2.get_window_size(conn, :connection) == expected_window_size
       assert HTTP2.open_request_count(conn) == 1

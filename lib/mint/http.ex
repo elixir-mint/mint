@@ -121,10 +121,8 @@ defmodule Mint.HTTP do
   > gets logged by using the `Logger` API and Erlang's `:logger` module.
   """
 
-  import Mint.Core.Util
-
   alias Mint.{Types, TunnelProxy, UnsafeProxy}
-  alias Mint.Core.Transport
+  alias Mint.Core.{Transport, Util}
 
   @behaviour Mint.Core.Conn
 
@@ -410,7 +408,7 @@ defmodule Mint.HTTP do
   def connect(scheme, address, port, opts \\ []) do
     case Keyword.fetch(opts, :proxy) do
       {:ok, {proxy_scheme, proxy_address, proxy_port, proxy_opts}} ->
-        case scheme_to_transport(scheme) do
+        case Util.scheme_to_transport(scheme) do
           Transport.TCP ->
             proxy = {proxy_scheme, proxy_address, proxy_port}
             host = {scheme, address, port}

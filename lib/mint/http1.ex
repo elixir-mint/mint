@@ -13,11 +13,9 @@ defmodule Mint.HTTP1 do
   how to use the data structure and client architecture, see `Mint`.
   """
 
-  import Mint.Core.Util
+  alias Mint.Core.{Headers, Util}
 
-  alias Mint.Core.Util
-
-  alias Mint.HTTP1.{Parse, Request, Response, Headers}
+  alias Mint.HTTP1.{Parse, Request, Response}
   alias Mint.{HTTPError, TransportError, Types}
 
   require Logger
@@ -133,7 +131,7 @@ defmodule Mint.HTTP1 do
     # TODO: Also ALPN negotiate HTTP1?
 
     hostname = Mint.Core.Util.hostname(opts, address)
-    transport = scheme_to_transport(scheme)
+    transport = Util.scheme_to_transport(scheme)
 
     transport_opts =
       Keyword.get(opts, :transport_opts, [])
@@ -156,7 +154,7 @@ defmodule Mint.HTTP1 do
   def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
     # TODO: Also ALPN negotiate HTTP1?
 
-    transport = scheme_to_transport(new_scheme)
+    transport = Util.scheme_to_transport(new_scheme)
 
     transport_opts =
       Keyword.get(opts, :transport_opts, [])
@@ -177,7 +175,7 @@ defmodule Mint.HTTP1 do
           keyword()
         ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
-    transport = scheme_to_transport(scheme)
+    transport = Util.scheme_to_transport(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
 
@@ -191,7 +189,7 @@ defmodule Mint.HTTP1 do
             "the :log option must be a boolean, got: #{inspect(log?)}"
     end
 
-    with :ok <- inet_opts(transport, socket),
+    with :ok <- Util.inet_opts(transport, socket),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       conn = %__MODULE__{
         transport: transport,
@@ -379,7 +377,7 @@ defmodule Mint.HTTP1 do
         ref,
         chunk
       ) do
-    with {:ok, chunk} <- validate_chunk(chunk),
+    with {:ok, chunk} <- validate_chunk(conn, chunk),
          :ok <- conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       case chunk do
         :eof ->
@@ -407,21 +405,21 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp validate_chunk({:eof, trailer_headers}) do
-    headers = lower_header_keys(trailer_headers)
+  defp validate_chunk(conn, {:eof, trailer_headers}) do
+    headers = Headers.from_raw_headers(trailer_headers)
 
-    if unallowed_header = find_unallowed_trailer_header(headers) do
+    if unallowed_header = Headers.find_unallowed_trailer(headers) do
       {:error, wrap_error({:unallowed_trailing_header, unallowed_header})}
     else
-      {:ok, {:eof, headers}}
+      {:ok, {:eof, Headers.to_raw_headers(headers, conn.case_sensitive_headers)}}
     end
   end
 
-  defp validate_chunk(:eof) do
+  defp validate_chunk(_conn, :eof) do
     {:ok, :eof}
   end
 
-  defp validate_chunk(chunk) do
+  defp validate_chunk(_conn, chunk) do
     if IO.iodata_length(chunk) == 0 do
       :empty_chunk
     else
@@ -474,7 +472,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp handle_data(%__MODULE__{request: request} = conn, data) do
-    data = maybe_concat(conn.buffer, data)
+    data = Util.maybe_concat(conn.buffer, data)
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
@@ -811,7 +809,7 @@ defmodule Mint.HTTP1 do
         decode_trailer_headers(conn, rest, responses, headers)
 
       {:ok, :eof, rest} ->
-        headers = Util.remove_unallowed_trailer_headers(headers)
+        headers = Headers.remove_unallowed_trailer(headers)
 
         responses = [
           {:done, conn.request.ref}

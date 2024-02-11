@@ -937,7 +937,7 @@ defmodule Mint.HTTP1Test do
       assert {:error, _conn, error} =
                HTTP1.stream_request_body(conn, ref, {:eof, trailer_headers})
 
-      assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
+      assert %HTTPError{reason: {:unallowed_trailing_header, "Host"}} = error
     end
 
     test "pipeline", %{conn: conn} do
