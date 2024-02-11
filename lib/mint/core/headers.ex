@@ -1,5 +1,6 @@
 defmodule Mint.Core.Headers do
-  @type canonical_header() :: {original_name :: String.t(), canonical_name :: String.t(), value :: String.t()}
+  @type canonical_header() ::
+          {original_name :: String.t(), canonical_name :: String.t(), value :: String.t()}
   @type raw_header() :: {original_name :: String.t(), value :: String.t()}
 
   @unallowed_trailer_headers MapSet.new([
@@ -71,7 +72,8 @@ defmodule Mint.Core.Headers do
     end
   end
 
-  @spec replace_header([canonical_header()], String.t(), String.t(), String.t()) :: [canonical_header()]
+  @spec replace_header([canonical_header()], String.t(), String.t(), String.t()) ::
+          [canonical_header()]
   def replace_header(headers, new_name, canonical_name, value) do
     List.keyreplace(headers, canonical_name, 1, {new_name, canonical_name, value})
   end
@@ -81,7 +83,8 @@ defmodule Mint.Core.Headers do
     List.keymember?(headers, name, 1)
   end
 
-  @spec put_new_header([canonical_header()], String.t(), String.t(), String.t() | nil) :: [canonical_header()]
+  @spec put_new_header([canonical_header()], String.t(), String.t(), String.t() | nil) ::
+          [canonical_header()]
   def put_new_header(headers, _name, _canonical_name, nil) do
     headers
   end
@@ -94,7 +97,8 @@ defmodule Mint.Core.Headers do
     end
   end
 
-  @spec put_new_header([canonical_header()], String.t(), String.t(), (() -> String.t())) :: [canonical_header()]
+  @spec put_new_header([canonical_header()], String.t(), String.t(), (-> String.t())) ::
+          [canonical_header()]
   def put_new_header_lazy(headers, name, canonical_name, fun) do
     if List.keymember?(headers, canonical_name, 1) do
       headers
