@@ -118,13 +118,13 @@ defmodule Mint.Core.Headers do
     Enum.reject(headers, fn {name, _value} -> name in @unallowed_trailer_headers end)
   end
 
-  @spec lower_raw(raw_header()) :: raw_header()
+  @spec lower_raw(String.t()) :: String.t()
   def lower_raw(name) do
     String.downcase(name, :ascii)
   end
 
   @spec lower_raws([raw_header()]) :: [raw_header()]
   def lower_raws(headers) do
-    Enum.map(headers, fn {name, value} -> {String.downcase(name, :ascii), value} end)
+    Enum.map(headers, fn {name, value} -> {lower_raw(name), value} end)
   end
 end
