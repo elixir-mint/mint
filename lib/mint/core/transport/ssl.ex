@@ -323,6 +323,7 @@ defmodule Mint.Core.Transport.SSL do
 
   defp connect(address, hostname, port, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    inet4? = Keyword.get(opts, :inet4, true)
     inet6? = Keyword.get(opts, :inet6, false)
 
     opts = ssl_opts(String.to_charlist(hostname), opts)
@@ -334,8 +335,11 @@ defmodule Mint.Core.Transport.SSL do
         {:ok, sslsocket} ->
           {:ok, sslsocket}
 
-        _error ->
+        _error when inet4? ->
           wrap_err(:ssl.connect(address, port, opts, timeout))
+
+        error ->
+          wrap_err(error)
       end
     else
       # Use the defaults provided by ssl/gen_tcp.
@@ -428,7 +432,7 @@ defmodule Mint.Core.Transport.SSL do
     default_ssl_opts(hostname)
     |> Keyword.merge(opts)
     |> Keyword.merge(@transport_opts)
-    |> Keyword.drop([:timeout, :inet6])
+    |> Keyword.drop([:timeout, :inet4, :inet6])
     |> add_verify_opts(hostname)
     |> remove_incompatible_ssl_opts()
     |> add_ciphers_opt()
