@@ -1106,15 +1106,15 @@ defmodule Mint.HTTP2 do
     encode_data(conn, stream_id, "", [:end_stream])
   end
 
-  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailer_headers}) do
-    trailer_headers = Headers.from_raw_headers(trailer_headers)
+  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailers}) do
+    trailers = Headers.from_raw(trailers)
 
-    if unallowed_trailer_header = Headers.find_unallowed_trailer(trailer_headers) do
+    if unallowed_trailer_header = Headers.find_unallowed_trailer(trailers) do
       error = wrap_error({:unallowed_trailing_header, unallowed_trailer_header})
       throw({:mint, conn, error})
     end
 
-    trailer_headers = Headers.to_raw_headers(trailer_headers, _case_sensitive_headers = false)
+    trailer_headers = Headers.to_raw(trailers, _case_sensitive = false)
     encode_headers(conn, stream_id, trailer_headers, [:end_headers, :end_stream])
   end
 

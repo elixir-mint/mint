@@ -120,9 +120,9 @@ defmodule Mint.HTTP1 do
 
   ## Additional Options
 
-    * `:case_sensitive_headers` - (boolean) if set to true the case of the supplied
+    * `:case_sensitive_headers` - (boolean) if set to `true` the case of the supplied
        headers in requests will be preserved. The default is to lowercase the headers
-       because http/1.1 header names are not case-insensitive.
+       because HTTP/1.1 header names are case-insensitive.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -270,7 +270,7 @@ defmodule Mint.HTTP1 do
 
     headers =
       headers
-      |> Headers.from_raw_headers()
+      |> Headers.from_raw()
       |> add_default_headers(conn)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
@@ -278,7 +278,7 @@ defmodule Mint.HTTP1 do
            Request.encode(
              method,
              path,
-             Headers.to_raw_headers(headers, conn.case_sensitive_headers),
+             Headers.to_raw(headers, conn.case_sensitive_headers),
              body
            ),
          :ok <- transport.send(socket, iodata) do
@@ -405,13 +405,13 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp validate_chunk(conn, {:eof, trailer_headers}) do
-    headers = Headers.from_raw_headers(trailer_headers)
+  defp validate_chunk(conn, {:eof, trailers}) do
+    trailers = Headers.from_raw(trailers)
 
-    if unallowed_header = Headers.find_unallowed_trailer(headers) do
+    if unallowed_header = Headers.find_unallowed_trailer(trailers) do
       {:error, wrap_error({:unallowed_trailing_header, unallowed_header})}
     else
-      {:ok, {:eof, Headers.to_raw_headers(headers, conn.case_sensitive_headers)}}
+      {:ok, {:eof, Headers.to_raw(trailers, conn.case_sensitive_headers)}}
     end
   end
 
@@ -988,8 +988,8 @@ defmodule Mint.HTTP1 do
 
   defp add_default_headers(headers, conn) do
     headers
-    |> Headers.put_new_header("User-Agent", "user-agent", @user_agent)
-    |> Headers.put_new_header("Host", "host", default_host_header(conn))
+    |> Headers.put_new("User-Agent", "user-agent", @user_agent)
+    |> Headers.put_new("Host", "host", default_host_header(conn))
   end
 
   # If the port is the default for the scheme, don't add it to the host header
@@ -1003,10 +1003,10 @@ defmodule Mint.HTTP1 do
 
   defp add_content_length_or_transfer_encoding(headers, :stream) do
     cond do
-      Headers.has_header?(headers, "content-length") ->
+      Headers.has?(headers, "content-length") ->
         {:ok, headers, :identity}
 
-      found = Headers.find_header(headers, "transfer-encoding") ->
+      found = Headers.find(headers, "transfer-encoding") ->
         {raw_name, value} = found
 
         with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
@@ -1014,7 +1014,7 @@ defmodule Mint.HTTP1 do
             {:ok, headers, :identity}
           else
             headers =
-              Headers.replace_header(headers, raw_name, "transfer-encoding", value <> ",chunked")
+              Headers.replace(headers, raw_name, "transfer-encoding", value <> ",chunked")
 
             {:ok, headers, :chunked}
           end
@@ -1024,7 +1024,7 @@ defmodule Mint.HTTP1 do
       # chunked transfer-encoding and handle the encoding ourselves.
       true ->
         headers =
-          Headers.put_new_header(headers, "Transfer-Encoding", "transfer-encoding", "chunked")
+          Headers.put_new(headers, "Transfer-Encoding", "transfer-encoding", "chunked")
 
         {:ok, headers, :chunked}
     end
@@ -1037,7 +1037,7 @@ defmodule Mint.HTTP1 do
   defp add_content_length_or_transfer_encoding(headers, body) do
     length_fun = fn -> body |> IO.iodata_length() |> Integer.to_string() end
 
-    {:ok, Headers.put_new_header_lazy(headers, "Content-Length", "content-length", length_fun),
+    {:ok, Headers.put_new_lazy(headers, "Content-Length", "content-length", length_fun),
      :identity}
   end
 
