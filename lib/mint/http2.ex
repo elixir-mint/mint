@@ -125,12 +125,11 @@ defmodule Mint.HTTP2 do
   > is enabled.
   """
 
-  import Mint.Core.Util
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
 
   alias Mint.{HTTPError, TransportError}
   alias Mint.Types
-  alias Mint.Core.Util
+  alias Mint.Core.{Headers, Util}
   alias Mint.HTTP2.Frame
 
   require Logger
@@ -405,7 +404,7 @@ defmodule Mint.HTTP2 do
           keyword()
         ) :: {:ok, t()} | {:error, Types.error()}
   def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
-    transport = scheme_to_transport(new_scheme)
+    transport = Util.scheme_to_transport(new_scheme)
 
     transport_opts =
       opts
@@ -521,7 +520,7 @@ defmodule Mint.HTTP2 do
       when is_binary(method) and is_binary(path) and is_list(headers) do
     headers =
       headers
-      |> lower_header_keys()
+      |> Headers.lower_raws()
       |> add_pseudo_headers(conn, method, path)
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
@@ -974,7 +973,7 @@ defmodule Mint.HTTP2 do
           keyword()
         ) :: {:ok, t()} | {:error, Types.error()}
   def initiate(scheme, socket, hostname, port, opts) do
-    transport = scheme_to_transport(scheme)
+    transport = Util.scheme_to_transport(scheme)
     scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
@@ -1002,7 +1001,7 @@ defmodule Mint.HTTP2 do
       hostname: hostname,
       port: port,
       authority: authority,
-      transport: scheme_to_transport(scheme),
+      transport: Util.scheme_to_transport(scheme),
       socket: socket,
       mode: mode,
       scheme: scheme_string,
@@ -1010,7 +1009,7 @@ defmodule Mint.HTTP2 do
       log: log?
     }
 
-    with :ok <- inet_opts(transport, socket),
+    with :ok <- Util.inet_opts(transport, socket),
          client_settings = settings(stream_id: 0, params: client_settings_params),
          preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
@@ -1065,12 +1064,12 @@ defmodule Mint.HTTP2 do
   defp negotiate(address, port, :http, transport_opts) do
     # We don't support protocol negotiation for TCP connections
     # so currently we just assume the HTTP/2 protocol
-    transport = scheme_to_transport(:http)
+    transport = Util.scheme_to_transport(:http)
     transport.connect(address, port, transport_opts)
   end
 
   defp negotiate(address, port, :https, transport_opts) do
-    transport = scheme_to_transport(:https)
+    transport = Util.scheme_to_transport(:https)
 
     with {:ok, socket} <- transport.connect(address, port, transport_opts),
          {:ok, protocol} <- transport.negotiated_protocol(socket) do
@@ -1107,14 +1106,15 @@ defmodule Mint.HTTP2 do
     encode_data(conn, stream_id, "", [:end_stream])
   end
 
-  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailer_headers}) do
-    lowered_headers = lower_header_keys(trailer_headers)
+  defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailers}) do
+    trailers = Headers.from_raw(trailers)
 
-    if unallowed_trailer_header = Util.find_unallowed_trailer_header(lowered_headers) do
+    if unallowed_trailer_header = Headers.find_unallowed_trailer(trailers) do
       error = wrap_error({:unallowed_trailing_header, unallowed_trailer_header})
       throw({:mint, conn, error})
     end
 
+    trailer_headers = Headers.to_raw(trailers, _case_sensitive = false)
     encode_headers(conn, stream_id, trailer_headers, [:end_headers, :end_stream])
   end
 
@@ -1402,7 +1402,7 @@ defmodule Mint.HTTP2 do
   ## Frame handling
 
   defp maybe_concat_and_handle_new_data(conn, data) do
-    data = maybe_concat(conn.buffer, data)
+    data = Util.maybe_concat(conn.buffer, data)
     {conn, responses} = handle_new_data(conn, data, [])
     {:ok, conn, Enum.reverse(responses)}
   end
@@ -1705,7 +1705,7 @@ defmodule Mint.HTTP2 do
       headers when received_first_headers? ->
         if end_stream? do
           conn = close_stream!(conn, stream.id, :no_error)
-          headers = headers |> Util.remove_unallowed_trailer_headers() |> join_cookie_headers()
+          headers = headers |> Headers.remove_unallowed_trailer() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
           # Trailer headers must set the END_STREAM flag because they're
@@ -1742,7 +1742,7 @@ defmodule Mint.HTTP2 do
 
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
-    case Enum.split_with(headers, fn {name, _value} -> lower_header_name(name) == "cookie" end) do
+    case Enum.split_with(headers, fn {name, _value} -> Headers.lower_raw(name) == "cookie" end) do
       {[], _headers} ->
         headers
 
@@ -2227,8 +2227,8 @@ defmodule Mint.HTTP2 do
     "can't send more data on this request since it's not streaming"
   end
 
-  def format_error({:unallowed_trailing_header, {name, value}}) do
-    "header #{inspect(name)} (with value #{inspect(value)}) is not allowed as a trailer header"
+  def format_error({:unallowed_trailing_header, name}) do
+    "header #{inspect(name)} is not allowed as a trailer header"
   end
 
   def format_error(:missing_status_header) do

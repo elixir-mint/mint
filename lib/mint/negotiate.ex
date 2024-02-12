@@ -1,14 +1,14 @@
 defmodule Mint.Negotiate do
   @moduledoc false
 
-  import Mint.Core.Util
-
   alias Mint.{
     HTTP1,
     HTTP2,
     TransportError,
     Types
   }
+
+  alias Mint.Core.Util
 
   @default_protocols [:http1, :http2]
   @transport_opts [alpn_advertised_protocols: ["http/1.1", "h2"]]
@@ -68,7 +68,7 @@ defmodule Mint.Negotiate do
   end
 
   defp connect_negotiate(scheme, address, port, opts) do
-    transport = scheme_to_transport(scheme)
+    transport = Util.scheme_to_transport(scheme)
     hostname = Mint.Core.Util.hostname(opts, address)
 
     transport_opts =
@@ -106,7 +106,7 @@ defmodule Mint.Negotiate do
   end
 
   defp connect_upgrade(proxy_scheme, transport_state, new_scheme, hostname, port, opts) do
-    transport = scheme_to_transport(new_scheme)
+    transport = Util.scheme_to_transport(new_scheme)
 
     transport_opts =
       opts
@@ -123,7 +123,7 @@ defmodule Mint.Negotiate do
   end
 
   defp alpn_negotiate(scheme, socket, hostname, port, opts) do
-    transport = scheme_to_transport(scheme)
+    transport = Util.scheme_to_transport(scheme)
 
     case transport.negotiated_protocol(socket) do
       {:ok, "http/1.1"} ->

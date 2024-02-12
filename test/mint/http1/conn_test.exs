@@ -650,6 +650,116 @@ defmodule Mint.HTTP1Test do
 
       assert HTTP1.open?(conn)
     end
+
+    test "non lower case headers", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
+
+      assert_receive {^server_ref, server_socket}
+      body = "body"
+      content_length = byte_size(body) |> Integer.to_string()
+
+      {:ok, _conn, _ref} =
+        HTTP1.request(
+          conn,
+          "GET",
+          "/",
+          [
+            {"User-Agent", "myapp/1.0"},
+            {"Host", "localhost"},
+            {"Content-Length", content_length}
+          ],
+          body
+        )
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               User-Agent: myapp/1.0
+               Host: localhost
+               Content-Length: 4
+
+               body\
+               """)
+    end
+
+    test "non lower case headers using defaults", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
+
+      assert_receive {^server_ref, server_socket}
+      body = "body"
+
+      {:ok, _conn, _ref} =
+        HTTP1.request(
+          conn,
+          "GET",
+          "/",
+          [
+            {"User-Agent", "myapp/1.0"}
+          ],
+          body
+        )
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               Content-Length: 4
+               Host: localhost:#{port}
+               User-Agent: myapp/1.0
+
+               body\
+               """)
+    end
+
+    test "non lower case headers identity transfer encoding", %{
+      port: port,
+      server_ref: server_ref
+    } do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
+
+      assert_receive {^server_ref, server_socket}
+
+      {:ok, _conn, _ref} =
+        HTTP1.request(
+          conn,
+          "GET",
+          "/",
+          [{"User-Agent", "myapp/1.0"}, {"Host", "localhost"}, {"TRANSFER-ENCODING", "identity"}],
+          :stream
+        )
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               User-Agent: myapp/1.0
+               Host: localhost
+               TRANSFER-ENCODING: identity
+
+               """)
+    end
+
+    test "non lower case headers gzip encoding", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, case_sensitive_headers: true)
+
+      assert_receive {^server_ref, server_socket}
+
+      {:ok, _conn, _ref} =
+        HTTP1.request(
+          conn,
+          "GET",
+          "/",
+          [{"User-Agent", "myapp/1.0"}, {"Host", "localhost"}, {"TRANSFER-ENCODING", "gzip"}],
+          :stream
+        )
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               User-Agent: myapp/1.0
+               Host: localhost
+               TRANSFER-ENCODING: gzip,chunked
+
+               """)
+    end
   end
 
   describe "streaming requests" do
@@ -827,7 +937,7 @@ defmodule Mint.HTTP1Test do
       assert {:error, _conn, error} =
                HTTP1.stream_request_body(conn, ref, {:eof, trailer_headers})
 
-      assert %HTTPError{reason: {:unallowed_trailing_header, {"host", "example.com"}}} = error
+      assert %HTTPError{reason: {:unallowed_trailing_header, "Host"}} = error
     end
 
     test "pipeline", %{conn: conn} do

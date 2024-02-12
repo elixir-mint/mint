@@ -1,6 +1,8 @@
 defmodule Mint.HTTP1.Response do
   @moduledoc false
 
+  alias Mint.Core.Headers
+
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do
       {:ok, {:http_response, version, status, reason}, rest} ->
@@ -37,5 +39,5 @@ defmodule Mint.HTTP1.Response do
   end
 
   defp header_name(atom) when is_atom(atom), do: atom |> Atom.to_string() |> header_name()
-  defp header_name(binary) when is_binary(binary), do: Mint.Core.Util.lower_header_name(binary)
+  defp header_name(binary) when is_binary(binary), do: Headers.lower_raw(binary)
 end
