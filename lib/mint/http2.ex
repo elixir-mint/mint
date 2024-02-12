@@ -448,8 +448,8 @@ defmodule Mint.HTTP2 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t(), :read | :write | :read_write) :: boolean()
-  def open?(%__MODULE__{state: state} = _conn, type \\ :read_write)
+  @spec open?(t(), :read | :write) :: boolean()
+  def open?(%__MODULE__{state: state} = _conn, type \\ :write)
       when type in [:read, :write, :read_write] do
     case state do
       :handshaking -> true

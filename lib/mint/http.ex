@@ -503,16 +503,16 @@ defmodule Mint.HTTP do
   either open, or closed (for both reading and writing). In HTTP/2, the connection can be closed only
   for writing but not for reading, meaning that you cannot send any more data to the
   server but you can still receive data from the server. In this case, `Mint.HTTP.open?(conn, :read)`
-  would return `true` but `Mint.HTTP.open?(conn, :read_write)` would return `false`.
+  would return `true` but `Mint.HTTP.open?(conn, :write)` would return `false`.
   See the "Closed connection" section in the module documentation of `Mint.HTTP2`.
 
   If a connection is *completely closed* (that is, `Mint.HTTP.open?(conn, :read)` returns `false`),
   it has become useless and you should get rid of it. If you still need a connection
   to the server, start a new connection with `connect/4`.
 
-  > #### The default value of `type` is `:read_write` {: .warning}
+  > #### The default value of `type` is `:write` {: .warning}
   >
-  > With the default value of `type` being `:read_write`, a call to
+  > With the default value of `type` being `:write`, a call to
   > `Mint.HTTP.open?(conn)` will return `false` if `conn` was closed for writing
   > but is still open for reading. If you need to make sure the connection is
   > completely closed, check that `Mint.HTTP.open?(conn, :read)` returns `false`.
@@ -525,8 +525,8 @@ defmodule Mint.HTTP do
 
   """
   @impl true
-  @spec open?(t(), :read | :write | :read_write) :: boolean()
-  def open?(conn, type \\ :read_write), do: conn_module(conn).open?(conn, type)
+  @spec open?(t(), :read | :write) :: boolean()
+  def open?(conn, type \\ :write), do: conn_module(conn).open?(conn, type)
 
   @doc """
   Sends a request to the connected server.

@@ -231,8 +231,8 @@ defmodule Mint.HTTP1 do
   See `Mint.HTTP.open?/1`.
   """
   @impl true
-  @spec open?(t(), :read | :write | :read_write) :: boolean()
-  def open?(conn, type \\ :read_write)
+  @spec open?(t(), :read | :write) :: boolean()
+  def open?(conn, type \\ :write)
 
   def open?(%__MODULE__{state: state}, type) when type in [:read, :write, :read_write] do
     state == :open
