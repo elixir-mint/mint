@@ -299,6 +299,12 @@ defmodule Mint.HTTP do
       seconds), and may be overridden by the caller. Set to `:infinity` to
       disable the connect timeout.
 
+    * `:inet6` - if set to `true` enables IPv6 connection. Defaults to `false`
+      and may be overridden by the caller.
+
+    * `:inet4` - if set to `true` falls back to IPv4 if IPv6 connection fails.
+      Defaults to `true` and may be overridden by the caller.
+
   Options for `:https` only:
 
     * `:alpn_advertised_protocols` - managed by Mint. Cannot be overridden.

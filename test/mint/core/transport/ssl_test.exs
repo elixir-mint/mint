@@ -186,15 +186,15 @@ defmodule Mint.Core.Transport.SSLTest do
 
       task =
         Task.async(fn ->
-          with {:ok, socket} <- :ssl.transport_accept(listen_socket) do
-            if function_exported?(:ssl, :handshake, 1) do
-              {:ok, _} = apply(:ssl, :handshake, [socket])
-            else
-              :ok = apply(:ssl, :ssl_accept, [socket])
-            end
+          {:ok, socket} = :ssl.transport_accept(listen_socket)
 
-            {:ok, socket}
+          if function_exported?(:ssl, :handshake, 1) do
+            {:ok, _} = apply(:ssl, :handshake, [socket])
+          else
+            :ok = apply(:ssl, :ssl_accept, [socket])
           end
+
+          {:ok, socket}
         end)
 
       assert {:ok, _socket} =
@@ -207,6 +207,73 @@ defmodule Mint.Core.Transport.SSLTest do
                )
 
       assert {:ok, _server_socket} = Task.await(task)
+    end
+
+    test "can fall back to IPv4 if IPv6 fails" do
+      ssl_opts = [
+        mode: :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        nodelay: true,
+        certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
+        keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
+      ]
+
+      {:ok, listen_socket} = :ssl.listen(0, ssl_opts)
+      {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+
+      task =
+        Task.async(fn ->
+          {:ok, socket} = :ssl.transport_accept(listen_socket)
+
+          if function_exported?(:ssl, :handshake, 1) do
+            {:ok, _} = apply(:ssl, :handshake, [socket])
+          else
+            :ok = apply(:ssl, :ssl_accept, [socket])
+          end
+
+          {:ok, socket}
+        end)
+
+      assert {:ok, _socket} =
+               SSL.connect("localhost", port,
+                 active: false,
+                 inet6: true,
+                 timeout: 1000,
+                 verify: :verify_none
+               )
+
+      assert {:ok, _server_socket} = Task.await(task)
+    end
+
+    test "does not fall back to IPv4 if IPv4 is disabled" do
+      ssl_opts = [
+        :inet,
+        mode: :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        nodelay: true,
+        certfile: Path.expand("../../../support/mint/certificate.pem", __DIR__),
+        keyfile: Path.expand("../../../support/mint/key.pem", __DIR__)
+      ]
+
+      {:ok, listen_socket} = :ssl.listen(0, ssl_opts)
+      {:ok, {_address, port}} = :ssl.sockname(listen_socket)
+
+      Task.async(fn ->
+        {:ok, _socket} = :ssl.transport_accept(listen_socket)
+      end)
+
+      assert {:error, %Mint.TransportError{reason: :econnrefused}} =
+               SSL.connect("localhost", port,
+                 active: false,
+                 inet6: true,
+                 inet4: false,
+                 timeout: 1000,
+                 verify: :verify_none
+               )
     end
   end
 

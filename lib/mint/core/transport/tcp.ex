@@ -19,12 +19,13 @@ defmodule Mint.Core.Transport.TCP do
     opts = Keyword.delete(opts, :hostname)
 
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    inet4? = Keyword.get(opts, :inet4, true)
     inet6? = Keyword.get(opts, :inet6, false)
 
     opts =
       opts
       |> Keyword.merge(@transport_opts)
-      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet6])
+      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6])
 
     if inet6? do
       # Try inet6 first, then fall back to the defaults provided by
@@ -33,8 +34,11 @@ defmodule Mint.Core.Transport.TCP do
         {:ok, socket} ->
           {:ok, socket}
 
-        _error ->
+        _error when inet4? ->
           wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+
+        error ->
+          wrap_err(error)
       end
     else
       # Use the defaults provided by gen_tcp.
