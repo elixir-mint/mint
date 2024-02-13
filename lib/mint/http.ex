@@ -302,7 +302,7 @@ defmodule Mint.HTTP do
     * `:inet6` - if set to `true` enables IPv6 connection. Defaults to `false`
       and may be overridden by the caller.
 
-    * `:inet4` - if set to `true` falls back to IPv4 if IPv6 connection failed.
+    * `:inet4` - if set to `true` falls back to IPv4 if IPv6 connection fails.
       Defaults to `true` and may be overridden by the caller.
 
   Options for `:https` only:
