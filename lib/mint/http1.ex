@@ -234,6 +234,7 @@ defmodule Mint.HTTP1 do
   @spec open?(t(), :read | :write) :: boolean()
   def open?(conn, type \\ :write)
 
+  # TODO: hard-deprecate :read_write in 1.7.
   def open?(%__MODULE__{state: state}, type) when type in [:read, :write, :read_write] do
     state == :open
   end
