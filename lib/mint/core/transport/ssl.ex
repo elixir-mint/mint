@@ -702,7 +702,7 @@ defmodule Mint.Core.Transport.SSL do
   defp blocked_cipher?({kex, cipher, _mac, prf}), do: blocked_cipher?({kex, cipher, prf})
   defp blocked_cipher?({_kex, _cipher, _prf} = suite), do: suite in @blocked_ciphers
 
-  if {:module, CAStore} == Code.ensure_loaded(CAStore) do
+  if Code.ensure_loaded?(CAStore) do
     defp raise_on_missing_castore! do
       :ok
     end
