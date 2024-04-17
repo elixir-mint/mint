@@ -702,8 +702,12 @@ defmodule Mint.Core.Transport.SSL do
   defp blocked_cipher?({kex, cipher, _mac, prf}), do: blocked_cipher?({kex, cipher, prf})
   defp blocked_cipher?({_kex, _cipher, _prf} = suite), do: suite in @blocked_ciphers
 
-  defp raise_on_missing_castore! do
-    Code.ensure_loaded?(CAStore) ||
+  if Code.ensure_loaded?(CAStore) do
+    defp raise_on_missing_castore! do
+      :ok
+    end
+  else
+    defp raise_on_missing_castore! do
       raise """
       default CA trust store not available; please add `:castore` to your project's \
       dependencies or specify the trust store using the :cacertfile/:cacerts option \
@@ -714,6 +718,7 @@ defmodule Mint.Core.Transport.SSL do
 
       See: https://www.erlang.org/blog/my-otp-25-highlights/#ca-certificates-can-be-fetched-from-the-os-standard-place
       """
+    end
   end
 
   defp wrap_err({:error, reason}), do: {:error, wrap_error(reason)}
