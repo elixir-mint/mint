@@ -232,21 +232,12 @@ defmodule Mint.HTTP2 do
       conn = unquote(conn)
 
       if conn.log do
-        Logger.log(normalize_logger_level(unquote(level)), unquote(message))
+        Logger.log(unquote(level), unquote(message))
       else
         :ok
       end
     end
   end
-
-  # TODO: remove this once we depend on Elixir 1.11+.
-  if macro_exported?(Logger, :warning, 2) do
-    defp normalize_logger_level(:warning), do: :warning
-  else
-    defp normalize_logger_level(:warning), do: :warn
-  end
-
-  defp normalize_logger_level(level), do: level
 
   ## Types
 
