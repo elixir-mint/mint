@@ -30,7 +30,7 @@ We need to attempt to decompress the data if the `content-encoding` header is pr
 # Returns a list of found compressions or [] if none found.
 defp get_content_encoding_header(headers) do
   headers
-  |> Enum.flat_map([], fn {name, value} ->
+  |> Enum.flat_map(fn {name, value} ->
     if String.downcase(name, :ascii) == "content-encoding" do
       value
       |> String.downcase()
@@ -44,7 +44,7 @@ defp get_content_encoding_header(headers) do
 end
 ```
 
-We use a combination of `Enum.flat_map/3` and `String.split/3` because the values can be comma-separated and spread over multiple headers. Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip algorithm.
+We use a combination of `Enum.flat_map/2` and `String.split/3` because the values can be comma-separated and spread over multiple headers. Now we should have a list like `["gzip"]`. We reversed the compression algorithms so that we decompress from the last one to the first one. Let's use this in another function that handles the decompression. Thankfully, Erlang ships with built-in support for gzip algorithm.
 
 ```elixir
 defp decompress_data(data, algorithms) do
