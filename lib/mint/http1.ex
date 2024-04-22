@@ -122,7 +122,7 @@ defmodule Mint.HTTP1 do
 
     * `:case_sensitive_headers` - (boolean) if set to `true` the case of the supplied
        headers in requests will be preserved. The default is to lowercase the headers
-       because HTTP/1.1 header names are case-insensitive.
+       because HTTP/1.1 header names are case-insensitive. *Available since v1.6.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::

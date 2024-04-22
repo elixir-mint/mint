@@ -296,7 +296,8 @@ defmodule Mint.HTTP do
       and may be overridden by the caller.
 
     * `:inet4` - if set to `true` falls back to IPv4 if IPv6 connection fails.
-      Defaults to `true` and may be overridden by the caller.
+      Defaults to `true` and may be overridden by the caller. *Available since
+      v1.6.0*.
 
   Options for `:https` only:
 

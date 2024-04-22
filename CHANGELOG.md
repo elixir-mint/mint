@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.0
+
+### New features
+
+  * Add `:case_sensitive_headers` option to `Mint.HTTP1.connect/4`.
+  * Add `:inet4` option to `Mint.HTTP.connect/4`.
+
+### Bug fixes and improvements
+
+  * Require Elixir 1.11+.
+  * Add `match_fun` clause to deal with IP addresses in TLS handshake.
+  * Optimize creation of HTTP/2 requests.
+  * Fix a compilation warning (unused `set_flag/2` function).
+  * Improve performance of downcasing headers.
+  * Deprecate `:read_write` option in `Mint.HTTP.open?/2`.
+  * Improve performance of checking for the CAStore library.
+
 ## v1.5.2
 
 ### Bug fixes and improvements
