@@ -279,10 +279,6 @@ defmodule Mint.HTTP2.FrameTest do
     map(positive_integer(), &(&1 * 2 + 1))
   end
 
-  defp non_negative_integer() do
-    map(integer(), &abs/1)
-  end
-
   defp error_code() do
     member_of([
       :no_error,

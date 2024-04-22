@@ -72,14 +72,14 @@ defmodule Mint.MixProject do
   defp deps do
     [
       {:castore, "~> 0.1.0 or ~> 1.0", optional: true},
-      {:hpax, "~> 0.1.1"},
+      {:hpax, "~> 0.1.1 or ~> 0.2.0"},
 
       # Dev/test dependencies
-      {:dialyxir, "~> 1.3.0", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.20", only: :dev},
-      {:excoveralls, "~> 0.17.0", only: :test},
+      {:excoveralls, "~> 0.18.0", only: :test},
       {:mox, "~> 1.0", only: :test},
-      {:stream_data, "~> 0.5.0", only: [:dev, :test]}
+      {:stream_data, "~> 0.6.0", only: [:dev, :test]}
     ]
   end
 end
