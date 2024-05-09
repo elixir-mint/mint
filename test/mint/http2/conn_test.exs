@@ -335,6 +335,25 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    test "doesn't send RST_STREAM when stream is declared ended in both sides", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert conn.streams[stream_id].state == :half_closed_local
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert_recv_frames([])
+      assert is_nil(conn.streams[stream_id])
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "stream state transitions" do

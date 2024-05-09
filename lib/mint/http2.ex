@@ -2105,7 +2105,7 @@ defmodule Mint.HTTP2 do
         reason == :remote_end_stream and stream.state == :half_closed_local ->
           conn
 
-        # We send a RST_STREAM with the given error code so that we move the 
+        # We send a RST_STREAM with the given error code so that we move the
         # stream to the :closed state (that is, we remove it).
         open?(conn) ->
           error_code = if reason == :remote_end_stream, do: :no_error, else: reason
