@@ -325,7 +325,7 @@ defmodule Mint.HTTP2Test do
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
 
-      assert_recv_frames [rst_stream(stream_id: ^stream_id)]
+      assert Enum.empty?(conn.streams)
 
       assert {:ok, %HTTP2{} = conn, []} =
                stream_frames(conn, [
@@ -333,6 +333,25 @@ defmodule Mint.HTTP2Test do
                  rst_stream(stream_id: stream_id, error_code: :no_error)
                ])
 
+      assert HTTP2.open?(conn)
+    end
+
+    test "doesn't send RST_STREAM when stream is declared ended in both sides", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert conn.streams[stream_id].state == :half_closed_local
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      assert_recv_frames([])
+      assert is_nil(conn.streams[stream_id])
       assert HTTP2.open?(conn)
     end
   end
@@ -763,8 +782,7 @@ defmodule Mint.HTTP2Test do
 
       assert [{:status, ^ref, 200}, {:headers, ^ref, _headers}, {:done, ^ref}] = responses
 
-      assert_recv_frames [rst_stream(error_code: :no_error)]
-
+      assert Enum.empty?(conn.streams)
       assert HTTP2.open?(conn)
     end
 
@@ -1465,8 +1483,6 @@ defmodule Mint.HTTP2Test do
                {:headers, ^ref, []},
                {:done, ^ref}
              ] = responses
-
-      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
 
       # Here we send headers for the two promised streams. Note that neither of the
       # header frames have the END_STREAM flag set otherwise we close the streams and

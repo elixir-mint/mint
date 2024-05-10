@@ -1566,7 +1566,7 @@ defmodule Mint.HTTP2 do
         responses = [{:data, stream.ref, data} | responses]
 
         if flag_set?(flags, :data, :end_stream) do
-          conn = close_stream!(conn, stream.id, :no_error)
+          conn = close_stream!(conn, stream.id, :remote_end_stream)
           {conn, [{:done, stream.ref} | responses]}
         else
           {conn, responses}
@@ -1675,7 +1675,7 @@ defmodule Mint.HTTP2 do
                 {conn, responses}
 
               end_stream? ->
-                conn = close_stream!(conn, stream.id, :no_error)
+                conn = close_stream!(conn, stream.id, :remote_end_stream)
                 {conn, [{:done, ref} | new_responses]}
 
               true ->
@@ -1685,7 +1685,7 @@ defmodule Mint.HTTP2 do
             end
 
           end_stream? ->
-            conn = close_stream!(conn, stream.id, :no_error)
+            conn = close_stream!(conn, stream.id, :remote_end_stream)
             {conn, [{:done, ref} | new_responses]}
 
           true ->
@@ -1695,7 +1695,7 @@ defmodule Mint.HTTP2 do
       # Trailer headers. We don't care about the :status header here.
       headers when received_first_headers? ->
         if end_stream? do
-          conn = close_stream!(conn, stream.id, :no_error)
+          conn = close_stream!(conn, stream.id, :remote_end_stream)
           headers = headers |> Headers.remove_unallowed_trailer() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
@@ -2094,18 +2094,27 @@ defmodule Mint.HTTP2 do
     throw({:mint, %{conn | state: :closed}, wrap_error({error_code, debug_data})})
   end
 
-  defp close_stream!(conn, stream_id, error_code) do
+  # Reason is either an error code or `remote_end_stream`
+  defp close_stream!(conn, stream_id, reason) do
     stream = Map.fetch!(conn.streams, stream_id)
 
-    # First of all we send a RST_STREAM with the given error code so that we
-    # move the stream to the :closed state (that is, we remove it).
-    rst_stream_frame = rst_stream(stream_id: stream_id, error_code: error_code)
-
     conn =
-      if open?(conn) do
-        send!(conn, Frame.encode(rst_stream_frame))
-      else
-        conn
+      cond do
+        # If the stream is ended on both sides, it is already deemed closed and
+        # there's no need to send a RST_STREAM frame
+        reason == :remote_end_stream and stream.state == :half_closed_local ->
+          conn
+
+        # We send a RST_STREAM with the given error code so that we move the
+        # stream to the :closed state (that is, we remove it).
+        open?(conn) ->
+          error_code = if reason == :remote_end_stream, do: :no_error, else: reason
+          rst_stream_frame = rst_stream(stream_id: stream_id, error_code: error_code)
+          send!(conn, Frame.encode(rst_stream_frame))
+
+        # If the connection is already closed, no-op
+        true ->
+          conn
       end
 
     delete_stream(conn, stream)
