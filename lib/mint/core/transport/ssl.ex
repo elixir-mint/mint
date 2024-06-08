@@ -572,8 +572,13 @@ defmodule Mint.Core.Transport.SSL do
     if Keyword.has_key?(opts, :cacertfile) or Keyword.has_key?(opts, :cacerts) do
       opts
     else
-      raise_on_missing_castore!()
-      Keyword.put(opts, :cacertfile, CAStore.file_path())
+      try do
+        Keyword.put(opts, :cacerts, :public_key.cacerts_get())
+      rescue
+        _ ->
+          raise_on_missing_castore!()
+          Keyword.put(opts, :cacertfile, CAStore.file_path())
+      end
     end
   end
 
