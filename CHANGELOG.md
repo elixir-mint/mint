@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.1
+
+### Bug fixes and improvements
+
+  * Default to using Erlang certificate store (see [`public_key:cacerts_get/0`](https://www.erlang.org/doc/apps/public_key/public_key.html#cacerts_get-0) and friends) if available, instead of [CAStore](https://github.com/elixir-mint/castore).
+  * Don't send `RST_STREAM` frames in HTTP/2 if they are not needed (this is a network optimization, not visible to users of Mint).
+
 ## v1.6.0
 
 ### New features
