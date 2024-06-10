@@ -18,6 +18,7 @@ defmodule Mint.MixProject do
         exclude: [
           :persistent_term,
           {:ssl, :cipher_suites, 1},
+          {:public_key, :cacerts_get, 0},
           CAStore
         ]
       ],
