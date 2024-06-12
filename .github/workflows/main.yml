@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - erlang: "26.2"
-            elixir: "1.16"
+          - erlang: "27.0"
+            elixir: "1.17"
             lint: true
             coverage: true
             dialyzer: true
