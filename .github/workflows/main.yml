@@ -22,10 +22,8 @@ jobs:
           - erlang: "24.3"
             elixir: "1.12"
           - erlang: "23.3.1"
-            elixir: "1.11"
+            elixir: "1.12"
             dialyzer: true
-          - erlang: "21.3"
-            elixir: "1.11.4-otp-21"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIX_ENV: test
