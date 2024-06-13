@@ -8,7 +8,7 @@ defmodule Mint.MixProject do
     [
       app: :mint,
       version: @version,
-      elixir: "~> 1.11",
+      elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
@@ -80,7 +80,7 @@ defmodule Mint.MixProject do
       {:ex_doc, "~> 0.20", only: :dev},
       {:excoveralls, "~> 0.18.0", only: :test},
       {:mox, "~> 1.0", only: :test},
-      {:stream_data, "~> 0.6.0", only: [:dev, :test]}
+      {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]
   end
 end
