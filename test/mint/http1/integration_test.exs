@@ -5,6 +5,8 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   alias Mint.{TransportError, HTTP1, HttpBin}
 
+  @moduletag :integration
+
   describe "local httpbin" do
     test "200 response" do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
@@ -113,6 +115,8 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   describe "httpbin.org" do
+    @describetag :integration
+
     test "keep alive" do
       assert {:ok, conn} =
                HTTP1.connect(:https, HttpBin.host(), HttpBin.https_port(),
@@ -196,8 +200,6 @@ defmodule Mint.HTTP1.IntegrationTest do
   end
 
   describe "badssl.com" do
-    @describetag :requires_internet_connection
-
     @tag :capture_log
     test "SSL with bad certificate" do
       assert {:error, %TransportError{reason: reason}} =

@@ -7,7 +7,7 @@ defmodule Mint.TunnelProxyTest do
   alias Mint.HttpBin
 
   @moduletag :proxy
-  @moduletag :requires_internet_connection
+  @moduletag :integration
 
   test "200 response - http://httpbin.org" do
     # Ensure we only match relevant messages

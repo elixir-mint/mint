@@ -6,7 +6,7 @@ defmodule HTTP2.IntegrationTest do
   alias Mint.HTTP2
   alias Mint.HttpBin
 
-  @moduletag :requires_internet_connection
+  @moduletag :integration
 
   setup context do
     transport_opts =

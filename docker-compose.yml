@@ -12,12 +12,12 @@ services:
       - "8889:8888"
 
   httpbin:
-    image: kennethreitz/httpbin:latest
+    image: docker.io/kennethreitz/httpbin:latest
     ports:
       - "8080:80"
 
   caddyhttpbin:
-    image: caddy:2.6.4-alpine
+    image: docker.io/caddy:2.6.4-alpine
     # In GitHub Actions we want to access the files created
     # by Caddy. However, in Linux these end up being owned by root
     # because the container by default runs using the root user

@@ -5,7 +5,7 @@ defmodule Mint.IntegrationTest do
 
   alias Mint.{TransportError, HTTP, HttpBin}
 
-  @moduletag :requires_internet_connection
+  @moduletag :integration
 
   describe "nghttp2.org" do
     test "SSL - select HTTP1" do

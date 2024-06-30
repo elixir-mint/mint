@@ -87,11 +87,11 @@ jobs:
         if: ${{ matrix.lint }}
 
       - name: Run tests
-        run: mix test --trace --include proxy
+        run: mix test --trace --include integration --include proxy
         if: ${{ !matrix.coverage }}
 
       - name: Run tests with coverage
-        run: mix coveralls.github --include proxy
+        run: mix coveralls.github --include integration --include proxy
         if: ${{ matrix.coverage }}
 
       - name: Run Dialyzer
