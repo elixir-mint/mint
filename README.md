@@ -19,7 +19,11 @@ defp deps do
 end
 ```
 
-Then, run `$ mix deps.get`.
+Then, run:
+
+```sh
+mix deps.get
+```
 
 ## Usage
 
@@ -106,13 +110,30 @@ Mint is a low-level client. If you need higher-level features such as connection
 
 If you wish to contribute, check out the [issue list][issues] and let us know what you want to work on, so that we can discuss it and reduce duplicate work.
 
-Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:requires_internet_connection`. Proxy tests are tagged with `:proxy` and require that you run `DOCKER_USER="$UID:$GID" docker-compose up` from the Mint root directory in order to run (they are excluded by default when you run `$ mix test`). A few examples of running tests:
+Tests are organized with tags. Integration tests that hit real websites over the internet are tagged with `:requires_internet_connection`. Proxy tests are tagged with `:proxy` (excluded by default) and require that you start local proxy instance through Docker Compose (or Podman Compose) from the Mint root directory in order to run.
 
-  * `$ mix test` to run the test suite without caring about Docker and `docker-compose up`.
+If you encounter `{:error, %Mint.TransportError{reason: :nxdomain}}` error during the integration test, this suggests your DNS-based adblocker (self-hosted or VPN) might be blocking social media sites used in the integration test cases.
 
-  * `$ mix test --exclude integration` to only run local tests (for example, you don't have an internet connection available).
+Here are a few examples of running tests:
 
-  * `$ mix test --include proxy` to run all tests, including proxy tests.
+Run all default tests which including `:requires_internet_connection` except `:proxy`:
+
+```sh
+mix test
+```
+
+Local tests, if you don't have an Internet connection available:
+
+```sh
+mix test --exclude requires_internet_connection
+```
+
+Run all tests:
+
+```sh
+DOCKER_USER="$UID:$GID" docker-compose up --detach # or podman-compose up --detach
+mix test --include proxy
+```
 
 ## License
 
@@ -122,7 +143,7 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
   you may not use this file except in compliance with the License.
   You may obtain a copy of the License at
 
-      http://www.apache.org/licenses/LICENSE-2.0
+      https://www.apache.org/licenses/LICENSE-2.0
 
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
