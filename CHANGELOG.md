@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.6.2
+
+### Bug fixes and improvements
+
+  * Allow for version `~> 1.0` of the `hpax` dependency.
+
 ## v1.6.1
 
 ### Bug fixes and improvements
