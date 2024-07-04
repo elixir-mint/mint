@@ -294,7 +294,10 @@ defmodule Mint.HTTP2.FrameTest do
       :connect_error,
       :enhance_your_calm,
       :inadequate_security,
-      :http_1_1_required
+      :http_1_1_required,
+      {:custom_error, 0x11},
+      {:custom_error, 0xFF},
+      {:custom_error, 70007}
     ])
   end
 end

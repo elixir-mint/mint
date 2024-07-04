@@ -474,4 +474,5 @@ defmodule Mint.HTTP2.Frame do
   end
 
   defp humanize_error_code(code), do: {:custom_error, code}
+  defp dehumanize_error_code({:custom_error, code}), do: code
 end
