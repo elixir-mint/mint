@@ -530,6 +530,136 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
+  TODO
+
+  ## Examples
+
+      iex> {:ok, conn} = Mint.HTTP1.connect(:https, "httpbin.org", 443, mode: :passive)
+      iex> {:ok, conn, ref} = Mint.HTTP1.request(conn, "GET", "/status/user-agent", [], nil)
+      iex> {:ok, _conn, response} = Mint.HTTP1.recv_response(conn, ref, 5000)
+      iex> response
+      %{
+        status: 201,
+        headers: [
+          {"date", ...},
+          ...
+        ],
+        body: "{\\n  \\"user-agent\\": \\"mint/1.6.2\\"\\n}\\n"
+      }
+  """
+  def recv_response(conn, ref, timeout) do
+    recv_response(conn, ref, timeout, %{status: nil, headers: [], body: ""}, fn
+      conn, {:status, status}, acc ->
+        {:cont, conn, %{acc | status: status}}
+
+      conn, {:headers, headers}, acc ->
+        {:cont, conn, update_in(acc.headers, &(&1 ++ headers))}
+
+      conn, {:data, data}, acc ->
+        {:cont, conn, update_in(acc.body, &(&1 <> data))}
+
+      conn, :done, acc ->
+        {:cont, conn, acc}
+    end)
+  end
+
+  @doc """
+  TODO
+
+  ## Examples
+
+      iex> {:ok, conn} = Mint.HTTP1.connect(:https, "httpbin.org", 443, mode: :passive)
+      iex> {:ok, conn, ref} = Mint.HTTP1.request(conn, "GET", "/user-agent", [], nil)
+      iex> {:ok, _conn, _acc} =
+      ...>   Mint.HTTP1.recv_response(conn, ref, 5000, nil, fn
+      ...>   conn, entry, acc ->
+      ...>     IO.inspect(entry)
+      ...>     {:cont, conn, acc}
+      ...>   end)
+
+  Outputs:
+
+      {:status, 201}
+      {:headers, [{"date", ...}, ...]}
+      {:data, "{\\n  \\"user-agent\\": \\"mint/1.6.2\\"\\n}\\n"}
+      :done
+  """
+  def recv_response(conn, ref, timeout, acc, fun) do
+    recv_response([], acc, fun, conn, ref, timeout)
+  end
+
+  defp recv_response([{:status, ref, status} | rest], acc, fun, conn, ref, timeout) do
+    case fun.(conn, {:status, status}, acc) do
+      {:cont, conn, acc} ->
+        recv_response(rest, acc, fun, conn, ref, timeout)
+
+      {:halt, conn, acc} ->
+        {:ok, conn, acc}
+
+      other ->
+        raise ArgumentError,
+              "expected {:cont, conn, acc} or {:halt, conn, acc}, got: #{inspect(other)}"
+    end
+  end
+
+  defp recv_response([{:headers, ref, headers} | rest], acc, fun, conn, ref, timeout) do
+    case fun.(conn, {:headers, headers}, acc) do
+      {:cont, conn, acc} ->
+        recv_response(rest, acc, fun, conn, ref, timeout)
+
+      {:halt, conn, acc} ->
+        {:ok, conn, acc}
+
+      other ->
+        raise ArgumentError,
+              "expected {:cont, conn, acc} or {:halt, conn, acc}, got: #{inspect(other)}"
+    end
+  end
+
+  defp recv_response([{:data, ref, data} | rest], acc, fun, conn, ref, timeout) do
+    case fun.(conn, {:data, data}, acc) do
+      {:cont, conn, acc} ->
+        recv_response(rest, acc, fun, conn, ref, timeout)
+
+      {:halt, conn, acc} ->
+        {:ok, conn, acc}
+
+      other ->
+        raise ArgumentError,
+              "expected {:cont, conn, acc} or {:halt, conn, acc}, got: #{inspect(other)}"
+    end
+  end
+
+  defp recv_response([{:done, ref} | _], acc, fun, conn, ref, _timeout) do
+    case fun.(conn, :done, acc) do
+      {:cont, conn, acc} ->
+        {:ok, conn, acc}
+
+      {:halt, conn, acc} ->
+        {:ok, conn, acc}
+
+      other ->
+        raise ArgumentError,
+              "expected {:cont, conn, acc} or {:halt, conn, acc}, got: #{inspect(other)}"
+    end
+  end
+
+  defp recv_response([], acc, fun, conn, ref, timeout) do
+    start_time = System.monotonic_time(:millisecond)
+
+    with {:ok, conn, entries} <- recv(conn, 0, timeout) do
+      timeout =
+        if is_integer(timeout) do
+          timeout - System.monotonic_time(:millisecond) - start_time
+        else
+          timeout
+        end
+
+      recv_response(entries, acc, fun, conn, ref, timeout)
+    end
+  end
+
+  @doc """
   See `Mint.HTTP.set_mode/2`.
   """
   @impl true

@@ -5,9 +5,37 @@ defmodule Mint.HTTP1Test do
 
   require Mint.HTTP
 
+  test "foo" do
+    {:ok, _} =
+      Bandit.start_link(
+        port: 4000,
+        plug: fn conn, _ ->
+          Plug.Conn.send_resp(conn, 200, "hi")
+        end,
+        startup_log: false
+      )
+
+    {:ok, conn} = HTTP1.connect(:http, "localhost", 4000, mode: :passive)
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, response} = HTTP1.recv_response(conn, ref, 5000)
+
+    assert %{
+             status: 200,
+             headers: [
+               {"date", _},
+               {"content-length", "2"},
+               {"vary", "accept-encoding"},
+               {"cache-control", "max-age=0, private, must-revalidate"}
+             ],
+             body: "hi"
+           } = response
+
+    assert HTTP1.open?(conn)
+  end
+
   setup do
     {:ok, port, server_ref} = TestServer.start()
-    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
     assert_receive {^server_ref, server_socket}
 
     [conn: conn, port: port, server_ref: server_ref, server_socket: server_socket]
