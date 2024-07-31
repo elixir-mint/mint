@@ -530,67 +530,6 @@ defmodule Mint.HTTP1 do
   end
 
   @doc """
-  TODO
-
-  ## Examples
-
-      iex> {:ok, conn} = Mint.HTTP1.connect(:https, "httpbin.org", 443, mode: :passive)
-      iex> {:ok, conn, ref} = Mint.HTTP1.request(conn, "GET", "/status/user-agent", [], nil)
-      iex> {:ok, _conn, response} = Mint.HTTP1.recv_response(conn, ref, 5000)
-      iex> response
-      %{
-        status: 201,
-        headers: [
-          {"date", ...},
-          ...
-        ],
-        body: "{\\n  \\"user-agent\\": \\"mint/1.6.2\\"\\n}\\n"
-      }
-  """
-  def recv_response(conn, ref, timeout) do
-    recv_response([], %{status: nil, headers: [], body: ""}, conn, ref, timeout)
-  end
-
-  defp recv_response([{:status, ref, status} | rest], acc, conn, ref, timeout) do
-    acc = put_in(acc.status, status)
-    recv_response(rest, acc, conn, ref, timeout)
-  end
-
-  defp recv_response([{:headers, ref, headers} | rest], acc, conn, ref, timeout) do
-    acc = update_in(acc.headers, &(&1 ++ headers))
-    recv_response(rest, acc, conn, ref, timeout)
-  end
-
-  defp recv_response([{:data, ref, data} | rest], acc, conn, ref, timeout) do
-    acc = update_in(acc.body, &(&1 <> data))
-    recv_response(rest, acc, conn, ref, timeout)
-  end
-
-  defp recv_response([{:done, ref} | _], acc, conn, ref, _timeout) do
-    {:ok, conn, acc}
-  end
-
-  # Ignore entries from other requests.
-  defp recv_response([_entry | rest], acc, conn, ref, timeout) do
-    recv_response(rest, acc, conn, ref, timeout)
-  end
-
-  defp recv_response([], acc, conn, ref, timeout) do
-    start_time = System.monotonic_time(:millisecond)
-
-    with {:ok, conn, entries} <- recv(conn, 0, timeout) do
-      timeout =
-        if is_integer(timeout) do
-          timeout - System.monotonic_time(:millisecond) - start_time
-        else
-          timeout
-        end
-
-      recv_response(entries, acc, conn, ref, timeout)
-    end
-  end
-
-  @doc """
   See `Mint.HTTP.set_mode/2`.
   """
   @impl true

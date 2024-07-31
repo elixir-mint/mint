@@ -5,37 +5,9 @@ defmodule Mint.HTTP1Test do
 
   require Mint.HTTP
 
-  test "foo" do
-    {:ok, _} =
-      Bandit.start_link(
-        port: 4000,
-        plug: fn conn, _ ->
-          Plug.Conn.send_resp(conn, 200, "hi")
-        end,
-        startup_log: false
-      )
-
-    {:ok, conn} = HTTP1.connect(:http, "localhost", 4000, mode: :passive)
-    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
-    {:ok, conn, response} = HTTP1.recv_response(conn, ref, 5000)
-
-    assert %{
-             status: 200,
-             headers: [
-               {"date", _},
-               {"content-length", "2"},
-               {"vary", "accept-encoding"},
-               {"cache-control", "max-age=0, private, must-revalidate"}
-             ],
-             body: "hi"
-           } = response
-
-    assert HTTP1.open?(conn)
-  end
-
   setup do
     {:ok, port, server_ref} = TestServer.start()
-    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
     assert_receive {^server_ref, server_socket}
 
     [conn: conn, port: port, server_ref: server_ref, server_socket: server_socket]
@@ -486,6 +458,28 @@ defmodule Mint.HTTP1Test do
 
     assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
     assert responses == [{:status, ref, 200}]
+  end
+
+  test "starting a connection in :passive mode and using Mint.HTTP.recv_response/3",
+       %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert_receive {^server_ref, server_socket}
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+    :ok = :gen_tcp.send(server_socket, "content-type: text/plain\r\n")
+    :ok = :gen_tcp.send(server_socket, "content-length: 10\r\n\r\n")
+    :ok = :gen_tcp.send(server_socket, "hello")
+    :ok = :gen_tcp.send(server_socket, "world")
+
+    assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+
+    assert response == %{
+             body: "helloworld",
+             headers: [{"content-type", "text/plain"}, {"content-length", "10"}],
+             status: 200
+           }
   end
 
   test "changing the connection mode with set_mode/2",

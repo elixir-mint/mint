@@ -1129,7 +1129,11 @@ defmodule Mint.HTTP2Test do
                    hbf: hbf,
                    flags: set_flags(:headers, [:end_headers])
                  ),
-                 data(stream_id: stream_id, data: "some data", flags: set_flags(:data, [])),
+                 data(
+                   stream_id: stream_id,
+                   data: "some data",
+                   flags: set_flags(:data, [])
+                 ),
                  headers(
                    stream_id: stream_id,
                    hbf: trailer_hbf1,
@@ -2079,6 +2083,45 @@ defmodule Mint.HTTP2Test do
                {:headers, ref, []},
                {:done, ref}
              ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [mode: :passive]
+    test "starting a connection with :passive mode and using Mint.HTTP.recv_response/3", %{
+      conn: conn
+    } do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf:
+              server_encode_headers([
+                {":status", "200"},
+                {"content-type", "text/plain"},
+                {"content-length", "10"}
+              ]),
+            flags: set_flags(:headers, [:end_headers])
+          ),
+          data(
+            stream_id: stream_id,
+            data: "helloworld",
+            flags: set_flags(:data, [:end_stream])
+          )
+        ])
+
+      :ok = :ssl.send(server_get_socket(), data)
+      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+
+      assert response == %{
+               body: "helloworld",
+               headers: [{"content-type", "text/plain"}, {"content-length", "10"}],
+               status: 200
+             }
 
       assert HTTP2.open?(conn)
     end

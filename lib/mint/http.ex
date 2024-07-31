@@ -123,6 +123,7 @@ defmodule Mint.HTTP do
 
   alias Mint.{Types, TunnelProxy, UnsafeProxy}
   alias Mint.Core.{Transport, Util}
+  require Util
 
   @behaviour Mint.Core.Conn
 
@@ -871,6 +872,100 @@ defmodule Mint.HTTP do
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
   def recv(conn, byte_count, timeout), do: conn_module(conn).recv(conn, byte_count, timeout)
+
+  @version Mix.Project.config()[:version]
+
+  @doc """
+  Receives response from the socket in a blocking way.
+
+  This function receives a response for the request identified by `request_ref` on the connection
+  `conn`.
+
+  `timeout` is the maximum time to wait before returning an error.
+
+  This function is a convenience for repeatedly calling `Mint.HTTP.recv/3`. The result is either:
+
+    * `{:ok, conn, response}` where `conn` is the updated connection and `response` is a map
+      with the following keys:
+
+        * `:status` - HTTP response status, an integer.
+
+        * `:headers` - HTTP response headers, a list of tuples `{header_name, header_value}`.
+
+        * `:body` - HTTP response body, a binary.
+
+    * `{:error, conn, reason}` where `conn` is the updated connection and `reason` is the cause
+      of the error. It is important to store the returned connection over the old connection in
+      case of errors too, because the state of the connection might change when there are errors
+      as well. An error when sending a request **does not** necessarily mean that the connection
+      is closed. Use `open?/1` to verify that the connection is open.
+
+  ## Examples
+
+      iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, mode: :passive)
+      iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/user-agent", [], nil)
+      iex> {:ok, _conn, response} = Mint.HTTP.recv_response(conn, request_ref, 5000)
+      iex> response
+      %{
+        status: 200,
+        headers: [{"date", ...}, ...],
+        body: "{\\n  \\"user-agent\\": \\"#{@version}\\"\\n}\\n"
+      }
+  """
+  @spec recv_response(t(), Types.request_ref(), timeout()) ::
+          {:ok, t(), response} | {:error, Types.error()}
+        when response: %{
+               status: non_neg_integer(),
+               headers: [{binary(), binary()}],
+               body: binary()
+             }
+  def recv_response(conn, ref, timeout)
+      when is_reference(ref) and Util.is_timeout(timeout) do
+    recv_response([], %{status: nil, headers: [], body: ""}, conn, ref, timeout)
+  end
+
+  defp recv_response([{:status, ref, status} | rest], acc, conn, ref, timeout) do
+    acc = put_in(acc.status, status)
+    recv_response(rest, acc, conn, ref, timeout)
+  end
+
+  defp recv_response([{:headers, ref, headers} | rest], acc, conn, ref, timeout) do
+    acc = update_in(acc.headers, &(&1 ++ headers))
+    recv_response(rest, acc, conn, ref, timeout)
+  end
+
+  defp recv_response([{:data, ref, data} | rest], acc, conn, ref, timeout) do
+    acc = update_in(acc.body, &(&1 <> data))
+    recv_response(rest, acc, conn, ref, timeout)
+  end
+
+  defp recv_response([{:done, ref} | _rest], acc, conn, ref, _timeout) do
+    {:ok, conn, acc}
+  end
+
+  defp recv_response([{:error, ref, error} | _rest], _acc, conn, ref, _timeout) do
+    {:error, conn, error}
+  end
+
+  # Ignore entries from other requests.
+  defp recv_response([_entry | rest], acc, conn, ref, timeout) do
+    recv_response(rest, acc, conn, ref, timeout)
+  end
+
+  defp recv_response([], acc, conn, ref, timeout) do
+    start_time = System.monotonic_time(:millisecond)
+
+    with {:ok, conn, entries} <- recv(conn, 0, timeout) do
+      timeout =
+        if is_integer(timeout) do
+          timeout - System.monotonic_time(:millisecond) - start_time
+        else
+          timeout
+        end
+
+      recv_response(entries, acc, conn, ref, timeout)
+    end
+  end
 
   @doc """
   Changes the mode of the underlying socket.
