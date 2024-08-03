@@ -13,6 +13,7 @@ services:
 
   httpbin:
     image: docker.io/kennethreitz/httpbin:latest
+    platform: linux/amd64
     ports:
       - "8080:80"
 
