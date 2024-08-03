@@ -921,26 +921,36 @@ defmodule Mint.HTTP do
              }
   def recv_response(conn, ref, timeout)
       when is_reference(ref) and Util.is_timeout(timeout) do
-    recv_response([], %{status: nil, headers: [], body: ""}, conn, ref, timeout)
+    recv_response([], {nil, [], ""}, conn, ref, timeout)
   end
 
-  defp recv_response([{:status, ref, status} | rest], acc, conn, ref, timeout) do
-    acc = put_in(acc.status, status)
-    recv_response(rest, acc, conn, ref, timeout)
+  defp recv_response(
+         [{:status, ref, new_status} | rest],
+         {_status, headers, body},
+         conn,
+         ref,
+         timeout
+       ) do
+    recv_response(rest, {new_status, headers, body}, conn, ref, timeout)
   end
 
-  defp recv_response([{:headers, ref, headers} | rest], acc, conn, ref, timeout) do
-    acc = update_in(acc.headers, &(&1 ++ headers))
-    recv_response(rest, acc, conn, ref, timeout)
+  defp recv_response(
+         [{:headers, ref, new_headers} | rest],
+         {status, headers, body},
+         conn,
+         ref,
+         timeout
+       ) do
+    recv_response(rest, {status, headers ++ new_headers, body}, conn, ref, timeout)
   end
 
-  defp recv_response([{:data, ref, data} | rest], acc, conn, ref, timeout) do
-    acc = update_in(acc.body, &(&1 <> data))
-    recv_response(rest, acc, conn, ref, timeout)
+  defp recv_response([{:data, ref, data} | rest], {status, headers, body}, conn, ref, timeout) do
+    recv_response(rest, {status, headers, [body, data]}, conn, ref, timeout)
   end
 
-  defp recv_response([{:done, ref} | _rest], acc, conn, ref, _timeout) do
-    {:ok, conn, acc}
+  defp recv_response([{:done, ref} | _rest], {status, headers, body}, conn, ref, _timeout) do
+    response = %{status: status, headers: headers, body: IO.iodata_to_binary(body)}
+    {:ok, conn, response}
   end
 
   defp recv_response([{:error, ref, error} | _rest], _acc, conn, ref, _timeout) do
