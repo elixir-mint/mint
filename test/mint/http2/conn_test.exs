@@ -2087,45 +2087,6 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    @tag connect_options: [mode: :passive]
-    test "starting a connection with :passive mode and using Mint.HTTP.recv_response/3", %{
-      conn: conn
-    } do
-      {conn, ref} = open_request(conn)
-
-      assert_recv_frames [headers(stream_id: stream_id)]
-
-      data =
-        server_encode_frames([
-          headers(
-            stream_id: stream_id,
-            hbf:
-              server_encode_headers([
-                {":status", "200"},
-                {"content-type", "text/plain"},
-                {"content-length", "10"}
-              ]),
-            flags: set_flags(:headers, [:end_headers])
-          ),
-          data(
-            stream_id: stream_id,
-            data: "helloworld",
-            flags: set_flags(:data, [:end_stream])
-          )
-        ])
-
-      :ok = :ssl.send(server_get_socket(), data)
-      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
-
-      assert response == %{
-               body: "helloworld",
-               headers: [{"content-type", "text/plain"}, {"content-length", "10"}],
-               status: 200
-             }
-
-      assert HTTP2.open?(conn)
-    end
-
     test "changing the mode of a connection with set_mode/2", %{conn: conn} do
       assert_raise ArgumentError, ~r"^can't use recv/3", fn ->
         HTTP2.recv(conn, 0, 100)
@@ -2203,6 +2164,67 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [goaway(error_code: :frame_size_error)]
       refute HTTP2.open?(conn)
+    end
+  end
+
+  describe "Mint.HTTP.recv_response/3" do
+    @describetag connect_options: [mode: :passive]
+
+    test "receives response", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf:
+              server_encode_headers([
+                {":status", "200"},
+                {"content-type", "text/plain"},
+                {"content-length", "10"}
+              ]),
+            flags: set_flags(:headers, [:end_headers])
+          ),
+          data(
+            stream_id: stream_id,
+            data: "helloworld",
+            flags: set_flags(:data, [:end_stream])
+          )
+        ])
+
+      :ok = :ssl.send(server_get_socket(), data)
+      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+
+      assert response == %{
+               body: "helloworld",
+               headers: [{"content-type", "text/plain"}, {"content-length", "10"}],
+               status: 200
+             }
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "handles errors", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: _stream_id)]
+      :ok = :ssl.close(server_get_socket())
+
+      assert {:error, _conn, %Mint.TransportError{reason: :closed}} =
+               Mint.HTTP.recv_response(conn, ref, 100)
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "handles timeout", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: _stream_id)]
+
+      assert {:error, _conn, %Mint.TransportError{reason: :timeout}} =
+               Mint.HTTP.recv_response(conn, ref, 1)
+
+      assert HTTP2.open?(conn)
     end
   end
 

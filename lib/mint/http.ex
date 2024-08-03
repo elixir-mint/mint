@@ -965,15 +965,19 @@ defmodule Mint.HTTP do
   defp recv_response([], acc, conn, ref, timeout) do
     start_time = System.monotonic_time(:millisecond)
 
-    with {:ok, conn, entries} <- recv(conn, 0, timeout) do
-      timeout =
-        if is_integer(timeout) do
-          timeout - System.monotonic_time(:millisecond) - start_time
-        else
-          timeout
-        end
+    case recv(conn, 0, timeout) do
+      {:ok, conn, entries} ->
+        timeout =
+          if is_integer(timeout) do
+            timeout - System.monotonic_time(:millisecond) - start_time
+          else
+            timeout
+          end
 
-      recv_response(entries, acc, conn, ref, timeout)
+        recv_response(entries, acc, conn, ref, timeout)
+
+      {:error, conn, reason, _responses} ->
+        {:error, conn, reason}
     end
   end
 
