@@ -903,6 +903,9 @@ defmodule Mint.HTTP do
       Contrary to `recv/3`, this function does not return partial responses on errors. Use
       `recv/3` for full control.
 
+  This function only handles responses for the given `request_ref`. Do not use it when making
+  concurrent requests as responses other than for `request_ref` are ignored.
+
   ## Examples
 
       iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, mode: :passive)
@@ -922,9 +925,9 @@ defmodule Mint.HTTP do
                headers: [{binary(), binary()}],
                body: binary()
              }
-  def recv_response(conn, ref, timeout)
-      when is_reference(ref) and Util.is_timeout(timeout) do
-    recv_response([], {nil, [], ""}, conn, ref, timeout)
+  def recv_response(conn, request_ref, timeout)
+      when is_reference(request_ref) and Util.is_timeout(timeout) do
+    recv_response([], {nil, [], ""}, conn, request_ref, timeout)
   end
 
   defp recv_response(

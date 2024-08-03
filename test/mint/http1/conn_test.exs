@@ -482,6 +482,32 @@ defmodule Mint.HTTP1Test do
              }
     end
 
+    test "handles trailers", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
+      :ok = :gen_tcp.send(server_socket, "transfer-encoding: chunked\r\n")
+      :ok = :gen_tcp.send(server_socket, "trailer: x-trailer\r\n\r\n")
+      :ok = :gen_tcp.send(server_socket, "5\r\nhello\r\n")
+      :ok = :gen_tcp.send(server_socket, "5\r\nworld\r\n0\r\n")
+      :ok = :gen_tcp.send(server_socket, "x-trailer: foo\r\n\r\n")
+
+      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+
+      assert response == %{
+               body: "helloworld",
+               headers: [
+                 {"transfer-encoding", "chunked"},
+                 {"trailer", "x-trailer"},
+                 {"x-trailer", "foo"}
+               ],
+               status: 200
+             }
+    end
+
     test "handles errors", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
       assert_receive {^server_ref, server_socket}

@@ -2206,6 +2206,55 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    test "handles trailers", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      <<trailer_hbf1::1-bytes, trailer_hbf2::binary>> =
+        server_encode_headers([{"x-trailer", "foo"}])
+
+      data =
+        server_encode_frames([
+          headers(
+            stream_id: stream_id,
+            hbf:
+              server_encode_headers([
+                {":status", "200"},
+                {"content-type", "text/plain"}
+              ]),
+            flags: set_flags(:headers, [:end_headers])
+          ),
+          data(
+            stream_id: stream_id,
+            data: "helloworld",
+            flags: set_flags(:data, [])
+          ),
+          headers(
+            stream_id: stream_id,
+            hbf: trailer_hbf1,
+            flags: set_flags(:headers, [:end_stream])
+          ),
+          continuation(
+            stream_id: stream_id,
+            hbf: trailer_hbf2,
+            flags: set_flags(:continuation, [:end_headers])
+          )
+        ])
+
+      :ok = :ssl.send(server_get_socket(), data)
+
+      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+
+      assert response == %{
+               body: "helloworld",
+               headers: [{"content-type", "text/plain"}, {"x-trailer", "foo"}],
+               status: 200
+             }
+
+      assert HTTP2.open?(conn)
+    end
+
     test "handles errors", %{conn: conn} do
       {conn, ref} = open_request(conn)
       assert_recv_frames [headers(stream_id: _stream_id)]
