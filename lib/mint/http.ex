@@ -900,6 +900,9 @@ defmodule Mint.HTTP do
       as well. An error when sending a request **does not** necessarily mean that the connection
       is closed. Use `open?/1` to verify that the connection is open.
 
+      Contrary to `recv/3`, this function does not return partial responses on errors. Use
+      `recv/3` for full control.
+
   ## Examples
 
       iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, mode: :passive)
