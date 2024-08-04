@@ -131,7 +131,7 @@ mix test --exclude requires_internet_connection
 Run all tests:
 
 ```sh
-DOCKER_USER="$UID:$GID" docker-compose up --detach # or podman-compose up --detach
+DOCKER_USER="$UID:$GID" docker compose up --detach # or podman-compose up --detach
 mix test --include proxy
 ```
 

@@ -5,7 +5,7 @@ defmodule Mint.HttpBin do
 
   def proxy_host() do
     # the proxy runs in docker so we use the
-    # docker-compose name to connect
+    # docker compose name to connect
     "caddyhttpbin"
   end
 

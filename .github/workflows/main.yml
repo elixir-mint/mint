@@ -72,7 +72,7 @@ jobs:
         run: mix dialyzer --plt
 
       - name: Start docker
-        run: DOCKER_USER="$UID:$GID" docker-compose up --detach
+        run: DOCKER_USER="$UID:$GID" docker compose up --detach
 
       - name: Check for unused dependencies
         run: mix do deps.get, deps.unlock --check-unused
