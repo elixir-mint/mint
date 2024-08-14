@@ -876,14 +876,11 @@ defmodule Mint.HTTP do
   @version Mix.Project.config()[:version]
 
   @doc """
-  Receives response from the socket in a blocking way.
+  Sends a request and receives a response from the socket in a blocking way.
 
-  This function receives a response for the request identified by `request_ref` on the connection
-  `conn`.
+  This function is a convenience for sending a request with `request/5` and repeatedly calling `recv/3`.
 
-  `timeout` is the maximum time to wait before returning an error.
-
-  This function is a convenience for repeatedly calling `Mint.HTTP.recv/3`. The result is either:
+  The result is either:
 
     * `{:ok, conn, response}` where `conn` is the updated connection and `response` is a map
       with the following keys:
@@ -903,30 +900,48 @@ defmodule Mint.HTTP do
       Contrary to `recv/3`, this function does not return partial responses on errors. Use
       `recv/3` for full control.
 
-  This function only handles responses for the given `request_ref`. Do not use it when making
-  concurrent requests as responses other than for `request_ref` are ignored.
+  ## Options
+
+    * `:timeout` - the maximum amount of time in milliseconds waiting to receive the response.
+      Setting to `:infinity`, disables the timeout. Defaults to `:infinity`.
 
   ## Examples
 
       iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, mode: :passive)
-      iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/user-agent", [], nil)
-      iex> {:ok, _conn, response} = Mint.HTTP.recv_response(conn, request_ref, 5000)
+      iex> {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/user-agent", [], nil)
       iex> response
       %{
         status: 200,
         headers: [{"date", ...}, ...],
         body: "{\\n  \\"user-agent\\": \\"#{@version}\\"\\n}\\n"
       }
+      iex> Mint.HTTP.open?(conn)
+      true
   """
-  @spec recv_response(t(), Types.request_ref(), timeout()) ::
-          {:ok, t(), response} | {:error, Types.error()}
+  @spec request_and_response(
+          t(),
+          method :: String.t(),
+          path :: String.t(),
+          Types.headers(),
+          body :: iodata() | nil | :stream,
+          options :: [{:timeout, timeout()}]
+        ) ::
+          {:ok, t(), response}
+          | {:error, t(), Types.error()}
         when response: %{
                status: non_neg_integer(),
                headers: [{binary(), binary()}],
                body: binary()
              }
-  def recv_response(conn, request_ref, timeout)
-      when is_reference(request_ref) and Util.is_timeout(timeout) do
+  def request_and_response(conn, method, path, headers, body, options \\ []) do
+    options = Keyword.validate!(options, timeout: :infinity)
+
+    with {:ok, conn, ref} <- request(conn, method, path, headers, body) do
+      recv_response(conn, ref, options[:timeout])
+    end
+  end
+
+  defp recv_response(conn, request_ref, timeout) when Util.is_timeout(timeout) do
     recv_response([], {nil, [], ""}, conn, request_ref, timeout)
   end
 

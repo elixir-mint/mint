@@ -460,12 +460,10 @@ defmodule Mint.HTTP1Test do
     assert responses == [{:status, ref, 200}]
   end
 
-  describe "Mint.HTTP.recv_response/3" do
+  describe "Mint.HTTP.request_and_response/6" do
     test "receives response", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
       assert_receive {^server_ref, server_socket}
-
-      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
       :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
       :ok = :gen_tcp.send(server_socket, "content-type: text/plain\r\n")
@@ -473,20 +471,20 @@ defmodule Mint.HTTP1Test do
       :ok = :gen_tcp.send(server_socket, "hello")
       :ok = :gen_tcp.send(server_socket, "world")
 
-      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+      {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
 
       assert response == %{
                body: "helloworld",
                headers: [{"content-type", "text/plain"}, {"content-length", "10"}],
                status: 200
              }
+
+      assert HTTP1.open?(conn)
     end
 
     test "handles trailers", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
       assert_receive {^server_ref, server_socket}
-
-      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
       :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
       :ok = :gen_tcp.send(server_socket, "transfer-encoding: chunked\r\n")
@@ -495,7 +493,7 @@ defmodule Mint.HTTP1Test do
       :ok = :gen_tcp.send(server_socket, "5\r\nworld\r\n0\r\n")
       :ok = :gen_tcp.send(server_socket, "x-trailer: foo\r\n\r\n")
 
-      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+      {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
 
       assert response == %{
                body: "helloworld",
@@ -506,29 +504,29 @@ defmodule Mint.HTTP1Test do
                ],
                status: 200
              }
+
+      assert HTTP1.open?(conn)
     end
 
     test "handles errors", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
       assert_receive {^server_ref, server_socket}
 
-      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
-
       :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\n")
       :ok = :gen_tcp.close(server_socket)
 
       assert {:error, _conn, %Mint.TransportError{reason: :closed}} =
-               Mint.HTTP.recv_response(conn, ref, 100)
+               Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
     end
 
     test "handles timeout", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
       assert_receive {^server_ref, _server_socket}
 
-      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+      assert {:error, conn, %Mint.TransportError{reason: :timeout}} =
+               Mint.HTTP.request_and_response(conn, "GET", "/", [], nil, timeout: 0)
 
-      assert {:error, _conn, %Mint.TransportError{reason: :timeout}} =
-               Mint.HTTP.recv_response(conn, ref, 1)
+      refute HTTP1.open?(conn)
     end
   end
 

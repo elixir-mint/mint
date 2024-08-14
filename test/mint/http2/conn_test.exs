@@ -2167,35 +2167,44 @@ defmodule Mint.HTTP2Test do
     end
   end
 
-  describe "Mint.HTTP.recv_response/3" do
+  describe "Mint.HTTP.request_and_response/6" do
     @describetag connect_options: [mode: :passive]
 
-    test "receives response", %{conn: conn} do
-      {conn, ref} = open_request(conn)
+    test "receives response", context do
+      pid = self()
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      Task.start_link(fn ->
+        context = Map.merge(context, start_server_async(context))
+        [conn: conn] = start_connection(context)
+        send(pid, {:conn, conn})
 
-      data =
-        server_encode_frames([
-          headers(
-            stream_id: stream_id,
-            hbf:
-              server_encode_headers([
-                {":status", "200"},
-                {"content-type", "text/plain"},
-                {"content-length", "10"}
-              ]),
-            flags: set_flags(:headers, [:end_headers])
-          ),
-          data(
-            stream_id: stream_id,
-            data: "helloworld",
-            flags: set_flags(:data, [:end_stream])
-          )
-        ])
+        assert_recv_frames [headers(stream_id: stream_id)]
 
-      :ok = :ssl.send(server_get_socket(), data)
-      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+        data =
+          server_encode_frames([
+            headers(
+              stream_id: stream_id,
+              hbf:
+                server_encode_headers([
+                  {":status", "200"},
+                  {"content-type", "text/plain"},
+                  {"content-length", "10"}
+                ]),
+              flags: set_flags(:headers, [:end_headers])
+            ),
+            data(
+              stream_id: stream_id,
+              data: "helloworld",
+              flags: set_flags(:data, [:end_stream])
+            )
+          ])
+
+        :ok = :ssl.send(server_get_socket(), data)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive {:conn, conn}
+      assert {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
 
       assert response == %{
                body: "helloworld",
@@ -2206,45 +2215,53 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "handles trailers", %{conn: conn} do
-      {conn, ref} = open_request(conn)
+    test "handles trailers", context do
+      pid = self()
 
-      assert_recv_frames [headers(stream_id: stream_id)]
+      Task.start_link(fn ->
+        context = Map.merge(context, start_server_async(context))
+        [conn: conn] = start_connection(context)
+        send(pid, {:conn, conn})
 
-      <<trailer_hbf1::1-bytes, trailer_hbf2::binary>> =
-        server_encode_headers([{"x-trailer", "foo"}])
+        assert_recv_frames [headers(stream_id: stream_id)]
 
-      data =
-        server_encode_frames([
-          headers(
-            stream_id: stream_id,
-            hbf:
-              server_encode_headers([
-                {":status", "200"},
-                {"content-type", "text/plain"}
-              ]),
-            flags: set_flags(:headers, [:end_headers])
-          ),
-          data(
-            stream_id: stream_id,
-            data: "helloworld",
-            flags: set_flags(:data, [])
-          ),
-          headers(
-            stream_id: stream_id,
-            hbf: trailer_hbf1,
-            flags: set_flags(:headers, [:end_stream])
-          ),
-          continuation(
-            stream_id: stream_id,
-            hbf: trailer_hbf2,
-            flags: set_flags(:continuation, [:end_headers])
-          )
-        ])
+        <<trailer_hbf1::1-bytes, trailer_hbf2::binary>> =
+          server_encode_headers([{"x-trailer", "foo"}])
 
-      :ok = :ssl.send(server_get_socket(), data)
+        data =
+          server_encode_frames([
+            headers(
+              stream_id: stream_id,
+              hbf:
+                server_encode_headers([
+                  {":status", "200"},
+                  {"content-type", "text/plain"}
+                ]),
+              flags: set_flags(:headers, [:end_headers])
+            ),
+            data(
+              stream_id: stream_id,
+              data: "helloworld",
+              flags: set_flags(:data, [])
+            ),
+            headers(
+              stream_id: stream_id,
+              hbf: trailer_hbf1,
+              flags: set_flags(:headers, [:end_stream])
+            ),
+            continuation(
+              stream_id: stream_id,
+              hbf: trailer_hbf2,
+              flags: set_flags(:continuation, [:end_headers])
+            )
+          ])
 
-      assert {:ok, _conn, response} = Mint.HTTP.recv_response(conn, ref, 100)
+        :ok = :ssl.send(server_get_socket(), data)
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive {:conn, conn}
+      assert {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
 
       assert response == %{
                body: "helloworld",
@@ -2255,25 +2272,42 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
-    test "handles errors", %{conn: conn} do
-      {conn, ref} = open_request(conn)
-      assert_recv_frames [headers(stream_id: _stream_id)]
-      :ok = :ssl.close(server_get_socket())
+    test "handles errors", context do
+      pid = self()
 
-      assert {:error, _conn, %Mint.TransportError{reason: :closed}} =
-               Mint.HTTP.recv_response(conn, ref, 100)
+      Task.start_link(fn ->
+        context = Map.merge(context, start_server_async(context))
+        [conn: conn] = start_connection(context)
+        send(pid, {:conn, conn})
 
-      assert HTTP2.open?(conn)
+        assert_recv_frames [headers(stream_id: _stream_id)]
+        :ok = :ssl.close(server_get_socket())
+      end)
+
+      assert_receive {:conn, conn}
+
+      assert {:error, conn, %Mint.TransportError{reason: :closed}} =
+               Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
+
+      refute HTTP2.open?(conn)
     end
 
-    test "handles timeout", %{conn: conn} do
-      {conn, ref} = open_request(conn)
-      assert_recv_frames [headers(stream_id: _stream_id)]
+    test "handles timeout", context do
+      pid = self()
 
-      assert {:error, _conn, %Mint.TransportError{reason: :timeout}} =
-               Mint.HTTP.recv_response(conn, ref, 1)
+      Task.start_link(fn ->
+        context = Map.merge(context, start_server_async(context))
+        [conn: conn] = start_connection(context)
+        send(pid, {:conn, conn})
+        Process.sleep(:infinity)
+      end)
 
-      assert HTTP2.open?(conn)
+      assert_receive {:conn, conn}
+
+      assert {:error, conn, %Mint.TransportError{reason: :timeout}} =
+               Mint.HTTP.request_and_response(conn, "GET", "/", [], nil, timeout: 0)
+
+      refute HTTP2.open?(conn)
     end
   end
 
