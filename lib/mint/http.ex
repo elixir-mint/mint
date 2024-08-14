@@ -900,6 +900,11 @@ defmodule Mint.HTTP do
       Contrary to `recv/3`, this function does not return partial responses on errors. Use
       `recv/3` for full control.
 
+  > #### Error {: .error}
+  >
+  > This function can only be used for one-off requests. If there is another concurrent request,
+  > started by `request/5`, it will crash.
+
   ## Options
 
     * `:timeout` - the maximum amount of time in milliseconds waiting to receive the response.
@@ -979,8 +984,9 @@ defmodule Mint.HTTP do
   end
 
   # Ignore entries from other requests.
-  defp recv_response([_entry | rest], acc, conn, ref, timeout) do
-    recv_response(rest, acc, conn, ref, timeout)
+  defp recv_response([entry | _rest], _acc, _conn, _ref, _timeout) when is_tuple(entry) do
+    ref = elem(entry, 1)
+    raise "received unexpected response from request #{inspect(ref)}"
   end
 
   defp recv_response([], acc, conn, ref, timeout) do

@@ -528,6 +528,28 @@ defmodule Mint.HTTP1Test do
 
       refute HTTP1.open?(conn)
     end
+
+    test "raises on multiple requests " do
+      {:ok, port, server_ref} =
+        TestServer.start(fn %{socket: socket} ->
+          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\n")
+          :ok = :gen_tcp.send(socket, "content-type: text/plain\r\n")
+          :ok = :gen_tcp.send(socket, "content-length: 10\r\n\r\n")
+          :ok = :gen_tcp.send(socket, "hello")
+          :ok = :gen_tcp.send(socket, "world")
+        end)
+
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, _server_socket}
+
+      {:ok, conn, ref} = Mint.HTTP.request(conn, "GET", "/", [], nil)
+
+      assert_raise RuntimeError,
+                   "received unexpected response from request #{inspect(ref)}",
+                   fn ->
+                     Mint.HTTP.request_and_response(conn, "GET", "/", [], nil)
+                   end
+    end
   end
 
   test "changing the connection mode with set_mode/2",
