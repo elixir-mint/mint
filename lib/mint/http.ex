@@ -939,7 +939,7 @@ defmodule Mint.HTTP do
                body: binary()
              }
   def request_and_response(conn, method, path, headers, body, options \\ []) do
-    options = Keyword.validate!(options, timeout: :infinity)
+    options = keyword_validate!(options, timeout: :infinity)
 
     with {:ok, conn, ref} <- request(conn, method, path, headers, body) do
       recv_response(conn, ref, options[:timeout])
@@ -1006,6 +1006,13 @@ defmodule Mint.HTTP do
       {:error, conn, reason, _responses} ->
         {:error, conn, reason}
     end
+  end
+
+  # TODO: Remove when we require Elixir v1.13
+  if Version.match?(System.version(), ">= 1.13.0") do
+    defp keyword_validate!(keyword, values), do: Keyword.validate!(keyword, values)
+  else
+    defp keyword_validate!(keyword, _values), do: keyword
   end
 
   @doc """
