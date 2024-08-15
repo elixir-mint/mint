@@ -922,6 +922,7 @@ defmodule Mint.HTTP do
       }
       iex> Mint.HTTP.open?(conn)
       true
+
   """
   @spec request_and_response(
           t(),
@@ -934,8 +935,8 @@ defmodule Mint.HTTP do
           {:ok, t(), response}
           | {:error, t(), Types.error()}
         when response: %{
-               status: non_neg_integer(),
-               headers: [{binary(), binary()}],
+               status: Types.status(),
+               headers: Types.headers(),
                body: binary()
              }
   def request_and_response(conn, method, path, headers, body, options \\ []) do
@@ -1009,7 +1010,7 @@ defmodule Mint.HTTP do
   end
 
   # TODO: Remove when we require Elixir v1.13
-  if Version.match?(System.version(), ">= 1.13.0") do
+  if function_exported?(Keyword, :validate!, 2) do
     defp keyword_validate!(keyword, values), do: Keyword.validate!(keyword, values)
   else
     defp keyword_validate!(keyword, _values), do: keyword
