@@ -21,28 +21,32 @@ defmodule Mint.Core.Transport.TCP do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet4? = Keyword.get(opts, :inet4, true)
     inet6? = Keyword.get(opts, :inet6, false)
+    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
 
     opts =
       opts
       |> Keyword.merge(@transport_opts)
-      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6])
+      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6, :trace_fun])
 
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # gen_tcp if connection fails.
-      case :gen_tcp.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, socket} ->
-          {:ok, socket}
-
-        _error when inet4? ->
-          wrap_err(:gen_tcp.connect(address, port, opts, timeout))
-
-        error ->
-          wrap_err(error)
-      end
+    with true <- inet6?,
+         {:ok, ip} <- :inet.getaddr(address, :inet6),
+         :ok <- trace_fun.(:dns_done),
+         {:ok, tcpsocket} <- :gen_tcp.connect(ip, port, [:inet6 | opts], timeout) do
+      trace_fun.(:connected)
+      {:ok, tcpsocket}
     else
-      # Use the defaults provided by gen_tcp.
-      wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+      _error when inet4? ->
+        with {:ok, ip} <- :inet.getaddr(address, :inet),
+             :ok <- trace_fun.(:dns_done),
+             {:ok, tcpsocket} <- :gen_tcp.connect(ip, port, opts, timeout) do
+          trace_fun.(:connected)
+          {:ok, tcpsocket}
+        else
+          error -> wrap_err(error)
+        end
+
+      error ->
+        wrap_err(error)
     end
   end
 

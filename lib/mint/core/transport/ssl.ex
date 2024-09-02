@@ -322,28 +322,21 @@ defmodule Mint.Core.Transport.SSL do
     do: connect(String.to_charlist(address), hostname, port, opts)
 
   defp connect(address, hostname, port, opts) do
-    timeout = Keyword.get(opts, :timeout, @default_timeout)
-    inet4? = Keyword.get(opts, :inet4, true)
-    inet6? = Keyword.get(opts, :inet6, false)
+    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
 
-    opts = ssl_opts(String.to_charlist(hostname), opts)
+    case Mint.Core.Transport.TCP.connect(address, port, Keyword.take(opts, [:trace_fun])) do
+      {:ok, tcpsocket} ->
+        case upgrade(tcpsocket, :http, hostname, port, opts) do
+          {:ok, sslsocket} ->
+            trace_fun.(:tls_done)
+            {:ok, sslsocket}
 
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # ssl/gen_tcp if connection fails.
-      case :ssl.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, sslsocket} ->
-          {:ok, sslsocket}
+          error ->
+            error
+        end
 
-        _error when inet4? ->
-          wrap_err(:ssl.connect(address, port, opts, timeout))
-
-        error ->
-          wrap_err(error)
-      end
-    else
-      # Use the defaults provided by ssl/gen_tcp.
-      wrap_err(:ssl.connect(address, port, opts, timeout))
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

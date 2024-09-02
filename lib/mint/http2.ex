@@ -369,12 +369,14 @@ defmodule Mint.HTTP2 do
           {:ok, t()} | {:error, Types.error()}
   def connect(scheme, address, port, opts \\ []) do
     hostname = Mint.Core.Util.hostname(opts, address)
+    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
 
     transport_opts =
       opts
       |> Keyword.get(:transport_opts, [])
       |> Keyword.merge(@transport_opts)
       |> Keyword.put(:hostname, hostname)
+      |> Keyword.put(:trace_fun, trace_fun)
 
     case negotiate(address, port, scheme, transport_opts) do
       {:ok, socket} ->
