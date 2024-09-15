@@ -223,8 +223,9 @@ defmodule Mint.HTTP2 do
     # Private store.
     private: %{},
 
-    # Logging
-    log: false
+    # Logging/Tracing
+    log: false,
+    trace_fun: nil
   ]
 
   defmacrop log(conn, level, message) do
@@ -369,7 +370,44 @@ defmodule Mint.HTTP2 do
           {:ok, t()} | {:error, Types.error()}
   def connect(scheme, address, port, opts \\ []) do
     hostname = Mint.Core.Util.hostname(opts, address)
-    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
+    transport = Util.scheme_to_transport(scheme)
+    scheme_string = Atom.to_string(scheme)
+    mode = Keyword.get(opts, :mode, :active)
+    log? = Keyword.get(opts, :log, false)
+    {trace_state, trace_fun} = Keyword.get(opts, :trace_fun, {nil, fn _conn, _event -> :ok end})
+
+    # If the port is the default for the scheme, don't add it to the :authority pseudo-header
+    authority =
+      if URI.default_port(scheme_string) == port do
+        hostname
+      else
+        "#{hostname}:#{port}"
+      end
+
+    unless mode in [:active, :passive] do
+      raise ArgumentError,
+            "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
+    end
+
+    unless is_boolean(log?) do
+      raise ArgumentError,
+            "the :log option must be a boolean, got: #{inspect(log?)}"
+    end
+
+    conn =
+      %__MODULE__{
+        hostname: hostname,
+        port: port,
+        authority: authority,
+        transport: transport,
+        socket: nil,
+        mode: mode,
+        scheme: scheme_string,
+        state: :handshaking,
+        log: log?,
+        trace_fun: trace_fun
+      }
+      |> put_private(:trace_state, trace_state)
 
     transport_opts =
       opts
@@ -378,9 +416,9 @@ defmodule Mint.HTTP2 do
       |> Keyword.put(:hostname, hostname)
       |> Keyword.put(:trace_fun, trace_fun)
 
-    case negotiate(address, port, scheme, transport_opts) do
-      {:ok, socket} ->
-        initiate(scheme, socket, hostname, port, opts)
+    case negotiate(conn, address, transport_opts) do
+      {:ok, conn} ->
+        initiate(conn, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -388,26 +426,26 @@ defmodule Mint.HTTP2 do
   end
 
   @doc false
-  @spec upgrade(
-          Types.scheme(),
-          Mint.Types.socket(),
-          Types.scheme(),
-          String.t(),
-          :inet.port_number(),
-          keyword()
-        ) :: {:ok, t()} | {:error, Types.error()}
-  def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
-    transport = Util.scheme_to_transport(new_scheme)
+  # @spec upgrade(
+  #         Types.scheme(),
+  #         Mint.Types.socket(),
+  #         Types.scheme(),
+  #         String.t(),
+  #         :inet.port_number(),
+  #         keyword()
+  #       ) :: {:ok, t()} | {:error, Types.error()}
+  # def upgrade(old_scheme, socket, new_scheme, hostname, port, opts) do
+  #   transport = Util.scheme_to_transport(new_scheme)
 
-    transport_opts =
-      opts
-      |> Keyword.get(:transport_opts, [])
-      |> Keyword.merge(@transport_opts)
+  #   transport_opts =
+  #     opts
+  #     |> Keyword.get(:transport_opts, [])
+  #     |> Keyword.merge(@transport_opts)
 
-    with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
-      initiate(new_scheme, socket, hostname, port, opts)
-    end
-  end
+  #   with {:ok, socket} <- transport.upgrade(socket, old_scheme, hostname, port, transport_opts) do
+  #     initiate(new_scheme, socket, hostname, port, opts)
+  #   end
+  # end
 
   @doc """
   See `Mint.HTTP.close/1`.
@@ -958,49 +996,15 @@ defmodule Mint.HTTP2 do
   # SETTINGS parameters are not negotiated. We keep client settings and server settings separate.
   @doc false
   @impl true
-  @spec initiate(
-          Types.scheme(),
-          Types.socket(),
-          String.t(),
-          :inet.port_number(),
-          keyword()
-        ) :: {:ok, t()} | {:error, Types.error()}
-  def initiate(scheme, socket, hostname, port, opts) do
-    transport = Util.scheme_to_transport(scheme)
-    scheme_string = Atom.to_string(scheme)
-    mode = Keyword.get(opts, :mode, :active)
-    log? = Keyword.get(opts, :log, false)
+  @spec initiate(t(), keyword()) :: {:ok, t()} | {:error, Types.error()}
+  def initiate(conn, opts) do
+    %__MODULE__{
+      socket: socket,
+      transport: transport
+    } = conn
+
     client_settings_params = Keyword.get(opts, :client_settings, [])
     validate_client_settings!(client_settings_params)
-    # If the port is the default for the scheme, don't add it to the :authority pseudo-header
-    authority =
-      if URI.default_port(scheme_string) == port do
-        hostname
-      else
-        "#{hostname}:#{port}"
-      end
-
-    unless mode in [:active, :passive] do
-      raise ArgumentError,
-            "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
-    end
-
-    unless is_boolean(log?) do
-      raise ArgumentError,
-            "the :log option must be a boolean, got: #{inspect(log?)}"
-    end
-
-    conn = %__MODULE__{
-      hostname: hostname,
-      port: port,
-      authority: authority,
-      transport: Util.scheme_to_transport(scheme),
-      socket: socket,
-      mode: mode,
-      scheme: scheme_string,
-      state: :handshaking,
-      log: log?
-    }
 
     with :ok <- Util.inet_opts(transport, socket),
          client_settings = settings(stream_id: 0, params: client_settings_params),
@@ -1008,7 +1012,7 @@ defmodule Mint.HTTP2 do
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          conn = put_in(conn.socket, socket),
-         :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
+         :ok <- if(conn.mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       {:ok, conn}
     else
       error ->
@@ -1054,20 +1058,17 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp negotiate(address, port, :http, transport_opts) do
+  defp negotiate(%{scheme: "http", transport: transport} = conn, address, transport_opts) do
     # We don't support protocol negotiation for TCP connections
     # so currently we just assume the HTTP/2 protocol
-    transport = Util.scheme_to_transport(:http)
-    transport.connect(address, port, transport_opts)
+    transport.connect(conn, address, transport_opts)
   end
 
-  defp negotiate(address, port, :https, transport_opts) do
-    transport = Util.scheme_to_transport(:https)
-
-    with {:ok, socket} <- transport.connect(address, port, transport_opts),
-         {:ok, protocol} <- transport.negotiated_protocol(socket) do
+  defp negotiate(%{scheme: "https", transport: transport} = conn, address, transport_opts) do
+    with {:ok, conn} <- transport.connect(conn, address, transport_opts),
+         {:ok, protocol} <- transport.negotiated_protocol(conn.socket) do
       if protocol == "h2" do
-        {:ok, socket}
+        {:ok, conn}
       else
         {:error, transport.wrap_error({:bad_alpn_protocol, protocol})}
       end
@@ -1405,6 +1406,7 @@ defmodule Mint.HTTP2 do
       {:ok, frame, rest} ->
         log(conn, :debug, "Received frame: #{Frame.inspect(frame)}")
         conn = validate_frame(conn, frame)
+        conn = maybe_received_first_byte(conn, frame)
         {conn, responses} = handle_frame(conn, frame, responses)
         handle_new_data(conn, rest, responses)
 
@@ -1428,6 +1430,17 @@ defmodule Mint.HTTP2 do
     :throw, {:mint, conn, error} -> throw({:mint, conn, error, responses})
     :throw, {:mint, _conn, _error, _responses} = thrown -> throw(thrown)
   end
+
+  defp maybe_received_first_byte(conn, {:data, _, _, _, _}) do
+    if get_private(conn, :first_byte_received, false) do
+      conn
+    else
+      conn.trace_fun.(conn, :first_byte_received)
+      put_private(conn, :first_byte_received, true)
+    end
+  end
+
+  defp maybe_received_first_byte(conn, _frame), do: conn
 
   defp handle_consumed_all_frames(%{state: state} = conn, responses) do
     case state do
@@ -2141,6 +2154,8 @@ defmodule Mint.HTTP2 do
         true ->
           conn
       end
+
+    conn.trace_fun.(conn, :request_done)
 
     conn
   end

@@ -311,25 +311,17 @@ defmodule Mint.Core.Transport.SSL do
   #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
 
   @impl true
-  def connect(address, port, opts) do
-    hostname = Mint.Core.Util.hostname(opts, address)
+  def connect(conn, address, opts) when is_binary(address),
+    do: connect(conn, String.to_charlist(address), opts)
+
+  def connect(conn, address, opts) do
     opts = Keyword.delete(opts, :hostname)
 
-    connect(address, hostname, port, opts)
-  end
-
-  defp connect(address, hostname, port, opts) when is_binary(address),
-    do: connect(String.to_charlist(address), hostname, port, opts)
-
-  defp connect(address, hostname, port, opts) do
-    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
-
-    case Mint.Core.Transport.TCP.connect(address, port, Keyword.take(opts, [:trace_fun])) do
-      {:ok, tcpsocket} ->
-        case upgrade(tcpsocket, :http, hostname, port, opts) do
-          {:ok, sslsocket} ->
-            trace_fun.(:tls_done)
-            {:ok, sslsocket}
+    case Mint.Core.Transport.TCP.connect(conn, address, []) do
+      {:ok, conn} ->
+        case upgrade(conn, opts) do
+          {:ok, conn} ->
+            {:ok, conn}
 
           error ->
             error
@@ -341,18 +333,24 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   @impl true
-  def upgrade(socket, :http, hostname, _port, opts) do
-    hostname = String.to_charlist(hostname)
+  def upgrade(%{socket: {:sslsocket, _, _}}, _opts) do
+    raise "nested SSL sessions are not supported"
+  end
+
+  def upgrade(conn, opts) do
+    hostname = String.to_charlist(conn.hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
-    Mint.Core.Transport.TCP.setopts(socket, active: false)
+    Mint.Core.Transport.TCP.setopts(conn.socket, active: false)
 
-    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
-  end
-
-  def upgrade(_socket, :https, _hostname, _port, _opts) do
-    raise "nested SSL sessions are not supported"
+    with {:ok, sslsocket} <- :ssl.connect(conn.socket, ssl_opts(hostname, opts), timeout) do
+      conn = %{conn | socket: sslsocket}
+      conn.trace_fun.(conn, :tls_done)
+      {:ok, conn}
+    else
+      error -> wrap_err(error)
+    end
   end
 
   @impl true

@@ -12,16 +12,16 @@ defmodule Mint.Core.Transport.TCP do
   @default_timeout 30_000
 
   @impl true
-  def connect(address, port, opts) when is_binary(address),
-    do: connect(String.to_charlist(address), port, opts)
+  def connect(conn, address, opts) when is_binary(address),
+    do: connect(conn, String.to_charlist(address), opts)
 
-  def connect(address, port, opts) do
+  def connect(conn, address, opts) do
     opts = Keyword.delete(opts, :hostname)
 
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet4? = Keyword.get(opts, :inet4, true)
     inet6? = Keyword.get(opts, :inet6, false)
-    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
+    trace_fun = conn.trace_fun
 
     opts =
       opts
@@ -30,17 +30,19 @@ defmodule Mint.Core.Transport.TCP do
 
     with true <- inet6?,
          {:ok, ip} <- :inet.getaddr(address, :inet6),
-         :ok <- trace_fun.(:dns_done),
-         {:ok, tcpsocket} <- :gen_tcp.connect(ip, port, [:inet6 | opts], timeout) do
-      trace_fun.(:connected)
-      {:ok, tcpsocket}
+         :ok <- trace_fun.(conn, :dns_done),
+         {:ok, tcpsocket} <- :gen_tcp.connect(ip, conn.port, [:inet6 | opts], timeout) do
+      conn = %{conn | socket: tcpsocket}
+      trace_fun.(conn, :connect_done)
+      {:ok, conn}
     else
       _error when inet4? ->
         with {:ok, ip} <- :inet.getaddr(address, :inet),
-             :ok <- trace_fun.(:dns_done),
-             {:ok, tcpsocket} <- :gen_tcp.connect(ip, port, opts, timeout) do
-          trace_fun.(:connected)
-          {:ok, tcpsocket}
+             :ok <- trace_fun.(conn, :dns_done),
+             {:ok, tcpsocket} <- :gen_tcp.connect(ip, conn.port, opts, timeout) do
+          conn = %{conn | socket: tcpsocket}
+          trace_fun.(conn, :connect_done)
+          {:ok, conn}
         else
           error -> wrap_err(error)
         end
