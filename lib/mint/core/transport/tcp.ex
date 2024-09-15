@@ -12,37 +12,43 @@ defmodule Mint.Core.Transport.TCP do
   @default_timeout 30_000
 
   @impl true
-  def connect(address, port, opts) when is_binary(address),
-    do: connect(String.to_charlist(address), port, opts)
+  def connect(conn, address, opts) when is_binary(address),
+    do: connect(conn, String.to_charlist(address), opts)
 
-  def connect(address, port, opts) do
+  def connect(conn, address, opts) do
     opts = Keyword.delete(opts, :hostname)
 
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     inet4? = Keyword.get(opts, :inet4, true)
     inet6? = Keyword.get(opts, :inet6, false)
+    trace_fun = conn.trace_fun
 
     opts =
       opts
       |> Keyword.merge(@transport_opts)
-      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6])
+      |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6, :trace_fun])
 
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # gen_tcp if connection fails.
-      case :gen_tcp.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, socket} ->
-          {:ok, socket}
-
-        _error when inet4? ->
-          wrap_err(:gen_tcp.connect(address, port, opts, timeout))
-
-        error ->
-          wrap_err(error)
-      end
+    with true <- inet6?,
+         {:ok, ip} <- :inet.getaddr(address, :inet6),
+         :ok <- trace_fun.(conn, :dns_done),
+         {:ok, tcpsocket} <- :gen_tcp.connect(ip, conn.port, [:inet6 | opts], timeout) do
+      conn = %{conn | socket: tcpsocket}
+      trace_fun.(conn, :connect_done)
+      {:ok, conn}
     else
-      # Use the defaults provided by gen_tcp.
-      wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+      _error when inet4? ->
+        with {:ok, ip} <- :inet.getaddr(address, :inet),
+             :ok <- trace_fun.(conn, :dns_done),
+             {:ok, tcpsocket} <- :gen_tcp.connect(ip, conn.port, opts, timeout) do
+          conn = %{conn | socket: tcpsocket}
+          trace_fun.(conn, :connect_done)
+          {:ok, conn}
+        else
+          error -> wrap_err(error)
+        end
+
+      error ->
+        wrap_err(error)
     end
   end
 

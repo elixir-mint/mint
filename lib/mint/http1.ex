@@ -132,10 +132,12 @@ defmodule Mint.HTTP1 do
 
     hostname = Mint.Core.Util.hostname(opts, address)
     transport = Util.scheme_to_transport(scheme)
+    trace_fun = Keyword.get(opts, :trace_fun, fn _ -> :ok end)
 
     transport_opts =
       Keyword.get(opts, :transport_opts, [])
       |> Keyword.put(:hostname, hostname)
+      |> Keyword.put(:trace_fun, trace_fun)
 
     with {:ok, socket} <- transport.connect(address, port, transport_opts) do
       initiate(scheme, socket, hostname, port, opts)

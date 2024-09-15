@@ -311,55 +311,46 @@ defmodule Mint.Core.Transport.SSL do
   #       crl_cache: {:ssl_crl_cache, {:internal, [http: 30_000]}}
 
   @impl true
-  def connect(address, port, opts) do
-    hostname = Mint.Core.Util.hostname(opts, address)
+  def connect(conn, address, opts) when is_binary(address),
+    do: connect(conn, String.to_charlist(address), opts)
+
+  def connect(conn, address, opts) do
     opts = Keyword.delete(opts, :hostname)
 
-    connect(address, hostname, port, opts)
-  end
+    case Mint.Core.Transport.TCP.connect(conn, address, []) do
+      {:ok, conn} ->
+        case upgrade(conn, opts) do
+          {:ok, conn} ->
+            {:ok, conn}
 
-  defp connect(address, hostname, port, opts) when is_binary(address),
-    do: connect(String.to_charlist(address), hostname, port, opts)
+          error ->
+            error
+        end
 
-  defp connect(address, hostname, port, opts) do
-    timeout = Keyword.get(opts, :timeout, @default_timeout)
-    inet4? = Keyword.get(opts, :inet4, true)
-    inet6? = Keyword.get(opts, :inet6, false)
-
-    opts = ssl_opts(String.to_charlist(hostname), opts)
-
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # ssl/gen_tcp if connection fails.
-      case :ssl.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, sslsocket} ->
-          {:ok, sslsocket}
-
-        _error when inet4? ->
-          wrap_err(:ssl.connect(address, port, opts, timeout))
-
-        error ->
-          wrap_err(error)
-      end
-    else
-      # Use the defaults provided by ssl/gen_tcp.
-      wrap_err(:ssl.connect(address, port, opts, timeout))
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   @impl true
-  def upgrade(socket, :http, hostname, _port, opts) do
-    hostname = String.to_charlist(hostname)
+  def upgrade(%{socket: {:sslsocket, _, _}}, _opts) do
+    raise "nested SSL sessions are not supported"
+  end
+
+  def upgrade(conn, opts) do
+    hostname = String.to_charlist(conn.hostname)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     # Seems like this is not set in :ssl.connect/2 correctly, so set it explicitly
-    Mint.Core.Transport.TCP.setopts(socket, active: false)
+    Mint.Core.Transport.TCP.setopts(conn.socket, active: false)
 
-    wrap_err(:ssl.connect(socket, ssl_opts(hostname, opts), timeout))
-  end
-
-  def upgrade(_socket, :https, _hostname, _port, _opts) do
-    raise "nested SSL sessions are not supported"
+    with {:ok, sslsocket} <- :ssl.connect(conn.socket, ssl_opts(hostname, opts), timeout) do
+      conn = %{conn | socket: sslsocket}
+      conn.trace_fun.(conn, :tls_done)
+      {:ok, conn}
+    else
+      error -> wrap_err(error)
+    end
   end
 
   @impl true

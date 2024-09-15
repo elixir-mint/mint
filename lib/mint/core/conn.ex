@@ -3,15 +3,9 @@ defmodule Mint.Core.Conn do
 
   alias Mint.Types
 
-  @type conn() :: term()
+  @type conn() :: Mint.Conn.t()
 
-  @callback initiate(
-              module(),
-              Mint.Types.socket(),
-              String.t(),
-              :inet.port_number(),
-              keyword()
-            ) :: {:ok, conn()} | {:error, Types.error()}
+  @callback initiate(conn(), keyword()) :: {:ok, conn()} | {:error, Types.error()}
 
   @callback open?(conn(), :read | :write) :: boolean()
 

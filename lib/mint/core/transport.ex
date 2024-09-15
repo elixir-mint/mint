@@ -5,16 +5,10 @@ defmodule Mint.Core.Transport do
 
   alias Mint.Types
 
-  @callback connect(address :: Types.address(), port :: :inet.port_number(), opts :: keyword()) ::
-              {:ok, Types.socket()} | error()
+  @callback connect(Mint.HTTP.t(), address :: Types.address(), opts :: keyword()) ::
+              {:ok, Mint.HTTP.t()} | error()
 
-  @callback upgrade(
-              Types.socket(),
-              original_scheme :: Types.scheme(),
-              hostname :: String.t(),
-              :inet.port_number(),
-              opts :: keyword()
-            ) :: {:ok, Types.socket()} | error()
+  @callback upgrade(Mint.HTTP.t(), opts :: keyword()) :: {:ok, Mint.HTTP.t()} | error()
 
   @callback negotiated_protocol(Types.socket()) ::
               {:ok, protocol :: binary()} | {:error, :protocol_not_negotiated}
