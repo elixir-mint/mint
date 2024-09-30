@@ -124,6 +124,11 @@ defmodule Mint.Core.Headers do
     Enum.reject(headers, fn {name, _value} -> name in @unallowed_trailers end)
   end
 
+  @spec lower_raw(atom) :: String.t()
+  def lower_raw(name) when is_atom(name) do
+    String.downcase(Atom.to_string(name), :ascii)
+  end
+
   @spec lower_raw(String.t()) :: String.t()
   def lower_raw(name) do
     String.downcase(name, :ascii)
