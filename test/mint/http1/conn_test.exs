@@ -548,7 +548,7 @@ defmodule Mint.HTTP1Test do
              request_string("""
              GET / HTTP/1.1
              host: localhost:#{port}
-             user-agent: mint/#{Mix.Project.config()[:version]}
+             user-agent: #{mint_user_agent()}
 
              \
              """)
@@ -570,7 +570,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -591,7 +591,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                content-length: 4
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                body\
                """)
@@ -607,7 +607,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -626,7 +626,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                content-length: 10
 
                body\
@@ -760,6 +760,42 @@ defmodule Mint.HTTP1Test do
 
                """)
     end
+
+    @invalid_request_targets ["/ /", "/%foo", "/foo%x"]
+    test "targets are validated by default", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+
+      assert_receive {^server_ref, _server_socket}
+
+      for invalid_target <- @invalid_request_targets do
+        assert {:error, %Mint.HTTP1{},
+                %Mint.HTTPError{reason: {:invalid_request_target, ^invalid_target}}} =
+                 HTTP1.request(conn, "GET", invalid_target, [], "")
+      end
+    end
+
+    test "target validation may be skipped based on connection options", %{
+      port: port,
+      server_ref: server_ref
+    } do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, skip_target_validation: true)
+
+      assert_receive {^server_ref, server_socket}
+
+      for invalid_target <- @invalid_request_targets do
+        assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", invalid_target, [], "body")
+
+        assert receive_request_string(server_socket) ==
+                 request_string("""
+                 GET #{invalid_target} HTTP/1.1
+                 content-length: 4
+                 host: localhost:#{port}
+                 user-agent: #{mint_user_agent()}
+
+                 body\
+                 """)
+      end
+    end
   end
 
   describe "streaming requests" do
@@ -772,7 +808,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -795,7 +831,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: chunked
 
                \
@@ -815,7 +851,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: gzip,chunked
 
                \
@@ -839,7 +875,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: identity
 
                \
@@ -859,7 +895,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                content-length: 5
 
                \
@@ -877,7 +913,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -897,7 +933,7 @@ defmodule Mint.HTTP1Test do
                POST / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -997,4 +1033,7 @@ defmodule Mint.HTTP1Test do
   defp stream_message_bytewise(<<>>, conn, responses) do
     {:ok, conn, responses}
   end
+
+  @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
+  defp mint_user_agent, do: @mint_user_agent
 end
