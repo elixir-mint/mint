@@ -33,14 +33,22 @@ defmodule Mint.HTTP1.RequestTest do
                """)
     end
 
+    @invalid_request_targets ["/ /", "/%foo", "/foo%x"]
     test "validates request target" do
-      for invalid_target <- ["/ /", "/%foo", "/foo%x"] do
+      for invalid_target <- @invalid_request_targets do
         assert Request.encode("GET", invalid_target, [], nil) ==
                  {:error, {:invalid_request_target, invalid_target}}
       end
 
       request = encode_request("GET", "/foo%20bar", [], nil)
       assert String.starts_with?(request, request_string("GET /foo%20bar HTTP/1.1"))
+    end
+
+    test "can optionally skip validating the request target" do
+      for invalid_target <- @invalid_request_targets do
+        request = encode_request("GET", invalid_target, [], nil, true)
+        assert String.starts_with?(request, request_string("GET #{invalid_target} HTTP/1.1"))
+      end
     end
 
     test "invalid header name" do
@@ -76,8 +84,8 @@ defmodule Mint.HTTP1.RequestTest do
     end
   end
 
-  defp encode_request(method, target, headers, body) do
-    assert {:ok, iodata} = Request.encode(method, target, headers, body)
+  defp encode_request(method, target, headers, body, skip_target_validation \\ false) do
+    assert {:ok, iodata} = Request.encode(method, target, headers, body, skip_target_validation)
     IO.iodata_to_binary(iodata)
   end
 

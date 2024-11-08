@@ -3,9 +3,9 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  def encode(method, target, headers, body) do
+  def encode(method, target, headers, body, skip_target_validation \\ false) do
     body = [
-      encode_request_line(method, target),
+      encode_request_line(method, target, skip_target_validation),
       encode_headers(headers),
       "\r\n",
       encode_body(body)
@@ -16,8 +16,8 @@ defmodule Mint.HTTP1.Request do
     {:mint, reason} -> {:error, reason}
   end
 
-  defp encode_request_line(method, target) do
-    validate_target!(target)
+  defp encode_request_line(method, target, skip_target_validation) do
+    unless skip_target_validation, do: validate_target!(target)
     [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 

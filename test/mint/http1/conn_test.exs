@@ -760,6 +760,38 @@ defmodule Mint.HTTP1Test do
 
                """)
     end
+
+    @invalid_target "%%"
+    test "targets are validated by default", %{port: port, server_ref: server_ref} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+
+      assert_receive {^server_ref, _server_socket}
+
+      assert {:error, %Mint.HTTP1{},
+              %Mint.HTTPError{reason: {:invalid_request_target, @invalid_target}}} =
+               HTTP1.request(conn, "GET", @invalid_target, [], "")
+    end
+
+    test "target validation may be skipped based on connection options", %{
+      port: port,
+      server_ref: server_ref
+    } do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, skip_target_validation: true)
+
+      assert_receive {^server_ref, server_socket}
+
+      assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", @invalid_target, [], "body")
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET %% HTTP/1.1
+               content-length: 4
+               host: localhost:#{port}
+               user-agent: mint/#{Mix.Project.config()[:version]}
+
+               body\
+               """)
+    end
   end
 
   describe "streaming requests" do

@@ -93,6 +93,7 @@ defmodule Mint.HTTP1 do
     :mode,
     :scheme_as_string,
     :case_sensitive_headers,
+    :skip_target_validation,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -123,6 +124,10 @@ defmodule Mint.HTTP1 do
     * `:case_sensitive_headers` - (boolean) if set to `true` the case of the supplied
        headers in requests will be preserved. The default is to lowercase the headers
        because HTTP/1.1 header names are case-insensitive. *Available since v1.6.0*.
+    * `:skip_target_validation` - (boolean) if set to `true` the target of a request
+       will not be validated. You might want this if you deal with non standard-
+       conform URIs but need to preserve them. The default is to validate the request
+       target. *Available since v1.?.?*
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -200,7 +205,8 @@ defmodule Mint.HTTP1 do
         scheme_as_string: Atom.to_string(scheme),
         state: :open,
         log: log?,
-        case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false)
+        case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
+        skip_target_validation: Keyword.get(opts, :skip_target_validation, false)
       }
 
       {:ok, conn}
@@ -280,7 +286,8 @@ defmodule Mint.HTTP1 do
              method,
              path,
              Headers.to_raw(headers, conn.case_sensitive_headers),
-             body
+             body,
+             conn.skip_target_validation
            ),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
