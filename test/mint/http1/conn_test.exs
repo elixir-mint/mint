@@ -1030,5 +1030,6 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, responses}
   end
 
-  defp mint_user_agent, do: "mint/#{Mix.Project.config()[:version]}"
+  @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
+  defp mint_user_agent, do: @mint_user_agent
 end
