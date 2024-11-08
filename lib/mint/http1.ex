@@ -126,8 +126,8 @@ defmodule Mint.HTTP1 do
        because HTTP/1.1 header names are case-insensitive. *Available since v1.6.0*.
     * `:skip_target_validation` - (boolean) if set to `true` the target of a request
        will not be validated. You might want this if you deal with non standard-
-       conform URIs but need to preserve them. The default is to validate the request
-       target. *Available since v1.?.?*
+       conforming URIs but need to preserve them. The default is to validate the request
+       target. *Available since v1.7.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
