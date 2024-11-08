@@ -761,15 +761,17 @@ defmodule Mint.HTTP1Test do
                """)
     end
 
-    @invalid_target "%%"
+    @invalid_request_targets ["/ /", "/%foo", "/foo%x"]
     test "targets are validated by default", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
 
       assert_receive {^server_ref, _server_socket}
 
-      assert {:error, %Mint.HTTP1{},
-              %Mint.HTTPError{reason: {:invalid_request_target, @invalid_target}}} =
-               HTTP1.request(conn, "GET", @invalid_target, [], "")
+      for invalid_target <- @invalid_request_targets do
+        assert {:error, %Mint.HTTP1{},
+                %Mint.HTTPError{reason: {:invalid_request_target, ^invalid_target}}} =
+                 HTTP1.request(conn, "GET", invalid_target, [], "")
+      end
     end
 
     test "target validation may be skipped based on connection options", %{
@@ -780,17 +782,19 @@ defmodule Mint.HTTP1Test do
 
       assert_receive {^server_ref, server_socket}
 
-      assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", @invalid_target, [], "body")
+      for invalid_target <- @invalid_request_targets do
+        assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", invalid_target, [], "body")
 
-      assert receive_request_string(server_socket) ==
-               request_string("""
-               GET %% HTTP/1.1
-               content-length: 4
-               host: localhost:#{port}
-               user-agent: #{mint_user_agent()}
+        assert receive_request_string(server_socket) ==
+                 request_string("""
+                 GET #{invalid_target} HTTP/1.1
+                 content-length: 4
+                 host: localhost:#{port}
+                 user-agent: #{mint_user_agent()}
 
-               body\
-               """)
+                 body\
+                 """)
+      end
     end
   end
 

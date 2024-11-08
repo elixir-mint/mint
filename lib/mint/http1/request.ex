@@ -3,9 +3,9 @@ defmodule Mint.HTTP1.Request do
 
   import Mint.HTTP1.Parse
 
-  def encode(method, target, headers, body, skip_target_validation \\ false) do
+  def encode(method, target, headers, body) do
     body = [
-      encode_request_line(method, target, skip_target_validation),
+      encode_request_line(method, target),
       encode_headers(headers),
       "\r\n",
       encode_body(body)
@@ -16,8 +16,7 @@ defmodule Mint.HTTP1.Request do
     {:mint, reason} -> {:error, reason}
   end
 
-  defp encode_request_line(method, target, skip_target_validation) do
-    unless skip_target_validation, do: validate_target!(target)
+  defp encode_request_line(method, target) do
     [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 
@@ -44,28 +43,6 @@ defmodule Mint.HTTP1.Request do
   def encode_chunk(chunk) do
     length = IO.iodata_length(chunk)
     [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
-  end
-
-  # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
-  @hex_characters ~c"0123456789abcdefABCDEF"
-
-  defp validate_target!(target), do: validate_target!(target, target)
-
-  defp validate_target!(<<?%, char1, char2, rest::binary>>, original_target)
-       when char1 in @hex_characters and char2 in @hex_characters do
-    validate_target!(rest, original_target)
-  end
-
-  defp validate_target!(<<char, rest::binary>>, original_target) do
-    if URI.char_unescaped?(char) do
-      validate_target!(rest, original_target)
-    else
-      throw({:mint, {:invalid_request_target, original_target}})
-    end
-  end
-
-  defp validate_target!(<<>>, _original_target) do
-    :ok
   end
 
   defp validate_header_name!(name) do

@@ -281,13 +281,13 @@ defmodule Mint.HTTP1 do
       |> add_default_headers(conn)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
+         :ok <- validate_request_target(path, conn.skip_target_validation),
          {:ok, iodata} <-
            Request.encode(
              method,
              path,
              Headers.to_raw(headers, conn.case_sensitive_headers),
-             body,
-             conn.skip_target_validation
+             body
            ),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
@@ -969,6 +969,32 @@ defmodule Mint.HTTP1 do
 
   defp message_body(%{body: body}) do
     {:ok, body}
+  end
+
+  defp validate_request_target(target, skip_validation?)
+  defp validate_request_target(target, false), do: validate_target(target)
+  defp validate_request_target(_, true), do: :ok
+
+  # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
+  @hex_characters ~c"0123456789abcdefABCDEF"
+
+  defp validate_target(target), do: validate_target(target, target)
+
+  defp validate_target(<<?%, char1, char2, rest::binary>>, original_target)
+       when char1 in @hex_characters and char2 in @hex_characters do
+    validate_target(rest, original_target)
+  end
+
+  defp validate_target(<<char, rest::binary>>, original_target) do
+    if URI.char_unescaped?(char) do
+      validate_target(rest, original_target)
+    else
+      {:error, {:invalid_request_target, original_target}}
+    end
+  end
+
+  defp validate_target(<<>>, _original_target) do
+    :ok
   end
 
   defp new_request(ref, method, body, encoding) do
