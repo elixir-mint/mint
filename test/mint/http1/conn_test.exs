@@ -548,7 +548,7 @@ defmodule Mint.HTTP1Test do
              request_string("""
              GET / HTTP/1.1
              host: localhost:#{port}
-             user-agent: mint/#{Mix.Project.config()[:version]}
+             user-agent: #{mint_user_agent()}
 
              \
              """)
@@ -570,7 +570,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -591,7 +591,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                content-length: 4
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                body\
                """)
@@ -607,7 +607,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -626,7 +626,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                content-length: 10
 
                body\
@@ -787,7 +787,7 @@ defmodule Mint.HTTP1Test do
                GET %% HTTP/1.1
                content-length: 4
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                body\
                """)
@@ -804,7 +804,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -827,7 +827,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: chunked
 
                \
@@ -847,7 +847,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: gzip,chunked
 
                \
@@ -871,7 +871,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                transfer-encoding: identity
 
                \
@@ -891,7 +891,7 @@ defmodule Mint.HTTP1Test do
                request_string("""
                GET / HTTP/1.1
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
                content-length: 5
 
                \
@@ -909,7 +909,7 @@ defmodule Mint.HTTP1Test do
                GET / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -929,7 +929,7 @@ defmodule Mint.HTTP1Test do
                POST / HTTP/1.1
                transfer-encoding: chunked
                host: localhost:#{port}
-               user-agent: mint/#{Mix.Project.config()[:version]}
+               user-agent: #{mint_user_agent()}
 
                \
                """)
@@ -1029,4 +1029,6 @@ defmodule Mint.HTTP1Test do
   defp stream_message_bytewise(<<>>, conn, responses) do
     {:ok, conn, responses}
   end
+
+  defp mint_user_agent, do: "mint/#{Mix.Project.config()[:version]}"
 end
