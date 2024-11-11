@@ -238,6 +238,10 @@ defmodule Mint.HTTP do
       server. See `Mint.HTTP2.put_settings/2` for more information. This is only used
       in HTTP/2 connections.
 
+  There may be further protocol specific options that only take effect when the corresponding
+  connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
+  details.
+
   ## Protocol negotiation
 
   If both `:http1` and `:http2` are present in the list passed in the `:protocols` option,
