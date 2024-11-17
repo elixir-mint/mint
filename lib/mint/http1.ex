@@ -93,6 +93,7 @@ defmodule Mint.HTTP1 do
     :mode,
     :scheme_as_string,
     :case_sensitive_headers,
+    :skip_target_validation,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -123,6 +124,10 @@ defmodule Mint.HTTP1 do
     * `:case_sensitive_headers` - (boolean) if set to `true` the case of the supplied
        headers in requests will be preserved. The default is to lowercase the headers
        because HTTP/1.1 header names are case-insensitive. *Available since v1.6.0*.
+    * `:skip_target_validation` - (boolean) if set to `true` the target of a request
+       will not be validated. You might want this if you deal with non standard-
+       conforming URIs but need to preserve them. The default is to validate the request
+       target. *Available since v1.7.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -202,7 +207,8 @@ defmodule Mint.HTTP1 do
         scheme_as_string: Atom.to_string(scheme),
         state: :open,
         log: log?,
-        case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false)
+        case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
+        skip_target_validation: Keyword.get(opts, :skip_target_validation, false)
       }
 
       {:ok, conn}
@@ -277,6 +283,7 @@ defmodule Mint.HTTP1 do
       |> add_default_headers(conn)
 
     with {:ok, headers, encoding} <- add_content_length_or_transfer_encoding(headers, body),
+         :ok <- validate_request_target(path, conn.skip_target_validation),
          {:ok, iodata} <-
            Request.encode(
              method,
@@ -964,6 +971,32 @@ defmodule Mint.HTTP1 do
 
   defp message_body(%{body: body}) do
     {:ok, body}
+  end
+
+  defp validate_request_target(target, skip_validation?)
+  defp validate_request_target(target, false), do: validate_target(target)
+  defp validate_request_target(_, true), do: :ok
+
+  # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
+  @hex_characters ~c"0123456789abcdefABCDEF"
+
+  defp validate_target(target), do: validate_target(target, target)
+
+  defp validate_target(<<?%, char1, char2, rest::binary>>, original_target)
+       when char1 in @hex_characters and char2 in @hex_characters do
+    validate_target(rest, original_target)
+  end
+
+  defp validate_target(<<char, rest::binary>>, original_target) do
+    if URI.char_unescaped?(char) do
+      validate_target(rest, original_target)
+    else
+      {:error, {:invalid_request_target, original_target}}
+    end
+  end
+
+  defp validate_target(<<>>, _original_target) do
+    :ok
   end
 
   defp new_request(ref, method, body, encoding) do
