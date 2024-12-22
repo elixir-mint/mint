@@ -22,7 +22,11 @@ defmodule Mint.HTTP2.FrameTest do
   test "flag_set?/3" do
     assert flag_set?(0x08, :data, :padded) == true
     assert flag_set?(0x00, :data, :padded) == false
-    assert_raise FunctionClauseError, fn -> flag_set?(0x00, :data, :ack) end
+
+    # Typing violation if done at compile time.
+    assert_raise FunctionClauseError, fn ->
+      Code.eval_quoted(quote do: Mint.HTTP2.Frame.flag_set?(0x00, :data, :ack))
+    end
   end
 
   test "decode_next/1 with an incomplete frame" do
