@@ -710,6 +710,14 @@ defmodule Mint.HTTP do
   where `conn` is the updated connection, `reason` is the error reason, and `responses`
   is a list of responses that were correctly parsed before the error.
 
+  > #### Graceful Close {: .tip}
+  >
+  > If this function returns `{:ok, conn, responses}`, it doesn't *necessarily* mean
+  > that the connection is still open. For example, TCP/SSL **close** messages are treated
+  > as errors only if there are in-flight requests. If there are no in-flight requests,
+  > the connection is closed gracefully and `{:ok, conn, responses}` is returned.
+  > Always check with `open?/1` to see if the connection is still open.
+
   If the given `message` is not from the connection's socket,
   this function returns `:unknown`.
 
