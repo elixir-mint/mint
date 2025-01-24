@@ -1036,7 +1036,7 @@ defmodule Mint.HTTP2 do
   @doc false
   @impl true
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
-    %__MODULE__{conn | proxy_headers: headers}
+    %{conn | proxy_headers: headers}
   end
 
   ## Helpers
@@ -1467,7 +1467,7 @@ defmodule Mint.HTTP2 do
           send_connection_error!(conn, :protocol_error, debug_data)
 
         conn.state == :handshaking ->
-          %__MODULE__{conn | state: :open}
+          %{conn | state: :open}
 
         true ->
           conn
