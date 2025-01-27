@@ -295,7 +295,7 @@ defmodule Mint.HTTP1 do
 
       case request.state do
         {:stream_request, _} ->
-          conn = %__MODULE__{conn | streaming_request: request}
+          conn = %{conn | streaming_request: request}
           {:ok, conn, request_ref}
 
         _ ->
@@ -351,7 +351,7 @@ defmodule Mint.HTTP1 do
         :eof
       ) do
     request = %{conn.streaming_request | state: :status}
-    conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+    conn = enqueue_request(%{conn | streaming_request: nil}, request)
     {:ok, conn}
   end
 
@@ -390,12 +390,12 @@ defmodule Mint.HTTP1 do
       case chunk do
         :eof ->
           request = %{conn.streaming_request | state: :status}
-          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          conn = enqueue_request(%{conn | streaming_request: nil}, request)
           {:ok, conn}
 
         {:eof, _trailer_headers} ->
           request = %{conn.streaming_request | state: :status}
-          conn = enqueue_request(%__MODULE__{conn | streaming_request: nil}, request)
+          conn = enqueue_request(%{conn | streaming_request: nil}, request)
           {:ok, conn}
 
         _other ->
@@ -639,7 +639,7 @@ defmodule Mint.HTTP1 do
   @impl true
   @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
-    %__MODULE__{conn | proxy_headers: headers}
+    %{conn | proxy_headers: headers}
   end
 
   ## Helpers
@@ -918,12 +918,12 @@ defmodule Mint.HTTP1 do
   end
 
   defp enqueue_request(%{request: nil} = conn, request) do
-    %__MODULE__{conn | request: request}
+    %{conn | request: request}
   end
 
   defp enqueue_request(conn, request) do
     requests = :queue.in(request, conn.requests)
-    %__MODULE__{conn | requests: requests}
+    %{conn | requests: requests}
   end
 
   defp internal_close(conn) do
