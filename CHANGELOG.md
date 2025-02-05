@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.1
+
+### Bug Fixes and Improvements
+
+  * Fix a bug introduced in the previous version that broke `Mint.HTTP.open?/1`.
+
 ## v1.7.0
 
 ### Bug Fixes and Improvements
