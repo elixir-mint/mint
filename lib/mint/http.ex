@@ -530,7 +530,7 @@ defmodule Mint.HTTP do
   """
   @impl true
   @spec open?(t(), :read | :write) :: boolean()
-  def open?(conn, type \\ :write), do: conn_apply(conn, :open, [conn, type])
+  def open?(conn, type \\ :write), do: conn_apply(conn, :open?, [conn, type])
 
   @doc """
   Sends a request to the connected server.
