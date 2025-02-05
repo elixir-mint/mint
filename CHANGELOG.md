@@ -1,14 +1,23 @@
 # Changelog
 
+## v1.7.0
+
+### Bug Fixes and Improvements
+
+  * Fix a bug with double-wrapping tunnel proxy errors. This only affected HTTP/1 connections using proxies when upgrade errors would happen—see [#438](https://github.com/elixir-mint/mint/issues/438).
+  * Introduce `:skip_target_validation` option for HTTP/1.1 connections.
+  * Add generic `:custom_error` to HTTP/2 frames. This can be returned by HTTP/2 servers in compliance with the HTTP/2 spec. Before, Mint would error out in such cases, while now it just returns the unaltered custom error code.
+  * Fix compilation warning for the next Elixir release (1.19).
+
 ## v1.6.2
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Allow for version `~> 1.0` of the `hpax` dependency.
 
 ## v1.6.1
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Default to using Erlang certificate store (see [`public_key:cacerts_get/0`](https://www.erlang.org/doc/apps/public_key/public_key.html#cacerts_get-0) and friends) if available, instead of [CAStore](https://github.com/elixir-mint/castore).
   * Don't send `RST_STREAM` frames in HTTP/2 if they are not needed (this is a network optimization, not visible to users of Mint).
@@ -20,7 +29,7 @@
   * Add `:case_sensitive_headers` option to `Mint.HTTP1.connect/4`.
   * Add `:inet4` option to `Mint.HTTP.connect/4`.
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Require Elixir 1.11+.
   * Add `match_fun` clause to deal with IP addresses in TLS handshake.
@@ -32,14 +41,14 @@
 
 ## v1.5.2
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a memory leak with `Mint.HTTP1` connections which would stay open but
     report as closed on timeouts.
 
 ## v1.5.1
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a `FunctionClauseError` that would happen when calling
     `Mint.HTTP2.close/1` on an HTTP/2 connection that hadn't completed the
@@ -48,7 +57,7 @@
 
 ## v1.5.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Properly close sockets on erroneous connections.
   * Fix `Mint.HTTP.is_connection_message/2` to support proxy connections.
@@ -63,7 +72,7 @@
 
 ## v1.4.2
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Properly handle interim responses (informational `1xx` status codes) in
     HTTP/2. Now you might get zero or more sequences of `:status` and `:headers`
@@ -72,7 +81,7 @@
 
 ## v1.4.1
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Emit the remaining buffer as a `:data` response when switching protocols
     from HTTP/1.
@@ -81,7 +90,7 @@
 
 ## v1.4.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Add support for `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/2 server setting.
   * Omit the `:scheme` and `:path` pseudo headers for HTTP/2 CONNECT.
@@ -92,7 +101,7 @@
 
 ## v1.3.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Improve compatibility with OTP 24.
   * Support HTTP/1 pipelining when streaming requests.
@@ -101,7 +110,7 @@
 
 ## v1.2.1
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a bug where we were not ignoring the return value of `:ssl.close/1` and `:gen_tcp.close/1`.
   * Fix a bug where we were not properly handling transport errors when doing ALPN protocol negotiation.
@@ -109,7 +118,7 @@
 
 ## v1.2.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a few bugs with passing the Mint connection around.
   * Add IPv6 support with `inet6: true` in the transport options.
@@ -118,7 +127,7 @@
 
 ## v1.1.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Concatenate values in one `cookie` header if the `cookie` header is provided more than once in HTTP/2.
   * Fix headers merging in `Mint.UnsafeProxy`.
@@ -137,7 +146,7 @@
 
 ## v0.5.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Deprecate `Mint.HTTP.request/4` in favor of explicitly passing the body every time in `Mint.HTTP.request/5`. Same for `Mint.HTTP1` and `Mint.HTTP2`.
   * Don't include port in the `authority` header if it's the default port for the used protocol.
@@ -147,7 +156,7 @@
 
 ## v0.4.0
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a small bug with double "wrapping" of some `Mint.TransportError`s.
   * Prevent unnecessary buffer allocations in the connections (less memory waste!).
@@ -161,7 +170,7 @@
 
   * Remove `Mint.HTTP1.get_socket/1`, `Mint.HTTP2.get_socket/1`, and `Mint.HTTP.get_socket/1`.
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Downcase all headers in HTTP/2 to mimic the behavior in HTTP/1.1.
 
@@ -177,7 +186,7 @@
 
 ## v0.2.1
 
-### Bug fixes and improvements
+### Bug Fixes and Improvements
 
   * Fix a bug with requests exceeding the window size in HTTP/2. We were sending the headers of a request even if the body was larger than the window size. Now, if the body is larger than the window size, we error out right away.
 
