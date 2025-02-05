@@ -47,7 +47,7 @@ defmodule Mint.TunnelProxy do
     # Note that we may leak messages if the server sent data after the CONNECT response
     case Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts) do
       {:ok, conn} -> {:ok, HTTP.put_proxy_headers(conn, proxy_headers)}
-      {:error, reason} -> wrap_in_proxy_error(reason)
+      {:error, reason} -> {:error, wrap_in_proxy_error(reason)}
     end
   end
 
