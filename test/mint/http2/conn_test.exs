@@ -1661,6 +1661,36 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
+    test "server sends invalid WINDOW_UPDATE on a stream that is in the half-closed (remote) state (RFC9113§5.1)",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{} = conn, reason, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers([{":status", "200"}]),
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream])),
+                 window_update(stream_id: stream_id, window_size_increment: 1000)
+               ])
+
+      assert Enum.reverse(responses) == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:data, ref, ""},
+               {:done, ref}
+             ]
+
+      assert_http2_error reason, {:stream_not_found, ^stream_id}
+
+      # Conn stays open.
+      assert HTTP2.open?(conn)
+    end
+
     test "server violates client's max frame size", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
