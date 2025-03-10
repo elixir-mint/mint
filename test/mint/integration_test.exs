@@ -9,10 +9,14 @@ defmodule Mint.IntegrationTest do
 
   describe "nghttp2.org" do
     test "SSL - select HTTP1" do
-      assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443, protocols: [:http1])
+      assert {:ok, conn} =
+               HTTP.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: HttpBin.https_transport_opts(),
+                 protocols: [:http1]
+               )
 
       assert conn.__struct__ == Mint.HTTP1
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [
@@ -24,10 +28,13 @@ defmodule Mint.IntegrationTest do
     end
 
     test "SSL - select HTTP2" do
-      assert {:ok, conn} = HTTP.connect(:https, "nghttp2.org", 443)
+      assert {:ok, conn} =
+               HTTP.connect(:https, HttpBin.host(), HttpBin.https_port(),
+                 transport_opts: HttpBin.https_transport_opts()
+               )
 
       assert conn.__struct__ == Mint.HTTP2
-      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/httpbin/bytes/1", [], nil)
+      assert {:ok, conn, request} = HTTP.request(conn, "GET", "/bytes/1", [], nil)
       assert {:ok, _conn, responses} = receive_stream(conn)
 
       assert [

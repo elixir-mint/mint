@@ -185,7 +185,7 @@ defmodule Mint.HTTP1.IntegrationTest do
                HTTP1.connect(
                  :https,
                  "localhost",
-                 8443,
+                 Mint.HttpBin.https_port(),
                  transport_opts: [cacerts: [], log_alert: false, reuse_sessions: false]
                )
 
