@@ -51,7 +51,6 @@ iex> flush()
 
 Users are not supposed to examine these messages. Instead, Mint provides a `stream/2` function that turns messages into HTTP responses. Mint streams responses back to the user in parts through response parts such as `:status`, `:headers`, `:data`, and `:done`.
 
-
 ```elixir
 iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443)
 iex> {:ok, conn, request_ref} = Mint.HTTP.request(conn, "GET", "/", [], "")
@@ -151,7 +150,6 @@ Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi
   See the License for the specific language governing permissions and
   limitations under the License.
 
-[castore]: https://github.com/elixir-mint/castore
 [documentation]: https://hexdocs.pm/mint
 [issues]: https://github.com/elixir-mint/mint/issues
 [mint_web_socket]: https://github.com/elixir-mint/mint_web_socket

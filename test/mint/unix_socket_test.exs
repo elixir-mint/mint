@@ -1,4 +1,4 @@
-defmodule Mint.UnitSocketTest do
+defmodule Mint.UnixSocketTest do
   use ExUnit.Case, async: true
 
   alias Mint.{HTTP, TestSocketServer}
