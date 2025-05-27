@@ -84,7 +84,7 @@ Now you can decompress responses! Above is a simple approach to a potentially co
 
 [gzip]: https://tools.ietf.org/html/rfc1952
 [brotli]: https://tools.ietf.org/html/rfc7932
-[ztsd]: https://tools.ietf.org/html/rfc8478
+[zstd]: https://tools.ietf.org/html/rfc8478
 [accept-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
 [content-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Encoding
 [transfer-encoding]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding
