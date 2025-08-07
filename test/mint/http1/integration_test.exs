@@ -100,12 +100,6 @@ defmodule Mint.HTTP1.IntegrationTest do
 
       assert byte_size(merge_body(responses, request)) == 1024
     end
-
-    test "empty target" do
-      {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
-      assert {:error, _conn, %Mint.HTTPError{} = error} = HTTP1.request(conn, "GET", "", [], nil)
-      assert Exception.message(error) == ~s|invalid request target: ""|
-    end
   end
 
   describe "twitter.com" do

@@ -761,7 +761,7 @@ defmodule Mint.HTTP1Test do
                """)
     end
 
-    @invalid_request_targets ["/ /", "/%foo", "/foo%x"]
+    @invalid_request_targets ["", "/ /", "/%foo", "/foo%x"]
     test "targets are validated by default", %{port: port, server_ref: server_ref} do
       assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
 
