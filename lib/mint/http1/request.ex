@@ -45,7 +45,7 @@ defmodule Mint.HTTP1.Request do
     [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
   end
 
-  defp validate_header_name!(name) do
+  defp validate_header_name!(name) when is_binary(name) do
     _ =
       for <<char <- name>> do
         unless is_tchar(char) do
@@ -56,7 +56,7 @@ defmodule Mint.HTTP1.Request do
     :ok
   end
 
-  defp validate_header_value!(name, value) do
+  defp validate_header_value!(name, value) when is_binary(value) do
     _ =
       for <<char <- value>> do
         unless is_vchar(char) or char in ~c"\s\t" do
