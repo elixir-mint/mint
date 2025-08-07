@@ -42,11 +42,6 @@ defmodule Mint.HTTP1.RequestTest do
       assert Request.encode("GET", "/", [{"foo", "bar\r\n"}], nil) ==
                {:error, {:invalid_header_value, "foo", "bar\r\n"}}
     end
-
-    test "empty target" do
-      assert Request.encode("GET", "", [], nil) ==
-               {:error, {:invalid_target, ""}}
-    end
   end
 
   describe "encode_chunk/1" do

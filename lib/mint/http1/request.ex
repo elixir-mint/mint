@@ -17,7 +17,6 @@ defmodule Mint.HTTP1.Request do
   end
 
   defp encode_request_line(method, target) do
-    validate_target!(target)
     [method, ?\s, target, " HTTP/1.1\r\n"]
   end
 
@@ -45,9 +44,6 @@ defmodule Mint.HTTP1.Request do
     length = IO.iodata_length(chunk)
     [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
   end
-
-  defp validate_target!("" = target), do: throw({:mint, {:invalid_target, target}})
-  defp validate_target!(_target), do: :ok
 
   defp validate_header_name!(name) do
     _ =
