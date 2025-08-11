@@ -978,6 +978,7 @@ defmodule Mint.HTTP1 do
   # Percent-encoding is not case sensitive so we have to account for lowercase and uppercase.
   @hex_characters ~c"0123456789abcdefABCDEF"
 
+  defp validate_target(<<>> = empty_target), do: {:error, {:invalid_request_target, empty_target}}
   defp validate_target(target), do: validate_target(target, target)
 
   defp validate_target(<<?%, char1, char2, rest::binary>>, original_target)
