@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }}, OTP ${{ matrix.erlang }})
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -19,10 +19,8 @@ jobs:
             lint: true
             coverage: true
             dialyzer: true
-          - erlang: "24.3"
-            elixir: "1.12"
-          - erlang: "23.3.1"
-            elixir: "1.12"
+          - erlang: "24.3" # We technically support OTP 23 but hard to test in CI
+            elixir: "1.14"
             dialyzer: true
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
