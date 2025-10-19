@@ -99,7 +99,8 @@ defmodule Mint.HTTP1 do
     buffer: "",
     proxy_headers: [],
     private: %{},
-    log: false
+    log: false,
+    optional_responses: []
   ]
 
   defmacrop log(conn, level, message) do
@@ -128,6 +129,11 @@ defmodule Mint.HTTP1 do
        will not be validated. You might want this if you deal with non standard-
        conforming URIs but need to preserve them. The default is to validate the request
        target. *Available since v1.7.0*.
+    * `:optional_responses` - (list of atoms) a list of optional responses to return.
+       The possible values in the list are `:status_reason` which will return the
+       [reason-phrase](https://datatracker.ietf.org/doc/html/rfc9112#name-status-line)
+       for the status code, if it is returned by the server in status-line.
+       This is only available for HTTP/1.1 connections. *Available since v1.7.2*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -206,7 +212,8 @@ defmodule Mint.HTTP1 do
         state: :open,
         log: log?,
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
-        skip_target_validation: Keyword.get(opts, :skip_target_validation, false)
+        skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
+        optional_responses: Keyword.get(opts, :optional_responses, [])
       }
 
       {:ok, conn}
@@ -646,10 +653,10 @@ defmodule Mint.HTTP1 do
 
   defp decode(:status, %{request: request} = conn, data, responses) do
     case Response.decode_status_line(data) do
-      {:ok, {version, status, _reason}, rest} ->
+      {:ok, {version, status, _reason} = status_line, rest} ->
         request = %{request | version: version, status: status, state: :headers}
         conn = %{conn | request: request}
-        responses = [{:status, request.ref, status} | responses]
+        responses = put_status_responses(conn, status_line, responses)
         decode(:headers, conn, rest, responses)
 
       :more ->
@@ -869,6 +876,20 @@ defmodule Mint.HTTP1 do
       data ->
         conn = put_in(conn.request.data_buffer, [])
         {conn, [{:data, conn.request.ref, data} | responses]}
+    end
+  end
+
+  defp put_status_responses(
+         %{request: request, optional_responses: optional_responses},
+         {_version, status, reason},
+         responses
+       ) do
+    responses = [{:status, request.ref, status} | responses]
+
+    if Enum.member?(optional_responses, :status_reason) do
+      [{:status_reason, request.ref, reason} | responses]
+    else
+      responses
     end
   end
 

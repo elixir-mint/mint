@@ -581,6 +581,39 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  describe "status reason" do
+    setup %{port: port} do
+      assert {:ok, conn} =
+               HTTP1.connect(:http, "localhost", port, optional_responses: [:status_reason])
+
+      [conn: conn]
+    end
+
+    test "returns with 200 OK", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:status_reason, ^ref, "OK"}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+    end
+
+    test "returns with 404 Not Found", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 404}, {:status_reason, ^ref, "Not Found"}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 404 Not Found\r\n"})
+    end
+
+    test "returns empty string when reason is not provided", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:status_reason, ^ref, ""}]} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "HTTP/1.1 200\r\n"}
+               )
+    end
+  end
+
   describe "non-streaming requests" do
     test "content-length header is added if not present",
          %{conn: conn, server_socket: server_socket, port: port} do
