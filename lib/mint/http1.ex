@@ -83,6 +83,8 @@ defmodule Mint.HTTP1 do
   """
   @type error_reason() :: term()
 
+  @optional_responses_opts [:status_reason]
+
   defstruct [
     :host,
     :port,
@@ -130,10 +132,11 @@ defmodule Mint.HTTP1 do
        conforming URIs but need to preserve them. The default is to validate the request
        target. *Available since v1.7.0*.
     * `:optional_responses` - (list of atoms) a list of optional responses to return.
-       The possible values in the list are `:status_reason` which will return the
-       [reason-phrase](https://datatracker.ietf.org/doc/html/rfc9112#name-status-line)
-       for the status code, if it is returned by the server in status-line.
-       This is only available for HTTP/1.1 connections. *Available since v1.7.2*.
+       The possible values in the list are -
+       * `:status_reason` which will return the
+          [reason-phrase](https://datatracker.ietf.org/doc/html/rfc9112#name-status-line)
+          for the status code, if it is returned by the server in status-line.
+          This is only available for HTTP/1.1 connections. *Available since v1.7.2*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -213,7 +216,7 @@ defmodule Mint.HTTP1 do
         log: log?,
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
         skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
-        optional_responses: Keyword.get(opts, :optional_responses, [])
+        optional_responses: validate_optional_response_values(opts)
       }
 
       {:ok, conn}
@@ -222,6 +225,21 @@ defmodule Mint.HTTP1 do
         :ok = transport.close(socket)
         {:error, reason}
     end
+  end
+
+  defp validate_optional_response_values(opts) do
+    opts
+    |> Keyword.get(:optional_responses, [])
+    |> Enum.map(fn opt ->
+      if opt not in @optional_responses_opts do
+        raise ArgumentError, """
+        invalid :optional_responses value #{opt}.
+        allowed values are - #{inspect(@optional_responses_opts)}
+        """
+      end
+
+      opt
+    end)
   end
 
   @doc """

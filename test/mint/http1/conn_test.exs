@@ -187,6 +187,12 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "raises error connecting with invalid optional_responses params", %{port: port} do
+    assert_raise ArgumentError, fn ->
+      HTTP1.connect(:http, "localhost", port, optional_responses: [:someting])
+    end
+  end
+
   test "pipeline", %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
