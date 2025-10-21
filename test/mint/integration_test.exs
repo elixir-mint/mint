@@ -233,7 +233,8 @@ defmodule Mint.IntegrationTest do
                HTTP.connect(
                  :https,
                  "tls-v1-2.badssl.com",
-                 1012
+                 1012,
+                 transport_opts: [keep_secrets: true]
                )
 
       assert socket = Mint.HTTP.get_socket(conn)
