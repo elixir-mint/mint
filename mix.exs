@@ -27,12 +27,12 @@ defmodule Mint.MixProject do
       dialyzer: [
         plt_add_apps: [:castore],
         plt_local_path: "plts",
-        plt_core_path: "plts"
+        plt_core_path: "plts",
+        ignore_warnings: ".dialyzer_ignore"
       ],
 
       # Code coverage
       test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: ["coveralls.html": :test, coveralls: :test],
 
       # Hex
       package: package(),
@@ -56,6 +56,12 @@ defmodule Mint.MixProject do
     [
       extra_applications: [:logger, :ssl],
       mod: {Mint.Application, []}
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: ["coveralls.html": :test, coveralls: :test]
     ]
   end
 
