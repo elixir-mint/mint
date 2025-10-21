@@ -27,7 +27,8 @@ defmodule Mint.MixProject do
       dialyzer: [
         plt_add_apps: [:castore],
         plt_local_path: "plts",
-        plt_core_path: "plts"
+        plt_core_path: "plts",
+        ignore_warnings: ".dialyzer_ignore"
       ],
 
       # Code coverage
