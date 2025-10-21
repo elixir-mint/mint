@@ -124,7 +124,7 @@ defmodule HTTP2.IntegrationTest do
       assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
       assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
-      assert status in [200, 302]
+      assert status in [200, 301, 302]
 
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
 

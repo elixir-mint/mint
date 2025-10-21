@@ -187,6 +187,12 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "raises error connecting with invalid optional_responses params", %{port: port} do
+    assert_raise ArgumentError, fn ->
+      HTTP1.connect(:http, "localhost", port, optional_responses: [:someting])
+    end
+  end
+
   test "pipeline", %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -578,6 +584,39 @@ defmodule Mint.HTTP1Test do
       assert HTTP1.open?(conn)
     after
       URI.default_port("http", default_http_port)
+    end
+  end
+
+  describe "status reason" do
+    setup %{port: port} do
+      assert {:ok, conn} =
+               HTTP1.connect(:http, "localhost", port, optional_responses: [:status_reason])
+
+      [conn: conn]
+    end
+
+    test "returns with 200 OK", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:status_reason, ^ref, "OK"}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+    end
+
+    test "returns with 404 Not Found", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 404}, {:status_reason, ^ref, "Not Found"}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 404 Not Found\r\n"})
+    end
+
+    test "returns empty string when reason is not provided", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:status_reason, ^ref, ""}]} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "HTTP/1.1 200\r\n"}
+               )
     end
   end
 

@@ -759,6 +759,12 @@ defmodule Mint.HTTP do
       You can have zero or more `1xx` `:status` and `:headers` responses for a
       single request, but they all precede a single non-`1xx` `:status` response.
 
+    * `{:status_reason, request_ref, reason_phrase}` - returned when the server replied
+      with a response status code and a reason-phrase. The reason-phrase is a string.
+      Returned when the `:optional_responses` option is passed to `connect/4`, with
+      `:status_reason` in the list. See `Mint.HTTP1.connect/4` for more information.
+      This is only available for HTTP/1.1 connections. *Available since v1.7.2*.
+
     * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
       with `header_name` and `header_value` being strings. A single `:headers` response
