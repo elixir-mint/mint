@@ -123,6 +123,7 @@ defmodule Mint.HTTP do
 
   alias Mint.{Types, TunnelProxy, UnsafeProxy}
   alias Mint.Core.{Transport, Util}
+  require Util
 
   @behaviour Mint.Core.Conn
 
@@ -889,6 +890,149 @@ defmodule Mint.HTTP do
           {:ok, t(), [Types.response()]}
           | {:error, t(), Types.error(), [Types.response()]}
   def recv(conn, byte_count, timeout), do: conn_apply(conn, :recv, [conn, byte_count, timeout])
+
+  @version Mix.Project.config()[:version]
+
+  @doc """
+  Sends a request and receives a response from the socket in a blocking way.
+
+  This function is a convenience for sending a request with `request/5` and repeatedly calling `recv/3`.
+
+  The result is either:
+
+    * `{:ok, conn, response}` where `conn` is the updated connection and `response` is a map
+      with the following keys:
+
+        * `:status` - HTTP response status, an integer.
+
+        * `:headers` - HTTP response headers, a list of tuples `{header_name, header_value}`.
+
+        * `:body` - HTTP response body, a binary.
+
+    * `{:error, conn, reason}` where `conn` is the updated connection and `reason` is the cause
+      of the error. It is important to store the returned connection over the old connection in
+      case of errors too, because the state of the connection might change when there are errors
+      as well. An error when sending a request **does not** necessarily mean that the connection
+      is closed. Use `open?/1` to verify that the connection is open.
+
+      Contrary to `recv/3`, this function does not return partial responses on errors. Use
+      `recv/3` for full control.
+
+  > #### Error {: .error}
+  >
+  > This function can only be used for one-off requests. If there is another concurrent request,
+  > started by `request/5`, it will crash.
+
+  ## Options
+
+    * `:timeout` - the maximum amount of time in milliseconds waiting to receive the response.
+      Setting to `:infinity`, disables the timeout. Defaults to `:infinity`.
+
+  ## Examples
+
+      iex> {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, mode: :passive)
+      iex> {:ok, conn, response} = Mint.HTTP.request_and_response(conn, "GET", "/user-agent", [], nil)
+      iex> response
+      %{
+        status: 200,
+        headers: [{"date", ...}, ...],
+        body: "{\\n  \\"user-agent\\": \\"#{@version}\\"\\n}\\n"
+      }
+      iex> Mint.HTTP.open?(conn)
+      true
+
+  """
+  @spec request_and_response(
+          t(),
+          method :: String.t(),
+          path :: String.t(),
+          Types.headers(),
+          body :: iodata() | nil | :stream,
+          options :: [{:timeout, timeout()}]
+        ) ::
+          {:ok, t(), response}
+          | {:error, t(), Types.error()}
+        when response: %{
+               status: Types.status(),
+               headers: Types.headers(),
+               body: binary()
+             }
+  def request_and_response(conn, method, path, headers, body, options \\ []) do
+    options = keyword_validate!(options, timeout: :infinity)
+
+    with {:ok, conn, ref} <- request(conn, method, path, headers, body) do
+      recv_response(conn, ref, options[:timeout])
+    end
+  end
+
+  defp recv_response(conn, request_ref, timeout) when Util.is_timeout(timeout) do
+    recv_response([], {nil, [], ""}, conn, request_ref, timeout)
+  end
+
+  defp recv_response(
+         [{:status, ref, new_status} | rest],
+         {_status, headers, body},
+         conn,
+         ref,
+         timeout
+       ) do
+    recv_response(rest, {new_status, headers, body}, conn, ref, timeout)
+  end
+
+  defp recv_response(
+         [{:headers, ref, new_headers} | rest],
+         {status, headers, body},
+         conn,
+         ref,
+         timeout
+       ) do
+    recv_response(rest, {status, headers ++ new_headers, body}, conn, ref, timeout)
+  end
+
+  defp recv_response([{:data, ref, data} | rest], {status, headers, body}, conn, ref, timeout) do
+    recv_response(rest, {status, headers, [body, data]}, conn, ref, timeout)
+  end
+
+  defp recv_response([{:done, ref} | _rest], {status, headers, body}, conn, ref, _timeout) do
+    response = %{status: status, headers: headers, body: IO.iodata_to_binary(body)}
+    {:ok, conn, response}
+  end
+
+  defp recv_response([{:error, ref, error} | _rest], _acc, conn, ref, _timeout) do
+    {:error, conn, error}
+  end
+
+  # Ignore entries from other requests.
+  defp recv_response([entry | _rest], _acc, _conn, _ref, _timeout) when is_tuple(entry) do
+    ref = elem(entry, 1)
+    raise "received unexpected response from request #{inspect(ref)}"
+  end
+
+  defp recv_response([], acc, conn, ref, timeout) do
+    start_time = System.monotonic_time(:millisecond)
+
+    case recv(conn, 0, timeout) do
+      {:ok, conn, entries} ->
+        timeout =
+          if is_integer(timeout) do
+            timeout - System.monotonic_time(:millisecond) - start_time
+          else
+            timeout
+          end
+
+        recv_response(entries, acc, conn, ref, timeout)
+
+      {:error, conn, reason, _responses} ->
+        {:error, conn, reason}
+    end
+  end
+
+  # TODO: Remove when we require Elixir v1.13
+  if function_exported?(Keyword, :validate!, 2) do
+    defp keyword_validate!(keyword, values), do: Keyword.validate!(keyword, values)
+  else
+    defp keyword_validate!(keyword, _values), do: keyword
+  end
 
   @doc """
   Changes the mode of the underlying socket.
