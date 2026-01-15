@@ -3,8 +3,6 @@ defmodule Mint.UnixSocketTest do
 
   alias Mint.{HTTP, TestSocketServer}
 
-  require HTTP
-
   unix? = match?({:unix, _}, :os.type())
   otp_19? = System.otp_release() >= "19"
   @moduletag skip: not (unix? and otp_19?)
