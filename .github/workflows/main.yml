@@ -24,7 +24,7 @@ jobs:
             elixir: "1.18"
           # Oldest version. We technically support OTP 23 but hard to test in CI
           - erlang: "24.3"
-            elixir: "1.14"
+            elixir: "1.15"
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
