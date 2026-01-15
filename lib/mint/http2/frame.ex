@@ -271,7 +271,7 @@ defmodule Mint.HTTP2.Frame do
     else
       # 1 byte is for the space taken by pad_length
       data_length = byte_size(payload) - pad_length - 1
-      <<data::size(data_length)-binary, padding::size(pad_length)-binary>> = rest
+      <<data::size(^data_length)-binary, padding::size(^pad_length)-binary>> = rest
       {data, padding}
     end
   end

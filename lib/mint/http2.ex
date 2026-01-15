@@ -1266,7 +1266,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp split_payload_in_chunks(binary, chunk_size, acc) do
-    <<chunk::size(chunk_size)-binary, rest::binary>> = binary
+    <<chunk::size(^chunk_size)-binary, rest::binary>> = binary
     split_payload_in_chunks(rest, chunk_size, [chunk | acc])
   end
 

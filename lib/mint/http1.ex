@@ -762,7 +762,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
-        <<body::binary-size(length), rest::binary>> = data
+        <<body::binary-size(^length), rest::binary>> = data
         {conn, responses} = add_body(conn, body, responses)
         conn = request_done(conn)
         responses = [{:done, request_ref} | responses]
@@ -836,7 +836,7 @@ defmodule Mint.HTTP1 do
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
-        <<body::binary-size(length), rest::binary>> = data
+        <<body::binary-size(^length), rest::binary>> = data
         {conn, responses} = add_body(conn, body, responses)
         conn = put_in(conn.request.body, {:chunked, :crlf})
         decode_body({:chunked, :crlf}, conn, rest, request_ref, responses)
