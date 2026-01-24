@@ -9,7 +9,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   describe "local httpbin" do
     test "200 response" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
       assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -22,7 +22,7 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "POST body" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
       assert {:ok, conn, request} = HTTP1.request(conn, "POST", "/post", [], "BODY")
       assert {:ok, conn, responses} = receive_stream(conn)
 
@@ -35,7 +35,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
     test "POST body streaming" do
       headers = [{"content-length", "4"}]
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
       assert {:ok, conn, request} = HTTP1.request(conn, "POST", "/post", headers, :stream)
       assert {:ok, conn} = HTTP1.stream_request_body(conn, request, "BO")
       assert {:ok, conn} = HTTP1.stream_request_body(conn, request, "DY")
@@ -50,7 +50,7 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "pipelining" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
       assert {:ok, conn, request1} = HTTP1.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, request2} = HTTP1.request(conn, "GET", "/", [], nil)
       assert {:ok, conn, request3} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -71,7 +71,7 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "chunked with no chunks" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
       assert {:ok, conn, request} = HTTP1.request(conn, "GET", "/stream-bytes/0", [], nil)
 
       assert {:ok, _conn, [_status, _headers | responses]} = receive_stream(conn)
@@ -80,7 +80,7 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "chunked with single chunk" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
 
       assert {:ok, conn, request} =
                HTTP1.request(conn, "GET", "/stream-bytes/1024?chunk_size=1024", [], nil)
@@ -91,7 +91,7 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
 
     test "chunked with multiple chunks" do
-      assert {:ok, conn} = HTTP1.connect(:http, "localhost", 8080)
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", HttpBin.http_port())
 
       assert {:ok, conn, request} =
                HTTP1.request(conn, "GET", "/stream-bytes/1024?chunk_size=100", [], nil)

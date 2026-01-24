@@ -4,18 +4,18 @@
 	storage file_system /caddy_storage
 }
 
-https://localhost:8443 {
+https://localhost:{$HTTPBIN_HTTPS_PORT:8443} {
 	reverse_proxy httpbin:80
 }
 
-http://localhost:8080 {
+http://localhost:{$HTTPBIN_HTTP_PORT:8080} {
 	reverse_proxy httpbin:80
 }
 
-https://caddyhttpbin:8443 {
+https://caddyhttpbin:{$HTTPBIN_HTTPS_PORT:8443} {
 	reverse_proxy httpbin:80
 }
 
-http://caddyhttpbin:8080 {
+http://caddyhttpbin:{$HTTPBIN_HTTP_PORT:8080} {
 	reverse_proxy httpbin:80
 }

@@ -11,7 +11,7 @@ defmodule Mint.UnsafeProxyTest do
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", 8888},
+               {:http, "localhost", HttpBin.proxy_port()},
                {:http, HttpBin.proxy_host(), HttpBin.http_port()}
              )
 
@@ -28,7 +28,7 @@ defmodule Mint.UnsafeProxyTest do
   test "407 response - proxy with missing authentication" do
     assert {:ok, conn} =
              HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
-               proxy: {:http, "localhost", 8889, []}
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []}
              )
 
     assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
@@ -42,7 +42,7 @@ defmodule Mint.UnsafeProxyTest do
 
     assert {:ok, conn} =
              HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
-               proxy: {:http, "localhost", 8889, []},
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []},
                proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}]
              )
 
@@ -57,7 +57,7 @@ defmodule Mint.UnsafeProxyTest do
 
     assert {:ok, conn} =
              HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
-               proxy: {:http, "localhost", 8889, []},
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []},
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}]
              )
 
@@ -73,7 +73,7 @@ defmodule Mint.UnsafeProxyTest do
   test "Mint.HTTP.protocol/1 on an unsafe proxy connection" do
     assert {:ok, %UnsafeProxy{} = conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", 8888},
+               {:http, "localhost", HttpBin.proxy_port()},
                {:http, HttpBin.proxy_host(), HttpBin.http_port()}
              )
 
@@ -86,7 +86,7 @@ defmodule Mint.UnsafeProxyTest do
 
     assert {:ok, %UnsafeProxy{state: %{socket: socket}} = conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", 8888},
+               {:http, "localhost", HttpBin.proxy_port()},
                {:http, HttpBin.proxy_host(), HttpBin.http_port()}
              )
 

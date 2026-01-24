@@ -15,7 +15,7 @@ defmodule Mint.TunnelProxyTest do
 
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
-               {:http, "localhost", 8888, []},
+               {:http, "localhost", HttpBin.proxy_port(), []},
                {:http, HttpBin.proxy_host(), HttpBin.http_port(), []}
              )
 
@@ -37,7 +37,7 @@ defmodule Mint.TunnelProxyTest do
   test "200 response - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
-               {:http, "localhost", 8888, []},
+               {:http, "localhost", HttpBin.proxy_port(), []},
                {:https, HttpBin.proxy_host(), HttpBin.https_port(),
                 transport_opts: HttpBin.https_transport_opts()}
              )
@@ -55,7 +55,7 @@ defmodule Mint.TunnelProxyTest do
   test "407 response - proxy with missing authentication" do
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 407}}}} =
              Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-               proxy: {:http, "localhost", 8889, []},
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []},
                transport_opts: HttpBin.https_transport_opts()
              )
   end
@@ -65,7 +65,7 @@ defmodule Mint.TunnelProxyTest do
 
     assert {:error, %Mint.HTTPError{reason: {:proxy, {:unexpected_status, 401}}}} =
              Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-               proxy: {:http, "localhost", 8889, []},
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []},
                proxy_headers: [{"proxy-authorization", "basic #{invalid_auth64}"}],
                transport_opts: HttpBin.https_transport_opts()
              )
@@ -76,7 +76,7 @@ defmodule Mint.TunnelProxyTest do
 
     assert {:ok, conn} =
              Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-               proxy: {:http, "localhost", 8889, []},
+               proxy: {:http, "localhost", HttpBin.proxy_auth_port(), []},
                proxy_headers: [{"proxy-authorization", "basic #{auth64}"}],
                transport_opts: HttpBin.https_transport_opts()
              )
@@ -94,7 +94,7 @@ defmodule Mint.TunnelProxyTest do
   test "200 response with explicit http2 - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
-               {:http, "localhost", 8888, []},
+               {:http, "localhost", HttpBin.proxy_port(), []},
                {:https, HttpBin.proxy_host(), HttpBin.https_port(),
                 [protocols: [:http2], transport_opts: HttpBin.https_transport_opts()]}
              )
@@ -117,7 +117,7 @@ defmodule Mint.TunnelProxyTest do
   test "200 response without explicit http2 - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
-               {:http, "localhost", 8888, []},
+               {:http, "localhost", HttpBin.proxy_port(), []},
                {:https, HttpBin.proxy_host(), HttpBin.https_port(),
                 [protocols: [:http1, :http2], transport_opts: HttpBin.https_transport_opts()]}
              )
@@ -141,7 +141,7 @@ defmodule Mint.TunnelProxyTest do
   test "do not support nested HTTPS connections - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
-               {:https, "localhost", 8888, []},
+               {:https, "localhost", HttpBin.proxy_port(), []},
                {:https, HttpBin.proxy_host(), HttpBin.https_port(),
                 [transport_opts: HttpBin.https_transport_opts()]}
              )

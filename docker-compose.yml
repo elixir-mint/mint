@@ -4,18 +4,18 @@ services:
   proxy:
     build: ./test/docker/tinyproxy
     ports:
-      - "8888:8888"
+      - "${TINYPROXY_PORT:-8888}:8888"
 
   proxy-auth:
     build: ./test/docker/tinyproxy-auth
     ports:
-      - "8889:8888"
+      - "${TINYPROXY_AUTH_PORT:-8889}:8888"
 
   httpbin:
     image: docker.io/kennethreitz/httpbin:latest
     platform: linux/amd64
     ports:
-      - "8080:80"
+      - "${HTTPBIN_HTTP_PORT:-8080}:80"
 
   caddyhttpbin:
     image: docker.io/caddy:2.8.4-alpine
@@ -24,10 +24,13 @@ services:
     # because the container by default runs using the root user
     # and we are not root in the GH action so we cannot access them.
     user: "${DOCKER_USER}"
+    environment:
+      - HTTPBIN_HTTP_PORT=${HTTPBIN_HTTP_PORT:-8080}
+      - HTTPBIN_HTTPS_PORT=${HTTPBIN_HTTPS_PORT:-8443}
     volumes:
       # The :z mount option solves issues with SELinux.
       # See https://github.com/elixir-mint/mint/pull/406.
       - "./caddy_storage:/caddy_storage:z"
       - "./Caddyfile:/etc/caddy/Caddyfile:z"
     ports:
-      - "8443:8443"
+      - "${HTTPBIN_HTTPS_PORT:-8443}:${HTTPBIN_HTTPS_PORT:-8443}"
