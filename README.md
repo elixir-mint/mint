@@ -134,6 +134,15 @@ DOCKER_USER="$UID:$GID" docker compose up --detach # or podman-compose up --deta
 mix test --include proxy
 ```
 
+If the default ports are already in use, you can configure them via environment variables:
+
+```sh
+TINYPROXY_PORT=8887 docker compose up --detach
+TINYPROXY_PORT=8887 mix test --include proxy
+```
+
+Available port variables: `TINYPROXY_PORT` (default 8888), `TINYPROXY_AUTH_PORT` (default 8889), `HTTPBIN_HTTP_PORT` (default 8080), `HTTPBIN_HTTPS_PORT` (default 8443).
+
 ## License
 
 Copyright 2018 Eric Meadows-Jönsson and Andrea Leopardi

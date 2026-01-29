@@ -157,7 +157,7 @@ defmodule Mint.IntegrationTest do
     test "200 response - http://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:http, HttpBin.proxy_host(), HttpBin.http_port(),
-                 proxy: {:http, "localhost", 8888, []}
+                 proxy: {:http, "localhost", HttpBin.proxy_port(), []}
                )
 
       assert conn.__struct__ == Mint.UnsafeProxy
@@ -174,7 +174,7 @@ defmodule Mint.IntegrationTest do
     test "200 response - https://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-                 proxy: {:http, "localhost", 8888, []},
+                 proxy: {:http, "localhost", HttpBin.proxy_port(), []},
                  transport_opts: HttpBin.https_transport_opts()
                )
 
@@ -191,7 +191,7 @@ defmodule Mint.IntegrationTest do
     test "200 response with explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-                 proxy: {:http, "localhost", 8888, []},
+                 proxy: {:http, "localhost", HttpBin.proxy_port(), []},
                  protocols: [:http2],
                  transport_opts: HttpBin.https_transport_opts()
                )
@@ -210,7 +210,7 @@ defmodule Mint.IntegrationTest do
     test "200 response without explicit http2 - https://httpbin.org" do
       assert {:ok, conn} =
                HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
-                 proxy: {:http, "localhost", 8888, []},
+                 proxy: {:http, "localhost", HttpBin.proxy_port(), []},
                  protocols: [:http1, :http2],
                  transport_opts: HttpBin.https_transport_opts()
                )
