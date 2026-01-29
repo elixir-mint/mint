@@ -37,11 +37,9 @@ defmodule HTTP2.IntegrationTest do
 
     assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
 
-    # For some reason, on OTP 26+ we get an SSL message sneaking in here. Instead of going
+    # For some reason, we get an SSL message sneaking in here. Instead of going
     # crazy trying to debug it, for now let's just swallow it.
-    if System.otp_release() >= "26" do
-      assert_receive {:ssl, _socket, _data}, 1000
-    end
+    assert_receive {:ssl, _socket, _data}, 1000
 
     assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 

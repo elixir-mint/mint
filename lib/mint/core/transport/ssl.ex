@@ -1,7 +1,6 @@
 defmodule Mint.Core.Transport.SSL do
   @moduledoc false
 
-  require Logger
   require Record
 
   @behaviour Mint.Core.Transport
