@@ -3,6 +3,9 @@ defmodule Mint.Core.Util do
 
   alias Mint.Types
 
+  defguard is_timeout(timeout)
+           when (is_integer(timeout) and timeout >= 0) or timeout == :infinity
+
   @spec hostname(keyword(), String.t()) :: String.t()
   def hostname(opts, address) when is_list(opts) do
     case Keyword.fetch(opts, :hostname) do
