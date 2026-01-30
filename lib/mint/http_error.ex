@@ -53,9 +53,8 @@ defmodule Mint.HTTPError do
            | {:unexpected_status, non_neg_integer()}
            | {:unexpected_trailing_responses, list()}}
 
-  @type t() :: %__MODULE__{
-          reason: HTTP1.error_reason() | HTTP2.error_reason() | proxy_reason() | term()
-        }
+  @type reason :: HTTP1.error_reason() | HTTP2.error_reason() | proxy_reason() | term()
+  @type t() :: %__MODULE__{reason: reason()}
 
   defexception [:reason, :module]
 

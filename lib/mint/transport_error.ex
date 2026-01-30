@@ -55,7 +55,8 @@ defmodule Mint.TransportError do
       reason_type
     end
 
-  @type t() :: %__MODULE__{reason: unquote(reason_type) | term()}
+  @type reason :: unquote(reason_type) | term()
+  @type t() :: %__MODULE__{reason: reason()}
 
   defexception [:reason]
 
