@@ -53,11 +53,20 @@ defmodule Mint.HTTPError do
            | {:unexpected_status, non_neg_integer()}
            | {:unexpected_trailing_responses, list()}}
 
+  @typedoc """
+  The error reason.
+  """
+  @typedoc since: "1.7.2"
   @type reason :: HTTP1.error_reason() | HTTP2.error_reason() | proxy_reason() | term()
+
+  @typedoc """
+  Type for the `Mint.HTTPError` exception struct.
+  """
   @type t() :: %__MODULE__{reason: reason()}
 
   defexception [:reason, :module]
 
+  @impl true
   def message(%__MODULE__{reason: reason, module: module}) do
     module.format_error(reason)
   end
