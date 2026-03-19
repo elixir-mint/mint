@@ -102,7 +102,8 @@ defmodule Mint.HTTP1 do
     proxy_headers: [],
     private: %{},
     log: false,
-    optional_responses: []
+    optional_responses: [],
+    sndbuf: nil
   ]
 
   defmacrop log(conn, level, message) do
@@ -204,6 +205,7 @@ defmodule Mint.HTTP1 do
     end
 
     with :ok <- Util.inet_opts(transport, socket),
+         {:ok, sndbuf_opts} <- transport.getopts(socket, [:sndbuf]),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       conn = %__MODULE__{
         transport: transport,
@@ -216,7 +218,8 @@ defmodule Mint.HTTP1 do
         log: log?,
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
         skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
-        optional_responses: validate_optional_response_values(opts)
+        optional_responses: validate_optional_response_values(opts),
+        sndbuf: sndbuf_opts[:sndbuf]
       }
 
       {:ok, conn}
@@ -666,6 +669,10 @@ defmodule Mint.HTTP1 do
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
     %{conn | proxy_headers: headers}
   end
+
+  @impl true
+  def get_send_window(%__MODULE__{streaming_request: %{ref: ref}, sndbuf: sndbuf}, ref),
+    do: sndbuf
 
   ## Helpers
 

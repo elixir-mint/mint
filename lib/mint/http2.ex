@@ -1039,6 +1039,10 @@ defmodule Mint.HTTP2 do
     %{conn | proxy_headers: headers}
   end
 
+  @impl true
+  def get_send_window(%__MODULE__{} = conn, ref),
+    do: min(get_window_size(conn, :connection), get_window_size(conn, {:request, ref}))
+
   ## Helpers
 
   defp handle_closed(conn) do

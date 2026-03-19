@@ -126,7 +126,7 @@ defmodule Mint.HTTP do
 
   @behaviour Mint.Core.Conn
 
-  @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
+  @type t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
 
   defguardp is_data_message(message)
             when elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3
@@ -1064,6 +1064,12 @@ defmodule Mint.HTTP do
   @doc false
   @impl true
   def put_proxy_headers(conn, headers), do: conn_apply(conn, :put_proxy_headers, [conn, headers])
+
+  @impl true
+  def get_send_window(conn, ref), do: conn_apply(conn, :get_send_window, [conn, ref])
+
+  @spec next_body_chunk_size(t(), term(), binary()) :: non_neg_integer()
+  def next_body_chunk_size(conn, ref, body), do: min(get_send_window(conn, ref), byte_size(body))
 
   ## Helpers
 

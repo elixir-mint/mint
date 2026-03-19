@@ -1073,6 +1073,21 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, responses}
   end
 
+  describe "get_send_window/2" do
+    test "returns a positive integer for an active streaming request", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+
+      send_window = HTTP1.get_send_window(conn, ref)
+      assert is_integer(send_window)
+      assert send_window > 0
+    end
+
+    test "returns the cached sndbuf value", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+      assert HTTP1.get_send_window(conn, ref) == conn.sndbuf
+    end
+  end
+
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
 end
