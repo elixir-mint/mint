@@ -62,4 +62,6 @@ defmodule Mint.Core.Conn do
   @callback put_proxy_headers(conn(), Mint.Types.headers()) :: conn()
 
   @callback put_log(conn(), boolean()) :: conn()
+
+  @callback next_body_chunk_size(conn(), Types.request_ref()) :: non_neg_integer()
 end

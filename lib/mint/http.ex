@@ -623,6 +623,9 @@ defmodule Mint.HTTP do
 
   This function always returns an updated connection to be stored over the old connection.
 
+  When streaming a body of arbitrary size, use `next_body_chunk/3` to split it
+  into chunks that respect the current send window of the connection.
+
   For information about transfer encoding and content length in HTTP/1, see
   `Mint.HTTP1.stream_request_body/3`.
 
@@ -1064,6 +1067,102 @@ defmodule Mint.HTTP do
   @doc false
   @impl true
   def put_proxy_headers(conn, headers), do: conn_apply(conn, :put_proxy_headers, [conn, headers])
+
+  @doc """
+  Returns the maximum number of body bytes that can be streamed on the connection
+  for the given `request_ref` right now.
+
+  The meaning of the returned value depends on the protocol of the underlying
+  connection:
+
+    * In HTTP/1, it is the operating-system socket send buffer (`:sndbuf`) cached
+      on the connection at connect time. HTTP/1 has no flow-control mechanism, so
+      this is purely an I/O sizing hint — passing a larger chunk to
+      `stream_request_body/3` is allowed and will not violate the protocol.
+
+    * In HTTP/2, it is the minimum of the connection-level and the per-request
+      flow-control windows. Sending more than this in a single `DATA` frame would
+      violate flow control, so the value is a hard upper bound. See
+      `Mint.HTTP2.get_window_size/2` for the underlying primitives.
+
+  Raises `ArgumentError` if `request_ref` is not associated with an active
+  streaming request.
+
+  See `next_body_chunk/3` for a higher-level helper that uses this value to
+  split a binary body into a sendable chunk.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  @spec next_body_chunk_size(t(), Types.request_ref()) :: non_neg_integer()
+  def next_body_chunk_size(conn, ref), do: conn_apply(conn, :next_body_chunk_size, [conn, ref])
+
+  @doc """
+  Splits off the next chunk of `body` that can be streamed on the connection right now.
+
+  This is a helper to be used together with `stream_request_body/3` when streaming a
+  request body of arbitrary size. Given a `body` binary, it inspects the connection
+  state via `next_body_chunk_size/2` to determine the largest chunk that can be sent
+  immediately, and returns that chunk together with the remainder to be streamed later.
+
+  The return value is a `{chunk, rest}` tuple such that `chunk <> rest == body`.
+  When `body` is empty (or smaller than the available send window), `rest` is `""`.
+
+  `body` must be a `t:binary/0`. If you have an `t:iodata/0` body, convert it
+  with `IO.iodata_to_binary/1` before calling this function.
+
+  This function performs no I/O — it only computes how to split the binary. You
+  still need to pass `chunk` to `stream_request_body/3` to actually send it on
+  the wire.
+
+  See `next_body_chunk_size/2` for the protocol-specific semantics of the chunk
+  size and a note on HTTP/1 vs HTTP/2 behavior.
+
+  ## When not to use this helper
+
+  This helper is convenient for small to medium request bodies that already live
+  as a single binary in memory. For large bodies — especially iodata assembled
+  from multiple parts, refc-binaries read from files, or streamed from another
+  source — calling `IO.iodata_to_binary/1` just to use this helper will:
+
+    * double peak memory usage while the temporary binary is built;
+    * defeat the scatter-gather (`writev/2`) optimization that `:gen_tcp.send`
+      and `:ssl.send` perform on iolists, forcing an extra full-buffer copy.
+
+  In those cases, drive the loop yourself: query `next_body_chunk_size/2` to
+  learn how many bytes you can send right now, take that prefix from your iodata
+  source without materializing the rest, hand it to `stream_request_body/3`, and
+  repeat. Mint's flow-control state is fully exposed through
+  `next_body_chunk_size/2` — this helper is just one ergonomic shape over it,
+  not the only supported one.
+
+  ## Examples
+
+  Streaming a body of arbitrary size by repeatedly chunking against the current
+  send window:
+
+      {:ok, conn, ref} = Mint.HTTP.request(conn, "POST", "/", headers, :stream)
+      {:ok, conn} = stream_body(conn, ref, payload)
+
+      defp stream_body(conn, ref, "") do
+        Mint.HTTP.stream_request_body(conn, ref, :eof)
+      end
+
+      defp stream_body(conn, ref, body) do
+        {chunk, rest} = Mint.HTTP.next_body_chunk(conn, ref, body)
+
+        with {:ok, conn} <- Mint.HTTP.stream_request_body(conn, ref, chunk) do
+          stream_body(conn, ref, rest)
+        end
+      end
+
+  """
+  @doc since: "1.8.0"
+  @spec next_body_chunk(t(), Types.request_ref(), binary()) :: {binary(), binary()}
+  def next_body_chunk(conn, ref, body) when is_binary(body) do
+    chunk_size = min(next_body_chunk_size(conn, ref), byte_size(body))
+    <<chunk::binary-size(chunk_size), rest::binary>> = body
+    {chunk, rest}
+  end
 
   ## Helpers
 

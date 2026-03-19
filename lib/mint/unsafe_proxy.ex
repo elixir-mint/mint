@@ -199,4 +199,9 @@ defmodule Mint.UnsafeProxy do
   def put_proxy_headers(%__MODULE__{}, _headers) do
     raise "invalid function for proxy unsafe proxy connections"
   end
+
+  @impl true
+  def next_body_chunk_size(%__MODULE__{module: module, state: state}, ref) do
+    module.next_body_chunk_size(state, ref)
+  end
 end

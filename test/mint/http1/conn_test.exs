@@ -1151,6 +1151,53 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, responses}
   end
 
+  describe "next_body_chunk_size/2" do
+    test "returns a positive integer for an active streaming request", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+
+      send_window = HTTP1.next_body_chunk_size(conn, ref)
+      assert is_integer(send_window)
+      assert send_window > 0
+    end
+
+    test "returns the cached body_chunk_size value", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+      assert HTTP1.next_body_chunk_size(conn, ref) == conn.body_chunk_size
+    end
+
+    test "raises if no request is currently streaming a body", %{conn: conn} do
+      assert_raise ArgumentError, ~r/was not found or is not streaming a body/, fn ->
+        HTTP1.next_body_chunk_size(conn, make_ref())
+      end
+    end
+
+    test "raises if the ref does not match the active streaming request", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+
+      assert_raise ArgumentError, ~r/was not found or is not streaming a body/, fn ->
+        HTTP1.next_body_chunk_size(conn, make_ref())
+      end
+    end
+  end
+
+  describe "next_body_chunk/3" do
+    test "iteratively drains a binary body across multiple calls", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+      body = :binary.copy(<<?a>>, conn.body_chunk_size * 3 + 17)
+
+      chunks = drain_body(conn, ref, body, [])
+      assert IO.iodata_to_binary(chunks) == body
+      assert length(chunks) == 4
+    end
+  end
+
+  defp drain_body(_conn, _ref, "", chunks), do: Enum.reverse(chunks)
+
+  defp drain_body(conn, ref, body, chunks) do
+    {chunk, rest} = Mint.HTTP.next_body_chunk(conn, ref, body)
+    drain_body(conn, ref, rest, [chunk | chunks])
+  end
+
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
 end

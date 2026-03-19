@@ -102,7 +102,13 @@ defmodule Mint.HTTP1 do
     proxy_headers: [],
     private: %{},
     log: false,
-    optional_responses: []
+    optional_responses: [],
+    # Chunk size returned by `next_body_chunk_size/2`. Seeded from the OS socket
+    # send buffer (`:sndbuf`) at connect time, falling back to 16 KiB. Cached on
+    # the connection so the streaming hot path doesn't pay a `getopts` syscall
+    # per chunk. HTTP/1 has no flow-control window, so this is purely a sizing
+    # hint and does not need to track the live socket value.
+    body_chunk_size: 16_384
   ]
 
   defmacrop log(conn, level, message) do
@@ -204,6 +210,7 @@ defmodule Mint.HTTP1 do
     end
 
     with :ok <- Util.inet_opts(transport, socket),
+         {:ok, sndbuf_opts} <- transport.getopts(socket, [:sndbuf]),
          :ok <- if(mode == :active, do: transport.setopts(socket, active: :once), else: :ok) do
       conn = %__MODULE__{
         transport: transport,
@@ -216,7 +223,8 @@ defmodule Mint.HTTP1 do
         log: log?,
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
         skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
-        optional_responses: validate_optional_response_values(opts)
+        optional_responses: validate_optional_response_values(opts),
+        body_chunk_size: sndbuf_opts[:sndbuf] || 16_384
       }
 
       {:ok, conn}
@@ -665,6 +673,23 @@ defmodule Mint.HTTP1 do
   @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
     %{conn | proxy_headers: headers}
+  end
+
+  @doc """
+  See `Mint.HTTP.next_body_chunk_size/2`.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  @spec next_body_chunk_size(t(), Types.request_ref()) :: non_neg_integer()
+  def next_body_chunk_size(
+        %__MODULE__{streaming_request: %{ref: ref}, body_chunk_size: body_chunk_size},
+        ref
+      ),
+      do: body_chunk_size
+
+  def next_body_chunk_size(%__MODULE__{}, ref) do
+    raise ArgumentError,
+          "request with request reference #{inspect(ref)} was not found or is not streaming a body"
   end
 
   ## Helpers

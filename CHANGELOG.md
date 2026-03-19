@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New features
+
+  * Add `Mint.HTTP.next_body_chunk/3` and `Mint.HTTP.next_body_chunk_size/2` helpers for streaming a request body of arbitrary size while respecting the connection's current send window. In HTTP/2 the chunk size is bounded by the connection-level and per-request flow-control windows; in HTTP/1 it is bounded by the OS socket send buffer (`:sndbuf`) cached at connect time.
+
 ## v1.7.1
 
 ### Bug Fixes and Improvements

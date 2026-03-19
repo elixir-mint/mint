@@ -1039,6 +1039,15 @@ defmodule Mint.HTTP2 do
     %{conn | proxy_headers: headers}
   end
 
+  @doc """
+  See `Mint.HTTP.next_body_chunk_size/2`.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  @spec next_body_chunk_size(t(), Types.request_ref()) :: non_neg_integer()
+  def next_body_chunk_size(%__MODULE__{} = conn, ref),
+    do: min(get_window_size(conn, :connection), get_window_size(conn, {:request, ref}))
+
   ## Helpers
 
   defp handle_closed(conn) do
