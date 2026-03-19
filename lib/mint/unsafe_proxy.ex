@@ -199,4 +199,9 @@ defmodule Mint.UnsafeProxy do
   def put_proxy_headers(%__MODULE__{}, _headers) do
     raise "invalid function for proxy unsafe proxy connections"
   end
+
+  @impl true
+  def request_body_window(%__MODULE__{module: module, state: state}, ref) do
+    module.request_body_window(state, ref)
+  end
 end

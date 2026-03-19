@@ -1039,6 +1039,15 @@ defmodule Mint.HTTP2 do
     %{conn | proxy_headers: headers}
   end
 
+  @doc """
+  See `Mint.HTTP.request_body_window/2`.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  def request_body_window(%__MODULE__{} = conn, ref) do
+    min(get_window_size(conn, :connection), get_window_size(conn, {:request, ref}))
+  end
+
   ## Helpers
 
   defp handle_closed(conn) do

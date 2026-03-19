@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New features
+
+  * Add `Mint.HTTP.request_body_window/2` to inspect the request body flow-control window for a streaming request. Returns `min(connection_window, stream_window)` for HTTP/2 and `:infinity` for HTTP/1, which has no application-level flow control.
+
 ## v1.7.1
 
 ### Bug Fixes and Improvements

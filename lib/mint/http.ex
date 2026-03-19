@@ -623,6 +623,10 @@ defmodule Mint.HTTP do
 
   This function always returns an updated connection to be stored over the old connection.
 
+  When streaming a body of arbitrary size, use `request_body_window/2` to learn
+  how many bytes you can send right now without violating HTTP/2 flow control,
+  then split your body accordingly before passing each chunk to this function.
+
   For information about transfer encoding and content length in HTTP/1, see
   `Mint.HTTP1.stream_request_body/3`.
 
@@ -1064,6 +1068,53 @@ defmodule Mint.HTTP do
   @doc false
   @impl true
   def put_proxy_headers(conn, headers), do: conn_apply(conn, :put_proxy_headers, [conn, headers])
+
+  @doc """
+  Returns the request body flow-control window for the streaming request
+  identified by `request_ref`.
+
+  The semantics differ by protocol:
+
+    * In HTTP/2, returns `min(connection_window, stream_window)` — the maximum
+      number of body bytes that can be sent right now without violating flow
+      control. Exceeding this value in a single `DATA` frame would close the
+      connection with a `FLOW_CONTROL_ERROR`. See `Mint.HTTP2.get_window_size/2`
+      for the underlying primitives.
+
+    * In HTTP/1, returns `:infinity`. HTTP/1 has no application-level
+      flow-control mechanism: any amount of body data is protocol-valid. The
+      operating-system socket send buffer may still cause `stream_request_body/3`
+      to block once it fills up, but that is a transport concern and not
+      reflected here.
+
+  Raises `ArgumentError` if `request_ref` is not associated with an active
+  streaming request.
+
+  ## Examples
+
+  Streaming a binary body in chunks that respect the protocol window:
+
+      defp stream_body(conn, ref, "") do
+        Mint.HTTP.stream_request_body(conn, ref, :eof)
+      end
+
+      defp stream_body(conn, ref, body) do
+        chunk_size = min(Mint.HTTP.request_body_window(conn, ref), byte_size(body))
+        <<chunk::binary-size(chunk_size), rest::binary>> = body
+
+        with {:ok, conn} <- Mint.HTTP.stream_request_body(conn, ref, chunk) do
+          stream_body(conn, ref, rest)
+        end
+      end
+
+  Note that `min(:infinity, n) == n` thanks to Erlang term ordering, so the
+  same loop works on HTTP/1 (each iteration sends the entire remaining body in
+  a single chunk) and on HTTP/2 (each iteration sends at most the current
+  flow-control window).
+  """
+  @doc since: "1.8.0"
+  @impl true
+  def request_body_window(conn, ref), do: conn_apply(conn, :request_body_window, [conn, ref])
 
   ## Helpers
 
