@@ -24,7 +24,7 @@ jobs:
             elixir: "1.18"
           # Oldest version.
           - erlang: "24.3"
-            elixir: "1.12"
+            elixir: "1.12.3"
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
