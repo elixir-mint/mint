@@ -90,7 +90,7 @@ defmodule Mint.HTTP1.PropertiesTest do
       |> Enum.sort()
       |> Enum.reduce({[], binary, 0}, fn split, {chunks, rest, prev_split} ->
         length = split - prev_split
-        <<chunk::binary-size(^length), rest::binary>> = rest
+        {chunk, rest} = :erlang.split_binary(rest, length)
         {[chunk | chunks], rest, split}
       end)
       |> join_last_chunk()
