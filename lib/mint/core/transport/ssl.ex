@@ -601,18 +601,14 @@ defmodule Mint.Core.Transport.SSL do
   end
 
   defp get_cacertfile(path) do
-    if Application.get_env(:mint, :persistent_term) do
-      case :persistent_term.get({:mint, {:cacertfile, path}}, :error) do
-        {:ok, cacerts} ->
-          cacerts
+    case :persistent_term.get({:mint, {:cacertfile, path}}, :error) do
+      {:ok, cacerts} ->
+        cacerts
 
-        :error ->
-          cacerts = decode_cacertfile(path)
-          :persistent_term.put({:mint, {:cacertfile, path}}, {:ok, cacerts})
-          cacerts
-      end
-    else
-      decode_cacertfile(path)
+      :error ->
+        cacerts = decode_cacertfile(path)
+        :persistent_term.put({:mint, {:cacertfile, path}}, {:ok, cacerts})
+        cacerts
     end
   end
 
