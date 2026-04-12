@@ -742,6 +742,27 @@ defmodule Mint.HTTP1 do
     {:ok, conn, responses}
   end
 
+  # Informational (1xx) responses have no body and must not finalize the
+  # request; the final response follows on the same request ref. Reset the
+  # request's response-side fields and continue parsing without popping it.
+  defp decode_body(:informational, conn, data, _request_ref, responses) do
+    request = %{
+      conn.request
+      | state: :status,
+        version: nil,
+        status: nil,
+        headers_buffer: [],
+        data_buffer: [],
+        content_length: nil,
+        connection: [],
+        transfer_encoding: [],
+        body: nil
+    }
+
+    conn = %{conn | request: request, buffer: ""}
+    decode(:status, conn, data, responses)
+  end
+
   defp decode_body(:single, conn, data, request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
     conn = request_done(conn)
@@ -981,7 +1002,10 @@ defmodule Mint.HTTP1 do
       status == 101 ->
         {:ok, :single}
 
-      method == "HEAD" or status in 100..199 or status in [204, 304] ->
+      status in 100..199 ->
+        {:ok, :informational}
+
+      method == "HEAD" or status in [204, 304] ->
         {:ok, :none}
 
       # method == "CONNECT" and status in 200..299 -> nil
