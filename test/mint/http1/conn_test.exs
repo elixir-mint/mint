@@ -327,6 +327,84 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "100 Continue informational response followed by final response", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"expect", "100-continue"}], "hello")
+
+    response =
+      "HTTP/1.1 100 Continue\r\n\r\n" <>
+        "HTTP/1.1 201 Created\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn,
+            [
+              {:status, ^ref, 100},
+              {:headers, ^ref, []},
+              {:status, ^ref, 201},
+              {:headers, ^ref, [{"content-length", "2"}]},
+              {:data, ^ref, "ok"},
+              {:done, ^ref}
+            ]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "103 Early Hints informational response followed by final response", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 103 Early Hints\r\nlink: </style.css>; rel=preload\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, _conn,
+            [
+              {:status, ^ref, 103},
+              {:headers, ^ref, [{"link", "</style.css>; rel=preload"}]},
+              {:status, ^ref, 200},
+              {:headers, ^ref, [{"content-length", "2"}]},
+              {:data, ^ref, "ok"},
+              {:done, ^ref}
+            ]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
+  test "multiple informational responses before final response", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"expect", "100-continue"}], "x")
+
+    response =
+      "HTTP/1.1 100 Continue\r\n\r\n" <>
+        "HTTP/1.1 103 Early Hints\r\nlink: </a>; rel=preload\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, _conn,
+            [
+              {:status, ^ref, 100},
+              {:headers, ^ref, []},
+              {:status, ^ref, 103},
+              {:headers, ^ref, [{"link", "</a>; rel=preload"}]},
+              {:status, ^ref, 200},
+              {:headers, ^ref, [{"content-length", "2"}]},
+              {:data, ^ref, "ok"},
+              {:done, ^ref}
+            ]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
+  test "informational response split across multiple TCP messages", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"expect", "100-continue"}], "x")
+
+    assert {:ok, conn, [{:status, ^ref, 100}, {:headers, ^ref, []}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 100 Continue\r\n\r\n"})
+
+    assert {:ok, _conn,
+            [
+              {:status, ^ref, 201},
+              {:headers, ^ref, [{"content-length", "2"}]},
+              {:data, ^ref, "ok"},
+              {:done, ^ref}
+            ]} =
+             HTTP1.stream(
+               conn,
+               {:tcp, conn.socket, "HTTP/1.1 201 Created\r\ncontent-length: 2\r\n\r\nok"}
+             )
+  end
+
   test "body following a 101 switching-protocols", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/socket/websocket", [], nil)
 
