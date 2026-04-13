@@ -147,6 +147,12 @@ defmodule Mint.HTTP2 do
   @default_stream_window_size 4 * 1024 * 1024
   @max_window_size 2_147_483_647
 
+  # Defer refilling the receive window until it has dropped to this many
+  # bytes — roughly 10× the default 16 KB max frame size, so the server
+  # has a safety margin before the window would starve it. See
+  # `refill_client_windows/3`.
+  @default_receive_window_update_threshold 160_000
+
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
 
@@ -189,6 +195,15 @@ defmodule Mint.HTTP2 do
     # matching WINDOW_UPDATE to bring the server's view from the spec
     # default of 65_535 up to the advertised peak.
     receive_window_size: @default_window_size,
+    # `receive_window` is the server's current view of our receive
+    # window — decremented by DATA frame sizes as they arrive, bumped
+    # back up to `receive_window_size` whenever we send a
+    # WINDOW_UPDATE. When it drops to `receive_window_update_threshold`, we
+    # refill it back to the peak in one frame.
+    receive_window: @default_window_size,
+    # Minimum remaining receive window before we send a WINDOW_UPDATE.
+    # Configurable via the `:receive_window_update_threshold` connect option.
+    receive_window_update_threshold: @default_receive_window_update_threshold,
     encode_table: HPAX.new(4096),
     decode_table: HPAX.new(4096),
 
@@ -896,7 +911,8 @@ defmodule Mint.HTTP2 do
 
   def set_window_size(%__MODULE__{} = conn, :connection, new_size) do
     do_set_window_size(conn, 0, conn.receive_window_size, new_size, fn conn, size ->
-      put_in(conn.receive_window_size, size)
+      conn = put_in(conn.receive_window_size, size)
+      put_in(conn.receive_window, size)
     end)
   catch
     :throw, {:mint, conn, error} -> {:error, conn, error}
@@ -908,7 +924,8 @@ defmodule Mint.HTTP2 do
         current = conn.streams[stream_id].receive_window_size
 
         do_set_window_size(conn, stream_id, current, new_size, fn conn, size ->
-          put_in(conn.streams[stream_id].receive_window_size, size)
+          conn = put_in(conn.streams[stream_id].receive_window_size, size)
+          put_in(conn.streams[stream_id].receive_window, size)
         end)
 
       :error ->
@@ -1104,12 +1121,10 @@ defmodule Mint.HTTP2 do
     scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
-
-    connection_window_size =
-      Keyword.get(opts, :connection_window_size, @default_connection_window_size)
-
+    connection_window_size = Keyword.get(opts, :connection_window_size, @default_connection_window_size)
     validate_window_size!(:connection_window_size, connection_window_size)
-
+    receive_window_update_threshold = Keyword.get(opts, :receive_window_update_threshold, @default_receive_window_update_threshold)
+    validate_receive_window_update_threshold!(receive_window_update_threshold)
     client_settings_params = Keyword.get(opts, :client_settings, [])
 
     client_settings_params =
@@ -1144,7 +1159,9 @@ defmodule Mint.HTTP2 do
       scheme: scheme_string,
       state: :handshaking,
       log: log?,
-      receive_window_size: connection_window_size
+      receive_window_size: connection_window_size,
+      receive_window: connection_window_size,
+      receive_window_update_threshold: receive_window_update_threshold
     }
 
     preface = build_preface(client_settings_params, connection_window_size)
@@ -1179,6 +1196,14 @@ defmodule Mint.HTTP2 do
       raise ArgumentError,
             "the :#{name} option must be an integer in " <>
               "#{@default_window_size}..#{@max_window_size}, got: #{inspect(value)}"
+    end
+  end
+
+  defp validate_receive_window_update_threshold!(value) do
+    unless is_integer(value) and value >= 1 and value <= @max_window_size do
+      raise ArgumentError,
+            "the :receive_window_update_threshold option must be a positive integer no larger than " <>
+              "#{@max_window_size}, got: #{inspect(value)}"
     end
   end
 
@@ -1259,6 +1284,9 @@ defmodule Mint.HTTP2 do
       # SETTINGS_INITIAL_WINDOW_SIZE; can be bumped per-stream with
       # `set_window_size/3`.
       receive_window_size: conn.client_settings.initial_window_size,
+      # Current remaining receive window for this stream, tracked
+      # independently from the peak so that refills can be batched.
+      receive_window: conn.client_settings.initial_window_size,
       received_first_headers?: false
     }
 
@@ -1753,15 +1781,77 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # Accounts for `data_size` bytes arriving on the connection and on
+  # `stream_id`. Sends a WINDOW_UPDATE for either window only once its
+  # remaining receive credit drops to `conn.receive_window_update_threshold`;
+  # previously we sent one per DATA frame, so an adversarial server
+  # emitting many small frames could amplify its inbound bytes into a
+  # WINDOW_UPDATE flood of outbound frames. Batching caps that ratio at
+  # roughly one update per `(receive_window_size - threshold)` bytes
+  # consumed.
   defp refill_client_windows(conn, stream_id, data_size) do
-    connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
-    stream_frame = window_update(stream_id: stream_id, window_size_increment: data_size)
+    conn = update_in(conn.receive_window, &(&1 - data_size))
 
-    if open?(conn) do
-      send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
+    conn =
+      case Map.fetch(conn.streams, stream_id) do
+        {:ok, _stream} ->
+          update_in(conn.streams[stream_id].receive_window, &(&1 - data_size))
+
+        :error ->
+          conn
+      end
+
+    frames =
+      []
+      |> maybe_refill_stream(conn, stream_id)
+      |> maybe_refill_conn(conn)
+
+    if frames != [] and open?(conn) do
+      conn = send!(conn, Enum.map(frames, &Frame.encode/1))
+      apply_refills(conn, frames)
     else
       conn
     end
+  end
+
+  defp maybe_refill_conn(frames, conn) do
+    if conn.receive_window <= conn.receive_window_update_threshold do
+      increment = conn.receive_window_size - conn.receive_window
+      [window_update(stream_id: 0, window_size_increment: increment) | frames]
+    else
+      frames
+    end
+  end
+
+  defp maybe_refill_stream(frames, conn, stream_id) do
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        if stream.receive_window <= conn.receive_window_update_threshold do
+          increment = stream.receive_window_size - stream.receive_window
+
+          [
+            window_update(stream_id: stream_id, window_size_increment: increment) | frames
+          ]
+        else
+          frames
+        end
+
+      :error ->
+        frames
+    end
+  end
+
+  defp apply_refills(conn, frames) do
+    Enum.reduce(frames, conn, fn
+      window_update(stream_id: 0), conn ->
+        put_in(conn.receive_window, conn.receive_window_size)
+
+      window_update(stream_id: stream_id), conn ->
+        put_in(
+          conn.streams[stream_id].receive_window,
+          conn.streams[stream_id].receive_window_size
+        )
+    end)
   end
 
   # HEADERS
@@ -2108,6 +2198,8 @@ defmodule Mint.HTTP2 do
       ref: make_ref(),
       state: :reserved_remote,
       send_window_size: conn.server_settings.initial_window_size,
+      receive_window_size: conn.client_settings.initial_window_size,
+      receive_window: conn.client_settings.initial_window_size,
       received_first_headers?: false
     }
 

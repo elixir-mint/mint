@@ -141,10 +141,12 @@ defmodule Mint.HTTP2Test do
          %{conn: conn} do
       assert HTTP2.get_window_size(conn, :connection) == 65_535
       assert conn.receive_window_size == 65_535
+      assert conn.receive_window == 65_535
 
       assert {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
 
       assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window == 1_000_000
 
       assert_recv_frames [
         window_update(stream_id: 0, window_size_increment: 934_465)
@@ -157,10 +159,12 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       current = conn.streams[stream_id].receive_window_size
+      assert conn.streams[stream_id].receive_window == current
 
       assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, current + 10_000)
 
       assert conn.streams[stream_id].receive_window_size == current + 10_000
+      assert conn.streams[stream_id].receive_window == current + 10_000
 
       assert_recv_frames [
         window_update(stream_id: ^stream_id, window_size_increment: 10_000)
@@ -1874,6 +1878,7 @@ defmodule Mint.HTTP2Test do
       # a WINDOW_UPDATE for `16 MB - 65_535` so the server sees the peak
       # from the start.
       assert conn.receive_window_size == 16 * 1024 * 1024
+      assert conn.receive_window == 16 * 1024 * 1024
     end
 
     test "advertises the configured stream window via SETTINGS", %{conn: conn} do
@@ -1884,11 +1889,13 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       assert conn.streams[stream_id].receive_window_size == 4 * 1024 * 1024
+      assert conn.streams[stream_id].receive_window == 4 * 1024 * 1024
     end
 
     @tag connect_options: [connection_window_size: 1_000_000]
     test "supports a custom :connection_window_size", %{conn: conn} do
       assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window == 1_000_000
     end
 
     @tag connect_options: [connection_window_size: 65_535]
@@ -1897,6 +1904,7 @@ defmodule Mint.HTTP2Test do
       # At 65_535 there's nothing to advertise beyond SETTINGS — the
       # preface should not carry an extra WINDOW_UPDATE.
       assert conn.receive_window_size == 65_535
+      assert conn.receive_window == 65_535
     end
 
     test "rejects a :connection_window_size below the spec minimum" do
@@ -1909,6 +1917,85 @@ defmodule Mint.HTTP2Test do
       assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
         HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 2_147_483_648)
       end
+    end
+
+    test "rejects a non-positive :receive_window_update_threshold" do
+      assert_raise ArgumentError, ~r/:receive_window_update_threshold/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, receive_window_update_threshold: 0)
+      end
+    end
+  end
+
+  describe "receive window batching" do
+    @describetag connect_options: [
+                   connection_window_size: 100_000,
+                   receive_window_update_threshold: 40_000,
+                   client_settings: [initial_window_size: 100_000]
+                 ]
+
+    test "does not send WINDOW_UPDATE until remaining window drops below threshold",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 50_000 bytes consumed leaves 50_000 remaining on both windows,
+      # above the 40_000 threshold, so no WINDOW_UPDATE should go out.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames []
+    end
+
+    test "sends one WINDOW_UPDATE topping both windows back to peak once the threshold is crossed",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 60_000 bytes consumed drops both windows to exactly the 40_000
+      # threshold; the 7th frame lands after the refill so there's
+      # still just one WINDOW_UPDATE per window.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 60_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 60_000)
+      ]
+    end
+
+    test "set_window_size/3 raises the target so subsequent refills top up to the new peak",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Raise the connection peak mid-flight. set_window_size sends its own
+      # WINDOW_UPDATE for the bump; drain that before proceeding.
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 500_000)
+      assert_recv_frames [window_update(stream_id: 0, window_size_increment: 400_000)]
+
+      # Also raise the stream peak so the stream doesn't bottleneck the
+      # connection-level test.
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 500_000)
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 400_000)]
+
+      # Consume enough to drop both windows to the 40_000 threshold;
+      # the refill should top up to the raised 500_000 peak, not the
+      # original 100_000 configured at connect.
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..46, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 460_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 460_000)
+      ]
     end
   end
 

@@ -243,6 +243,12 @@ defmodule Mint.HTTP do
       on stream 0 as part of the connection preface. Defaults to 16 MB. Can be
       raised later with `Mint.HTTP2.set_window_size/3`.
 
+    * `:receive_window_update_threshold` - (integer) the minimum number of bytes of receive
+      window that must remain on a connection or stream before a `WINDOW_UPDATE`
+      frame is sent to refill it. Lower values send more frequent, smaller updates;
+      higher values batch updates into fewer, larger ones. Defaults to 160_000
+      (approximately 10× the default max frame size).
+
   There may be further protocol specific options that only take effect when the corresponding
   connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
   details.
