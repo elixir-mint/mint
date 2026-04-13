@@ -176,10 +176,10 @@ defmodule Mint.HTTP2 do
 
     # Fields of the connection.
     buffer: "",
-    # `window_size` is the client *send* window for the connection — how
-    # much request-body data we're allowed to send to the server before it
-    # refills the window with a WINDOW_UPDATE frame.
-    window_size: @default_window_size,
+    # `send_window_size` is the client *send* window for the connection
+    # — how much request-body data we're allowed to send to the server
+    # before it refills the window with a WINDOW_UPDATE frame.
+    send_window_size: @default_window_size,
     # `receive_window_size` is the client *receive* window for the
     # connection — the peak size we've advertised to the server via
     # `WINDOW_UPDATE` frames on stream 0 (or the spec default of 65_535
@@ -804,13 +804,13 @@ defmodule Mint.HTTP2 do
   def get_window_size(conn, connection_or_request)
 
   def get_window_size(%__MODULE__{} = conn, :connection) do
-    conn.window_size
+    conn.send_window_size
   end
 
   def get_window_size(%__MODULE__{} = conn, {:request, request_ref}) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-        conn.streams[stream_id].window_size
+        conn.streams[stream_id].send_window_size
 
       :error ->
         raise ArgumentError,
@@ -1219,7 +1219,7 @@ defmodule Mint.HTTP2 do
       # Client send window — decremented as we send body bytes, refilled
       # by incoming WINDOW_UPDATE frames from the server. Bounded initially
       # by the server's SETTINGS_INITIAL_WINDOW_SIZE.
-      window_size: conn.server_settings.initial_window_size,
+      send_window_size: conn.server_settings.initial_window_size,
       # Client receive window — the peak we've advertised to the server
       # for this stream. Starts at whatever we told the server via our
       # SETTINGS_INITIAL_WINDOW_SIZE; can be bumped per-stream with
@@ -1354,11 +1354,11 @@ defmodule Mint.HTTP2 do
     data_size = IO.iodata_length(data)
 
     cond do
-      data_size > stream.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_window_size, :request, stream.window_size})})
+      data_size > stream.send_window_size ->
+        throw({:mint, conn, wrap_error({:exceeds_window_size, :request, stream.send_window_size})})
 
-      data_size > conn.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.window_size})})
+      data_size > conn.send_window_size ->
+        throw({:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.send_window_size})})
 
       # If the data size is greater than the max frame size, we chunk automatically based
       # on the max frame size.
@@ -1386,8 +1386,8 @@ defmodule Mint.HTTP2 do
        when is_integer(stream_id) and is_list(enabled_flags) do
     chunk_size = IO.iodata_length(chunk)
     frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: chunk)
-    conn = update_in(conn.streams[stream_id].window_size, &(&1 - chunk_size))
-    conn = update_in(conn.window_size, &(&1 - chunk_size))
+    conn = update_in(conn.streams[stream_id].send_window_size, &(&1 - chunk_size))
+    conn = update_in(conn.send_window_size, &(&1 - chunk_size))
 
     conn =
       if :end_stream in enabled_flags do
@@ -2005,16 +2005,16 @@ defmodule Mint.HTTP2 do
         for {stream_id, stream} <- streams,
             stream.state in [:open, :half_closed_remote],
             into: streams do
-          window_size = stream.window_size + diff
+          send_window_size = stream.send_window_size + diff
 
-          if window_size > @max_window_size do
+          if send_window_size > @max_window_size do
             debug_data =
-              "INITIAL_WINDOW_SIZE parameter of #{window_size} makes some window sizes too big"
+              "INITIAL_WINDOW_SIZE parameter of #{send_window_size} makes some window sizes too big"
 
             send_connection_error!(conn, :flow_control_error, debug_data)
           end
 
-          {stream_id, %{stream | window_size: window_size}}
+          {stream_id, %{stream | send_window_size: send_window_size}}
         end
       end)
 
@@ -2073,7 +2073,7 @@ defmodule Mint.HTTP2 do
       id: promised_stream_id,
       ref: make_ref(),
       state: :reserved_remote,
-      window_size: conn.server_settings.initial_window_size,
+      send_window_size: conn.server_settings.initial_window_size,
       received_first_headers?: false
     }
 
@@ -2170,12 +2170,12 @@ defmodule Mint.HTTP2 do
          window_update(stream_id: 0, window_size_increment: wsi),
          responses
        ) do
-    new_window_size = conn.window_size + wsi
+    new_window_size = conn.send_window_size + wsi
 
     if new_window_size > @max_window_size do
       send_connection_error!(conn, :flow_control_error, "window size too big")
     else
-      conn = put_in(conn.window_size, new_window_size)
+      conn = put_in(conn.send_window_size, new_window_size)
       {conn, responses}
     end
   end
@@ -2186,14 +2186,14 @@ defmodule Mint.HTTP2 do
          responses
        ) do
     stream = fetch_stream!(conn, stream_id)
-    new_window_size = conn.streams[stream_id].window_size + wsi
+    new_window_size = conn.streams[stream_id].send_window_size + wsi
 
     if new_window_size > @max_window_size do
       conn = close_stream!(conn, stream_id, :flow_control_error)
       error = wrap_error({:flow_control_error, "window size too big"})
       {conn, [{:error, stream.ref, error} | responses]}
     else
-      conn = put_in(conn.streams[stream_id].window_size, new_window_size)
+      conn = put_in(conn.streams[stream_id].send_window_size, new_window_size)
       {conn, responses}
     end
   end
