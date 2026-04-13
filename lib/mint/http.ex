@@ -238,6 +238,11 @@ defmodule Mint.HTTP do
       server. See `Mint.HTTP2.put_settings/2` for more information. This is only used
       in HTTP/2 connections.
 
+    * `:connection_window_size` - (integer) the initial size of the connection-level
+      HTTP/2 receive window, in bytes. Sent to the server as a `WINDOW_UPDATE` frame
+      on stream 0 as part of the connection preface. Defaults to 16 MB. Can be
+      raised later with `Mint.HTTP2.set_window_size/3`.
+
   There may be further protocol specific options that only take effect when the corresponding
   connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
   details.

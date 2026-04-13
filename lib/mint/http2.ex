@@ -143,6 +143,8 @@ defmodule Mint.HTTP2 do
   @transport_opts [alpn_advertised_protocols: ["h2"]]
 
   @default_window_size 65_535
+  @default_connection_window_size 16 * 1024 * 1024
+  @default_stream_window_size 4 * 1024 * 1024
   @max_window_size 2_147_483_647
 
   @default_max_frame_size 16_384
@@ -182,9 +184,10 @@ defmodule Mint.HTTP2 do
     send_window_size: @default_window_size,
     # `receive_window_size` is the client *receive* window for the
     # connection — the peak size we've advertised to the server via
-    # `WINDOW_UPDATE` frames on stream 0 (or the spec default of 65_535
-    # if we've never sent one). Mint auto-refills to maintain this peak
-    # as DATA frames arrive.
+    # `WINDOW_UPDATE` frames on stream 0. Initialized to the configured
+    # connection window during `initiate/5`, which also sends the
+    # matching WINDOW_UPDATE to bring the server's view from the spec
+    # default of 65_535 up to the advertised peak.
     receive_window_size: @default_window_size,
     encode_table: HPAX.new(4096),
     decode_table: HPAX.new(4096),
@@ -216,7 +219,7 @@ defmodule Mint.HTTP2 do
     # Settings that the client communicates to the server.
     client_settings: %{
       max_concurrent_streams: 100,
-      initial_window_size: @default_window_size,
+      initial_window_size: @default_stream_window_size,
       max_header_list_size: :infinity,
       max_frame_size: @default_max_frame_size,
       enable_push: true
@@ -1101,7 +1104,17 @@ defmodule Mint.HTTP2 do
     scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
+
+    connection_window_size =
+      Keyword.get(opts, :connection_window_size, @default_connection_window_size)
+
+    validate_window_size!(:connection_window_size, connection_window_size)
+
     client_settings_params = Keyword.get(opts, :client_settings, [])
+
+    client_settings_params =
+      Keyword.put_new(client_settings_params, :initial_window_size, @default_stream_window_size)
+
     validate_client_settings!(client_settings_params)
     # If the port is the default for the scheme, don't add it to the :authority pseudo-header
     authority =
@@ -1130,12 +1143,13 @@ defmodule Mint.HTTP2 do
       mode: mode,
       scheme: scheme_string,
       state: :handshaking,
-      log: log?
+      log: log?,
+      receive_window_size: connection_window_size
     }
 
+    preface = build_preface(client_settings_params, connection_window_size)
+
     with :ok <- Util.inet_opts(transport, socket),
-         client_settings = settings(stream_id: 0, params: client_settings_params),
-         preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          conn = put_in(conn.socket, socket),
@@ -1145,6 +1159,26 @@ defmodule Mint.HTTP2 do
       error ->
         transport.close(socket)
         error
+    end
+  end
+
+  defp build_preface(client_settings_params, connection_window_size) do
+    settings_frame = Frame.encode(settings(stream_id: 0, params: client_settings_params))
+
+    if connection_window_size > @default_window_size do
+      increment = connection_window_size - @default_window_size
+      update_frame = Frame.encode(window_update(stream_id: 0, window_size_increment: increment))
+      [@connection_preface, settings_frame, update_frame]
+    else
+      [@connection_preface, settings_frame]
+    end
+  end
+
+  defp validate_window_size!(name, value) do
+    unless is_integer(value) and value >= @default_window_size and value <= @max_window_size do
+      raise ArgumentError,
+            "the :#{name} option must be an integer in " <>
+              "#{@default_window_size}..#{@max_window_size}, got: #{inspect(value)}"
     end
   end
 

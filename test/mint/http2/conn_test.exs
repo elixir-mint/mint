@@ -135,6 +135,8 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "set_window_size/3" do
+    @describetag connect_options: [connection_window_size: 65_535]
+
     test "bumps the connection-level receive window by sending WINDOW_UPDATE on stream 0",
          %{conn: conn} do
       assert HTTP2.get_window_size(conn, :connection) == 65_535
@@ -1861,6 +1863,51 @@ defmodule Mint.HTTP2Test do
     test "get_window_size/2 raises if the request is not found", %{conn: conn} do
       assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
         HTTP2.get_window_size(conn, {:request, make_ref()})
+      end
+    end
+  end
+
+  describe "default receive windows" do
+    test "advertises the configured connection window with a WINDOW_UPDATE in the preface",
+         %{conn: conn} do
+      # The default :connection_window_size is 16 MB; the preface carries
+      # a WINDOW_UPDATE for `16 MB - 65_535` so the server sees the peak
+      # from the start.
+      assert conn.receive_window_size == 16 * 1024 * 1024
+    end
+
+    test "advertises the configured stream window via SETTINGS", %{conn: conn} do
+      # The default :client_settings[:initial_window_size] is 4 MB.
+      assert conn.client_settings.initial_window_size == 4 * 1024 * 1024
+
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert conn.streams[stream_id].receive_window_size == 4 * 1024 * 1024
+    end
+
+    @tag connect_options: [connection_window_size: 1_000_000]
+    test "supports a custom :connection_window_size", %{conn: conn} do
+      assert conn.receive_window_size == 1_000_000
+    end
+
+    @tag connect_options: [connection_window_size: 65_535]
+    test "omits the preface WINDOW_UPDATE when the configured window equals the spec default",
+         %{conn: conn} do
+      # At 65_535 there's nothing to advertise beyond SETTINGS — the
+      # preface should not carry an extra WINDOW_UPDATE.
+      assert conn.receive_window_size == 65_535
+    end
+
+    test "rejects a :connection_window_size below the spec minimum" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 1024)
+      end
+    end
+
+    test "rejects a :connection_window_size above 2^31-1" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 2_147_483_648)
       end
     end
   end
