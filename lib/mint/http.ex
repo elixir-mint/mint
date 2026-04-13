@@ -247,7 +247,10 @@ defmodule Mint.HTTP do
       window that must remain on a connection or stream before a `WINDOW_UPDATE`
       frame is sent to refill it. Lower values send more frequent, smaller updates;
       higher values batch updates into fewer, larger ones. Defaults to 160_000
-      (approximately 10× the default max frame size).
+      (approximately 10× the default max frame size). The same threshold applies
+      to both the connection and per-stream windows; when a window's peak size is
+      at or below the threshold, the client refills after every DATA frame on
+      that window.
 
   There may be further protocol specific options that only take effect when the corresponding
   connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
