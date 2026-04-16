@@ -101,7 +101,7 @@ defmodule HTTP2.IntegrationTest do
   end
 
   describe "twitter.com" do
-    @moduletag connect: {"twitter.com", 443}
+    @describetag connect: {"twitter.com", 443}
     @browser_user_agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_0_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 
     test "ping", %{conn: conn} do
