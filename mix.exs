@@ -8,7 +8,7 @@ defmodule Mint.MixProject do
     [
       app: :mint,
       version: @version,
-      elixir: "~> 1.15",
+      elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
@@ -16,7 +16,6 @@ defmodule Mint.MixProject do
       # Xref
       xref: [
         exclude: [
-          :persistent_term,
           {:ssl, :cipher_suites, 1},
           {:public_key, :cacerts_get, 0},
           CAStore
@@ -54,8 +53,7 @@ defmodule Mint.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :ssl],
-      mod: {Mint.Application, []}
+      extra_applications: [:logger, :ssl]
     ]
   end
 
