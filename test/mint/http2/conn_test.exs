@@ -131,7 +131,6 @@ defmodule Mint.HTTP2Test do
       assert_http2_error error, {:protocol_error, "received invalid frame ping during handshake"}
       refute HTTP2.open?(conn)
     end
-
   end
 
   describe "set_window_size/3" do

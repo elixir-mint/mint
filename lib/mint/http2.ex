@@ -915,7 +915,8 @@ defmodule Mint.HTTP2 do
     :throw, {:mint, conn, error} -> {:error, conn, error}
   end
 
-  defp do_set_window_size(conn, _stream_id, current, new_size, _update) when new_size == current do
+  defp do_set_window_size(conn, _stream_id, current, new_size, _update)
+       when new_size == current do
     {:ok, conn}
   end
 
