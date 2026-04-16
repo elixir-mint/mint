@@ -133,6 +133,102 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "set_window_size/3" do
+    @describetag connect_options: [connection_window_size: 65_535]
+
+    test "bumps the connection-level receive window by sending WINDOW_UPDATE on stream 0",
+         %{conn: conn} do
+      assert HTTP2.get_window_size(conn, :connection) == 65_535
+      assert conn.receive_window_size == 65_535
+      assert conn.receive_window_remaining == 65_535
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+
+      assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window_remaining == 1_000_000
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 934_465)
+      ]
+    end
+
+    test "bumps a per-stream receive window by sending WINDOW_UPDATE on that stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+      assert conn.streams[stream_id].receive_window_remaining == current
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, current + 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == current + 10_000
+      assert conn.streams[stream_id].receive_window_remaining == current + 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 10_000)
+      ]
+    end
+
+    test "is a no-op when the new size equals the current size", %{conn: conn} do
+      assert {:ok, ^conn} = HTTP2.set_window_size(conn, :connection, 65_535)
+
+      # Nothing should have gone out on the wire.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink the connection window", %{conn: conn} do
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+      assert_recv_frames [window_update(stream_id: 0)]
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, :connection, 500_000)
+
+      assert_http2_error error, {:window_size_too_small, 1_000_000, 500_000}
+
+      # No WINDOW_UPDATE was sent for the invalid call.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink a stream window", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+      after_grow = current + 10_000
+      shrink_target = current + 5_000
+
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, after_grow)
+      assert_recv_frames [window_update(stream_id: ^stream_id)]
+
+      assert {:error, ^conn, error} =
+               HTTP2.set_window_size(conn, {:request, ref}, shrink_target)
+
+      assert_http2_error error, {:window_size_too_small, ^after_grow, ^shrink_target}
+    end
+
+    test "returns an error for an unknown request ref", %{conn: conn} do
+      fake_ref = make_ref()
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, {:request, fake_ref}, 1_000_000)
+
+      assert_http2_error error, {:unknown_request_to_stream, ^fake_ref}
+    end
+
+    test "raises on out-of-range new_size", %{conn: conn} do
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 0)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 3_000_000_000)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, :nope)
+      end
+    end
+  end
+
   describe "open?/1" do
     test "returns true if the state is :open or :handshaking", %{conn: conn} do
       assert HTTP2.open?(%{conn | state: :open})
@@ -1771,6 +1867,162 @@ defmodule Mint.HTTP2Test do
       assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
         HTTP2.get_window_size(conn, {:request, make_ref()})
       end
+    end
+  end
+
+  describe "default receive windows" do
+    test "advertises the configured connection window with a WINDOW_UPDATE in the preface",
+         %{conn: conn} do
+      # The default :connection_window_size is 16 MB; the preface carries
+      # a WINDOW_UPDATE for `16 MB - 65_535` so the server sees the peak
+      # from the start.
+      assert conn.receive_window_size == 16 * 1024 * 1024
+      assert conn.receive_window_remaining == 16 * 1024 * 1024
+    end
+
+    test "advertises the configured stream window via SETTINGS", %{conn: conn} do
+      # The default :client_settings[:initial_window_size] is 4 MB.
+      assert conn.client_settings.initial_window_size == 4 * 1024 * 1024
+
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert conn.streams[stream_id].receive_window_size == 4 * 1024 * 1024
+      assert conn.streams[stream_id].receive_window_remaining == 4 * 1024 * 1024
+    end
+
+    @tag connect_options: [connection_window_size: 1_000_000]
+    test "supports a custom :connection_window_size", %{conn: conn} do
+      assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window_remaining == 1_000_000
+    end
+
+    @tag :no_connection
+    test "streams opened before the SETTINGS ACK track the advertised window, not the default",
+         %{server_port: port, server_socket_task: server_socket_task} do
+      # Regression: when the user advertises a stream window smaller than
+      # the library default (4 MB), streams opened before the server's
+      # SETTINGS ACK must track the advertised value. Otherwise the
+      # client holds onto credit the server never granted, never crosses
+      # the refill threshold, never sends a stream-level WINDOW_UPDATE,
+      # and the connection stalls after the server exhausts its send
+      # window.
+      assert {:ok, conn} =
+               HTTP2.connect(:https, "localhost", port,
+                 transport_opts: [verify: :verify_none],
+                 client_settings: [initial_window_size: 65_535]
+               )
+
+      {:ok, _server_socket} = Task.await(server_socket_task)
+
+      # Open a request *before* the server has ACKed our SETTINGS — this
+      # is the pre-ACK window where the struct must already reflect what
+      # was advertised, not the library default.
+      assert {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
+
+      stream_id = conn.ref_to_stream_id[ref]
+      assert conn.streams[stream_id].receive_window_size == 65_535
+      assert conn.streams[stream_id].receive_window_remaining == 65_535
+    end
+
+    @tag connect_options: [connection_window_size: 65_535]
+    test "omits the preface WINDOW_UPDATE when the configured window equals the spec default",
+         %{conn: conn} do
+      # At 65_535 there's nothing to advertise beyond SETTINGS — the
+      # preface should not carry an extra WINDOW_UPDATE.
+      assert conn.receive_window_size == 65_535
+      assert conn.receive_window_remaining == 65_535
+    end
+
+    test "rejects a :connection_window_size below the spec minimum" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 1024)
+      end
+    end
+
+    test "rejects a :connection_window_size above 2^31-1" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 2_147_483_648)
+      end
+    end
+
+    test "rejects a non-positive :receive_window_update_threshold" do
+      assert_raise ArgumentError, ~r/:receive_window_update_threshold/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, receive_window_update_threshold: 0)
+      end
+    end
+  end
+
+  describe "receive window batching" do
+    @describetag connect_options: [
+                   connection_window_size: 100_000,
+                   receive_window_update_threshold: 40_000,
+                   client_settings: [initial_window_size: 100_000]
+                 ]
+
+    test "does not send WINDOW_UPDATE until remaining window drops below threshold",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 50_000 bytes consumed leaves 50_000 remaining on both windows,
+      # above the 40_000 threshold, so no WINDOW_UPDATE should go out.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames []
+    end
+
+    test "sends one WINDOW_UPDATE topping both windows back to peak once the threshold is crossed",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 60_000 bytes consumed drops both windows to exactly the 40_000
+      # threshold; the 7th frame lands after the refill so there's
+      # still just one WINDOW_UPDATE per window.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 60_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 60_000)
+      ]
+    end
+
+    test "set_window_size/3 raises the target so subsequent refills top up to the new peak",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Raise the connection peak mid-flight. set_window_size sends its own
+      # WINDOW_UPDATE for the bump; drain that before proceeding.
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 500_000)
+      assert_recv_frames [window_update(stream_id: 0, window_size_increment: 400_000)]
+
+      # Also raise the stream peak so the stream doesn't bottleneck the
+      # connection-level test.
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 500_000)
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 400_000)]
+
+      # Consume enough to drop both windows to the 40_000 threshold;
+      # the refill should top up to the raised 500_000 peak, not the
+      # original 100_000 configured at connect.
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..46, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 460_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 460_000)
+      ]
     end
   end
 
