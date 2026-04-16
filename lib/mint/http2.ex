@@ -176,7 +176,16 @@ defmodule Mint.HTTP2 do
 
     # Fields of the connection.
     buffer: "",
+    # `window_size` is the client *send* window for the connection — how
+    # much request-body data we're allowed to send to the server before it
+    # refills the window with a WINDOW_UPDATE frame.
     window_size: @default_window_size,
+    # `receive_window_size` is the client *receive* window for the
+    # connection — the peak size we've advertised to the server via
+    # `WINDOW_UPDATE` frames on stream 0 (or the spec default of 65_535
+    # if we've never sent one). Mint auto-refills to maintain this peak
+    # as DATA frames arrive.
+    receive_window_size: @default_window_size,
     encode_table: HPAX.new(4096),
     decode_table: HPAX.new(4096),
 
@@ -729,11 +738,21 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  Returns the window size of the connection or of a single request.
+  Returns the client **send** window size for the connection or a request.
 
-  This function is HTTP/2 specific. It returns the window size of
-  either the connection if `connection_or_request` is `:connection` or of a single
-  request if `connection_or_request` is `{:request, request_ref}`.
+  > #### Send vs receive windows {: .warning}
+  >
+  > This function returns the *send* window — how much body data this client
+  > is still permitted to send to the server before being throttled. It is
+  > decremented by `request/5` and `stream_request_body/3` and refilled by
+  > the server, which `stream/2` handles transparently.
+  >
+  > It does **not** return the client *receive* window (how much the server
+  > is permitted to send us). To influence that, use `set_window_size/3`.
+
+  This function is HTTP/2 specific. It returns the send window of either the
+  connection if `connection_or_request` is `:connection` or of a single request
+  if `connection_or_request` is `{:request, request_ref}`.
 
   Use this function to check the window size of the connection before sending a
   full request. Also use this function to check the window size of both the
@@ -744,21 +763,23 @@ defmodule Mint.HTTP2 do
 
   ## HTTP/2 Flow Control
 
-  In HTTP/2, flow control is implemented through a
-  window size. When the client sends data to the server, the window size is decreased
-  and the server needs to "refill" it on the client side. You don't need to take care of
-  the refilling of the client window as it happens behind the scenes in `stream/2`.
+  In HTTP/2, flow control is implemented through a window size. When the client
+  sends data to the server, the window size is decreased and the server needs
+  to "refill" it on the client side, which `stream/2` handles transparently.
+  Symmetrically, the server's outbound flow toward the client is bounded by a
+  receive window the client advertises and refills — see `set_window_size/3`.
 
-  A window size is kept for the entire connection and all requests affect this window
-  size. A window size is also kept per request.
+  A window size is kept for the entire connection and all requests affect this
+  window size. A window size is also kept per request.
 
-  The only thing that affects the window size is the body of a request, regardless of
-  if it's a full request sent with `request/5` or body chunks sent through
-  `stream_request_body/3`. That means that if we make a request with a body that is
-  five bytes long, like `"hello"`, the window size of the connection and the window size
-  of that particular request will decrease by five bytes.
+  The only thing that affects the send window size is the body of a request,
+  regardless of whether it's a full request sent with `request/5` or body chunks
+  sent through `stream_request_body/3`. That means that if we make a request with
+  a body that is five bytes long, like `"hello"`, the send window size of the
+  connection and the send window size of that particular request will decrease
+  by five bytes.
 
-  If we use all the window size before the server refills it, functions like
+  If we use all the send window size before the server refills it, functions like
   `request/5` will return an error.
 
   ## Examples
@@ -795,6 +816,119 @@ defmodule Mint.HTTP2 do
         raise ArgumentError,
               "request with request reference #{inspect(request_ref)} was not found"
     end
+  end
+
+  @doc """
+  Advertises a larger client **receive** window to the server.
+
+  > #### Receive vs send windows {: .warning}
+  >
+  > This function sets the *receive* window — the peak amount of body data
+  > the server is permitted to send us before being throttled. It does
+  > **not** set the *send* window (how much body data we're permitted to
+  > send to the server) — the server controls that. See `get_window_size/2`
+  > for the send window.
+
+  Without calling this, `stream/2` refills the receive window in small
+  increments as response body data is consumed. Each refill costs a
+  round-trip before the server can send more, so bulk throughput is capped
+  at roughly `window / RTT`; on higher-latency links the default 64 KB
+  window makes that cap well below the link bandwidth. Raising the window
+  removes those pauses and is the main HTTP/2 tuning knob for bulk or
+  highly parallel downloads.
+
+  Mint exposes the per-stream initial window as the `:initial_window_size`
+  client setting passed to `connect/4`, but there is no connection-level
+  equivalent — use this function for the connection window, and for any
+  per-stream adjustment after a request has started.
+
+  `connection_or_request` is `:connection` for the whole connection or
+  `{:request, request_ref}` for a single request. `new_size` must be in
+  `1..2_147_483_647`. Windows can only grow: `new_size` smaller than the
+  current receive window returns
+  `{:error, conn, %Mint.HTTPError{reason: :window_size_too_small}}`, and
+  `new_size` equal to the current window is a no-op.
+
+  For more information on flow control and window sizes in HTTP/2, see the
+  section below.
+
+  ## HTTP/2 Flow Control
+
+  See `get_window_size/2` for a description of the client *send* window.
+  The client *receive* window is the symmetric bound on the server's
+  outbound flow: it starts at 64 KB for the connection and for each new
+  request, is decremented by response body bytes, and is refilled by
+  `stream/2` as the body is consumed. A window size is kept for the entire
+  connection and all responses affect this window size; a window size is
+  also kept per request.
+
+  This function raises the *advertised* receive window — the peak the
+  server is allowed to fill before pausing. It does not pre-allocate any
+  buffers; it only permits the server to send further ahead of the
+  client's reads.
+
+  ## Examples
+
+  Bump the connection-level receive window right after connect so the server
+  can stream multi-MB bodies without flow-control pauses:
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, host, 443)
+      {:ok, conn} = Mint.HTTP2.set_window_size(conn, :connection, 8_000_000)
+
+  Give one specific request a bigger window than the per-stream default:
+
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "GET", "/huge", [], nil)
+      {:ok, conn} = Mint.HTTP2.set_window_size(conn, {:request, ref}, 16_000_000)
+
+  """
+  @spec set_window_size(t(), :connection | {:request, Types.request_ref()}, pos_integer()) ::
+          {:ok, t()} | {:error, t(), Types.error()}
+  def set_window_size(conn, connection_or_request, new_size)
+
+  def set_window_size(%__MODULE__{} = _conn, _target, new_size)
+      when not (is_integer(new_size) and new_size >= 1 and new_size <= @max_window_size) do
+    raise ArgumentError,
+          "new window size must be an integer in 1..#{@max_window_size}, got: #{inspect(new_size)}"
+  end
+
+  def set_window_size(%__MODULE__{} = conn, :connection, new_size) do
+    do_set_window_size(conn, 0, conn.receive_window_size, new_size, fn conn, size ->
+      put_in(conn.receive_window_size, size)
+    end)
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
+  end
+
+  def set_window_size(%__MODULE__{} = conn, {:request, request_ref}, new_size) do
+    case Map.fetch(conn.ref_to_stream_id, request_ref) do
+      {:ok, stream_id} ->
+        current = conn.streams[stream_id].receive_window_size
+
+        do_set_window_size(conn, stream_id, current, new_size, fn conn, size ->
+          put_in(conn.streams[stream_id].receive_window_size, size)
+        end)
+
+      :error ->
+        {:error, conn, wrap_error({:unknown_request_to_stream, request_ref})}
+    end
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
+  end
+
+  defp do_set_window_size(conn, _stream_id, current, new_size, _update)
+       when new_size == current do
+    {:ok, conn}
+  end
+
+  defp do_set_window_size(conn, _stream_id, current, new_size, _update) when new_size < current do
+    {:error, conn, wrap_error({:window_size_too_small, current, new_size})}
+  end
+
+  defp do_set_window_size(conn, stream_id, current, new_size, update) do
+    increment = new_size - current
+    frame = window_update(stream_id: stream_id, window_size_increment: increment)
+    conn = send!(conn, Frame.encode(frame))
+    {:ok, update.(conn, new_size)}
   end
 
   @doc """
@@ -1083,7 +1217,15 @@ defmodule Mint.HTTP2 do
       id: conn.next_stream_id,
       ref: make_ref(),
       state: :idle,
+      # Client send window — decremented as we send body bytes, refilled
+      # by incoming WINDOW_UPDATE frames from the server. Bounded initially
+      # by the server's SETTINGS_INITIAL_WINDOW_SIZE.
       window_size: conn.server_settings.initial_window_size,
+      # Client receive window — the peak we've advertised to the server
+      # for this stream. Starts at whatever we told the server via our
+      # SETTINGS_INITIAL_WINDOW_SIZE; can be bumped per-stream with
+      # `set_window_size/3`.
+      receive_window_size: conn.client_settings.initial_window_size,
       received_first_headers?: false
     }
 
@@ -2221,6 +2363,15 @@ defmodule Mint.HTTP2 do
 
   def format_error(:unknown_request_to_stream) do
     "can't stream chunk of data because the request is unknown"
+  end
+
+  def format_error({:unknown_request_to_stream, ref}) do
+    "request with reference #{inspect(ref)} was not found"
+  end
+
+  def format_error({:window_size_too_small, current, new_size}) do
+    "set_window_size/3 can only grow a window; new size #{new_size} is " <>
+      "smaller than the current size #{current}"
   end
 
   def format_error(:request_is_not_streaming) do
