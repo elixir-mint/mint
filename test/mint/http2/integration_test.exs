@@ -32,14 +32,10 @@ defmodule HTTP2.IntegrationTest do
     end
   end
 
-  test "TCP - nghttp2.org" do
-    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, "nghttp2.org", 80)
+  test "TCP - h2c prior knowledge" do
+    assert {:ok, %HTTP2{} = conn} = HTTP2.connect(:http, HttpBin.host(), HttpBin.h2c_port())
 
-    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
-
-    # For some reason, we get an SSL message sneaking in here. Instead of going
-    # crazy trying to debug it, for now let's just swallow it.
-    assert_receive {:ssl, _socket, _data}, 1000
+    assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
 
     assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
 
@@ -152,32 +148,6 @@ defmodule HTTP2.IntegrationTest do
       assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
 
       assert status == 301
-      assert is_list(headers)
-
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-  end
-
-  describe "nghttp2.org/httpbin" do
-    @describetag connect: {"nghttp2.org", 443}
-
-    test "ping", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.ping(conn)
-      assert {:ok, %HTTP2{} = conn, [{:pong, ^ref}]} = receive_stream(conn)
-      assert conn.buffer == ""
-      assert HTTP2.open?(conn)
-    end
-
-    test "GET /", %{conn: conn} do
-      assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/httpbin/", [], nil)
-
-      assert {:ok, %HTTP2{} = conn, responses} = receive_stream(conn)
-
-      assert [{:status, ^ref, status}, {:headers, ^ref, headers} | rest] = responses
-      assert {_, [{:done, ^ref}]} = Enum.split_while(rest, &match?({:data, ^ref, _}, &1))
-
-      assert status == 200
       assert is_list(headers)
 
       assert conn.buffer == ""

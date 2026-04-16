@@ -34,3 +34,4 @@ services:
       - "./Caddyfile:/etc/caddy/Caddyfile:z"
     ports:
       - "${HTTPBIN_HTTPS_PORT:-8443}:${HTTPBIN_HTTPS_PORT:-8443}"
+      - "${HTTPBIN_H2C_PORT:-8081}:${HTTPBIN_HTTP_PORT:-8080}"
