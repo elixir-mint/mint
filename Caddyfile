@@ -2,6 +2,9 @@
 	local_certs
 	skip_install_trust
 	storage file_system /caddy_storage
+	servers :{$HTTPBIN_HTTP_PORT:8080} {
+		protocols h1 h2c
+	}
 }
 
 https://localhost:{$HTTPBIN_HTTPS_PORT:8443} {

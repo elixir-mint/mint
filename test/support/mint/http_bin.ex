@@ -17,6 +17,10 @@ defmodule Mint.HttpBin do
     get_env_port("HTTPBIN_HTTPS_PORT", 8443)
   end
 
+  def h2c_port() do
+    get_env_port("HTTPBIN_H2C_PORT", 8081)
+  end
+
   def proxy_port() do
     get_env_port("TINYPROXY_PORT", 8888)
   end
