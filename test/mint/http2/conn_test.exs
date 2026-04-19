@@ -1772,6 +1772,29 @@ defmodule Mint.HTTP2Test do
         HTTP2.get_window_size(conn, {:request, make_ref()})
       end
     end
+
+    test "get_send_window/2 returns the minimum of connection and request window sizes",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      send_window = HTTP2.get_send_window(conn, ref)
+      conn_window = HTTP2.get_window_size(conn, :connection)
+      request_window = HTTP2.get_window_size(conn, {:request, ref})
+
+      assert send_window == min(conn_window, request_window)
+    end
+
+    test "get_send_window/2 decreases after streaming body data", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      initial_send_window = HTTP2.get_send_window(conn, ref)
+      assert initial_send_window > 0
+
+      body_chunk = "hello"
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, body_chunk)
+
+      assert HTTP2.get_send_window(conn, ref) == initial_send_window - byte_size(body_chunk)
+    end
   end
 
   describe "settings" do
