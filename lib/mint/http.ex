@@ -126,7 +126,7 @@ defmodule Mint.HTTP do
 
   @behaviour Mint.Core.Conn
 
-  @opaque t() :: Mint.HTTP1.t() | Mint.HTTP2.t()
+  @type t() :: Mint.HTTP1.t() | Mint.HTTP2.t() | Mint.UnsafeProxy.t()
 
   defguardp is_data_message(message)
             when elem(message, 0) in [:ssl, :tcp] and tuple_size(message) == 3
