@@ -133,6 +133,118 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "set_window_size/3" do
+    test "bumps the connection-level receive window by sending WINDOW_UPDATE on stream 0",
+         %{conn: conn} do
+      assert HTTP2.get_window_size(conn, :connection) == 65_535
+      assert conn.receive_window_size == 65_535
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+
+      assert conn.receive_window_size == 1_000_000
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 934_465)
+      ]
+    end
+
+    test "bumps a per-stream receive window by sending WINDOW_UPDATE on that stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, current + 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == current + 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 10_000)
+      ]
+    end
+
+    test "uses acknowledged client initial_window_size when bumping an open stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, conn} = HTTP2.put_settings(conn, initial_window_size: 1_000)
+      assert_recv_frames [settings(params: [initial_window_size: 1_000])]
+
+      assert {:ok, conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert conn.streams[stream_id].receive_window_size == 1_000
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 9_000)
+      ]
+    end
+
+    test "is a no-op when the new size equals the current size", %{conn: conn} do
+      assert {:ok, ^conn} = HTTP2.set_window_size(conn, :connection, 65_535)
+
+      # Nothing should have gone out on the wire.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink the connection window", %{conn: conn} do
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+      assert_recv_frames [window_update(stream_id: 0)]
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, :connection, 500_000)
+
+      assert_http2_error error, {:window_size_too_small, 1_000_000, 500_000}
+
+      # No WINDOW_UPDATE was sent for the invalid call.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink a stream window", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+      after_grow = current + 10_000
+      shrink_target = current + 5_000
+
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, after_grow)
+      assert_recv_frames [window_update(stream_id: ^stream_id)]
+
+      assert {:error, ^conn, error} =
+               HTTP2.set_window_size(conn, {:request, ref}, shrink_target)
+
+      assert_http2_error error, {:window_size_too_small, ^after_grow, ^shrink_target}
+    end
+
+    test "returns an error for an unknown request ref", %{conn: conn} do
+      fake_ref = make_ref()
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, {:request, fake_ref}, 1_000_000)
+
+      assert_http2_error error, {:unknown_request_to_stream, ^fake_ref}
+    end
+
+    test "raises on out-of-range new_size", %{conn: conn} do
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 0)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 3_000_000_000)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, :nope)
+      end
+    end
+  end
+
   describe "open?/1" do
     test "returns true if the state is :open or :handshaking", %{conn: conn} do
       assert HTTP2.open?(%{conn | state: :open})
