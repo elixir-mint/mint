@@ -164,6 +164,28 @@ defmodule Mint.HTTP2Test do
       ]
     end
 
+    test "uses acknowledged client initial_window_size when bumping an open stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, conn} = HTTP2.put_settings(conn, initial_window_size: 1_000)
+      assert_recv_frames [settings(params: [initial_window_size: 1_000])]
+
+      assert {:ok, conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert conn.streams[stream_id].receive_window_size == 1_000
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 9_000)
+      ]
+    end
+
     test "is a no-op when the new size equals the current size", %{conn: conn} do
       assert {:ok, ^conn} = HTTP2.set_window_size(conn, :connection, 65_535)
 

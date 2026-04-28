@@ -1988,9 +1988,14 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  valid_client_settings_without_iws = @valid_client_settings -- [:initial_window_size]
+
   defp apply_client_settings(conn, client_settings) do
     Enum.reduce(client_settings, conn, fn
-      {setting, value}, conn when setting in @valid_client_settings ->
+      {:initial_window_size, initial_window_size}, conn ->
+        update_client_initial_window_size(conn, initial_window_size)
+
+      {setting, value}, conn when setting in unquote(valid_client_settings_without_iws) ->
         update_in(conn.client_settings, &%{&1 | setting => value})
 
       {setting, _value}, _conn ->
@@ -2020,6 +2025,23 @@ defmodule Mint.HTTP2 do
       end)
 
     put_in(conn.server_settings.initial_window_size, new_iws)
+  end
+
+  defp update_client_initial_window_size(conn, new_iws) do
+    diff = new_iws - conn.client_settings.initial_window_size
+
+    conn =
+      update_in(conn.streams, fn streams ->
+        for {stream_id, stream} <- streams,
+            stream.state in [:open, :half_closed_local, :reserved_remote],
+            into: streams do
+          receive_window_size = stream.receive_window_size + diff
+
+          {stream_id, %{stream | receive_window_size: receive_window_size}}
+        end
+      end)
+
+    put_in(conn.client_settings.initial_window_size, new_iws)
   end
 
   # PUSH_PROMISE
@@ -2075,6 +2097,7 @@ defmodule Mint.HTTP2 do
       ref: make_ref(),
       state: :reserved_remote,
       window_size: conn.server_settings.initial_window_size,
+      receive_window_size: conn.client_settings.initial_window_size,
       received_first_headers?: false
     }
 
