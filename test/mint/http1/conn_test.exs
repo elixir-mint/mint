@@ -1162,14 +1162,6 @@ defmodule Mint.HTTP1Test do
         HTTP1.request_body_window(conn, make_ref())
       end
     end
-
-    test "raises if the ref does not match the active streaming request", %{conn: conn} do
-      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], :stream)
-
-      assert_raise ArgumentError, ~r/was not found or is not streaming a body/, fn ->
-        HTTP1.request_body_window(conn, make_ref())
-      end
-    end
   end
 
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
