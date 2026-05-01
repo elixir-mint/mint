@@ -1772,6 +1772,82 @@ defmodule Mint.HTTP2Test do
         HTTP2.get_window_size(conn, {:request, make_ref()})
       end
     end
+
+    test "request_body_window/2 returns the minimum of connection and request window sizes",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      send_window = HTTP2.request_body_window(conn, ref)
+      conn_window = HTTP2.get_window_size(conn, :connection)
+      request_window = HTTP2.get_window_size(conn, {:request, ref})
+
+      assert send_window == min(conn_window, request_window)
+    end
+
+    test "request_body_window/2 decreases after streaming body data", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      initial_send_window = HTTP2.request_body_window(conn, ref)
+      assert initial_send_window > 0
+
+      body_chunk = "hello"
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, body_chunk)
+
+      assert HTTP2.request_body_window(conn, ref) == initial_send_window - byte_size(body_chunk)
+    end
+
+    test "request_body_window/2 raises if the request is not found", %{conn: conn} do
+      assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
+        HTTP2.request_body_window(conn, make_ref())
+      end
+    end
+
+    @tag server_settings: [initial_window_size: 5]
+    test "streaming a body larger than the window using request_body_window/2 in a loop",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      body = "0123456789ABCDE"
+
+      # First chunk: window is 5, so we send 5 bytes.
+      assert HTTP2.request_body_window(conn, ref) == 5
+      <<chunk1::binary-size(5), rest1::binary>> = body
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, chunk1)
+
+      assert HTTP2.request_body_window(conn, ref) == 0
+
+      assert_recv_frames [data(stream_id: ^stream_id, data: ^chunk1, flags: flags1)]
+      assert flags1 == set_flags(:data, [])
+
+      # Server replenishes the stream window so we can send more.
+      {:ok, conn, []} =
+        stream_frames(conn, [window_update(stream_id: stream_id, window_size_increment: 5)])
+
+      assert HTTP2.request_body_window(conn, ref) == 5
+      <<chunk2::binary-size(5), rest2::binary>> = rest1
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, chunk2)
+
+      assert_recv_frames [data(stream_id: ^stream_id, data: ^chunk2)]
+
+      # Final replenishment for the remaining bytes plus :eof.
+      {:ok, conn, []} =
+        stream_frames(conn, [
+          window_update(stream_id: stream_id, window_size_increment: byte_size(rest2))
+        ])
+
+      assert HTTP2.request_body_window(conn, ref) == byte_size(rest2)
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, rest2)
+      {:ok, _conn} = HTTP2.stream_request_body(conn, ref, :eof)
+
+      assert_recv_frames [
+        data(stream_id: ^stream_id, data: ^rest2),
+        data(stream_id: ^stream_id, data: "", flags: end_flags)
+      ]
+
+      assert end_flags == set_flags(:data, [:end_stream])
+    end
   end
 
   describe "settings" do

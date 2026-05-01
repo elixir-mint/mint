@@ -667,6 +667,18 @@ defmodule Mint.HTTP1 do
     %{conn | proxy_headers: headers}
   end
 
+  @doc """
+  See `Mint.HTTP.request_body_window/2`.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  def request_body_window(%__MODULE__{streaming_request: %{ref: ref}}, ref), do: :infinity
+
+  def request_body_window(%__MODULE__{}, ref) do
+    raise ArgumentError,
+          "request with request reference #{inspect(ref)} was not found or is not streaming a body"
+  end
+
   ## Helpers
 
   defp decode(:status, %{request: request} = conn, data, responses) do
