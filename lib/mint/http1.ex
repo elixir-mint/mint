@@ -551,6 +551,7 @@ defmodule Mint.HTTP1 do
     case conn.transport.recv(conn.socket, byte_count, timeout) do
       {:ok, data} -> handle_data(conn, data)
       {:error, %Mint.TransportError{reason: :closed}} -> handle_close(conn)
+      {:error, %Mint.TransportError{reason: :timeout} = error} -> {:error, conn, error, []}
       {:error, error} -> handle_transport_error(conn, error)
     end
   end
