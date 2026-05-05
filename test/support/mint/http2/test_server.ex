@@ -1,6 +1,6 @@
 defmodule Mint.HTTP2.TestServer do
   import ExUnit.Assertions
-  import Mint.HTTP2.Frame, only: [settings: 1, goaway: 1, ping: 1]
+  import Mint.HTTP2.Frame, only: [settings: 1, goaway: 1, ping: 1, window_update: 1]
 
   alias Mint.HTTP2.Frame
 
@@ -144,10 +144,18 @@ defmodule Mint.HTTP2.TestServer do
     # First we get the connection preface.
     {:ok, unquote(connection_preface) <> rest} = :ssl.recv(socket, 0, 100)
 
-    # Then we get a SETTINGS frame.
-    assert {:ok, frame, ""} = Frame.decode_next(rest)
+    # Then we get a SETTINGS frame, optionally followed by a WINDOW_UPDATE
+    # on stream 0 if the client raised its connection-level receive window.
+    assert {:ok, frame, rest} = Frame.decode_next(rest)
     assert settings(flags: ^no_flags, params: _params) = frame
 
-    :ok
+    case rest do
+      "" ->
+        :ok
+
+      _ ->
+        assert {:ok, window_update(stream_id: 0), ""} = Frame.decode_next(rest)
+        :ok
+    end
   end
 end
