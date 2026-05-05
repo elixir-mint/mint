@@ -1151,6 +1151,19 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, responses}
   end
 
+  describe "request_body_window/2" do
+    test "returns :infinity for an active streaming request", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+      assert HTTP1.request_body_window(conn, ref) == :infinity
+    end
+
+    test "raises if no request is currently streaming a body", %{conn: conn} do
+      assert_raise ArgumentError, ~r/was not found or is not streaming a body/, fn ->
+        HTTP1.request_body_window(conn, make_ref())
+      end
+    end
+  end
+
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
 end

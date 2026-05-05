@@ -62,4 +62,6 @@ defmodule Mint.Core.Conn do
   @callback put_proxy_headers(conn(), Mint.Types.headers()) :: conn()
 
   @callback put_log(conn(), boolean()) :: conn()
+
+  @callback request_body_window(conn(), Types.request_ref()) :: non_neg_integer() | :infinity
 end
