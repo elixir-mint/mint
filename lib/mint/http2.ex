@@ -899,6 +899,7 @@ defmodule Mint.HTTP2 do
       {:ok, conn} = Mint.HTTP2.set_window_size(conn, {:request, ref}, 16_000_000)
 
   """
+  @doc since: "1.8.0"
   @spec set_window_size(t(), :connection | {:request, Types.request_ref()}, pos_integer()) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def set_window_size(conn, connection_or_request, new_size)

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.8.0
+
+### New features
+
+  * Raise the default HTTP/2 receive windows to 16 MB (connection) and 4 MB (stream), and batch HTTP/2 receive-window refills. The larger windows lift the per-stream throughput cap (`window / RTT`), giving substantially higher throughput on higher-latency connections, in exchange for higher peak memory use per connection. The connection-level window is now configurable via the new `:connection_window_size` option to `Mint.HTTP.connect/4`, and refill batching is configurable via the new `:receive_window_update_threshold` option.
+  * Add `Mint.HTTP2.set_window_size/3` for advertising a larger receive window to the server after a connection has been established.
+  * Add `Mint.HTTP.request_body_window/2` for querying the available send-window when streaming a request body.
+  * Introduce the `:optional_responses` option for `Mint.HTTP1.connect/4`, with a `:status_reason` value that surfaces the HTTP/1.1 status reason-phrase as a new `{:status_reason, request_ref, reason_phrase}` response.
+  * Change `t:Mint.HTTP.t/0` from an opaque to an open type.
+  * Add `t:Mint.HTTPError.reason/0` and `t:Mint.TransportError.reason/0`.
+
+### Bug Fixes and Improvements
+
+  * Fix HTTP/1 handling of `1xx` informational responses.
+  * Forbid or replace empty targets in HTTP/1.1 requests.
+
 ## v1.7.1
 
 ### Bug Fixes and Improvements

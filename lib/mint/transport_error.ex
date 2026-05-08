@@ -58,7 +58,7 @@ defmodule Mint.TransportError do
   @typedoc """
   The error reason.
   """
-  @typedoc since: "1.7.2"
+  @typedoc since: "1.8.0"
   @type reason :: unquote(reason_type) | term()
 
   @typedoc """

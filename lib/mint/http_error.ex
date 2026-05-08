@@ -56,7 +56,7 @@ defmodule Mint.HTTPError do
   @typedoc """
   The error reason.
   """
-  @typedoc since: "1.7.2"
+  @typedoc since: "1.8.0"
   @type reason :: HTTP1.error_reason() | HTTP2.error_reason() | proxy_reason() | term()
 
   @typedoc """
