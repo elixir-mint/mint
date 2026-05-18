@@ -152,7 +152,7 @@ defmodule Mint.HTTP do
 
   This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
   `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
-  `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+  `Mint.HTTP.stream/2` and check for the `:unknown` return value.
 
   This macro can be used in guards.
 
