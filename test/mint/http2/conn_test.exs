@@ -1631,7 +1631,7 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [client_settings: [max_concurrent_streams: 1]]
-    test "if the server reaches the max number of client streams, the client sends an error",
+    test "promised streams beyond max_concurrent_streams are refused at promise time",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -1661,36 +1661,67 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
+      # Only the first promise is accepted: it fills the single available slot.
+      # The second is refused at decode time, before it can be inserted into the
+      # streams map, so it never surfaces as a :push_promise response.
       assert [
-               {:push_promise, ^ref, promised_ref1, _},
-               {:push_promise, ^ref, _promised_ref2, _},
+               {:push_promise, ^ref, _promised_ref1, _},
                {:status, ^ref, 200},
                {:headers, ^ref, []},
                {:done, ^ref}
              ] = responses
 
-      # Here we send headers for the two promised streams. Note that neither of the
-      # header frames have the END_STREAM flag set otherwise we close the streams and
-      # they don't count towards the open stream count.
-      assert {:ok, %HTTP2{} = conn, responses} =
-               stream_frames(conn, [
-                 headers(
-                   stream_id: 4,
-                   hbf: normal_headers_hbf,
-                   flags: set_flags(:headers, [:end_headers])
-                 ),
-                 headers(
-                   stream_id: 6,
-                   hbf: normal_headers_hbf,
-                   flags: set_flags(:headers, [:end_headers])
-                 )
-               ])
-
-      assert [{:status, ^promised_ref1, 200}, {:headers, ^promised_ref1, []}] = responses
-
       assert_recv_frames [
         rst_stream(stream_id: 6, error_code: :refused_stream)
       ]
+
+      refute Map.has_key?(conn.streams, 6)
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_concurrent_streams: 5]]
+    test "a flood of PUSH_PROMISE frames cannot grow the streams map past max_concurrent_streams",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+
+      # The server promises many more streams than the client's limit but never
+      # follows up with the response HEADERS for any of them. Each promise must
+      # still be HPACK-decoded to keep the decode table in sync, but only the
+      # first five may be retained as reserved streams.
+      promised_ids = Enum.map(1..100, &(&1 * 2 + 2))
+
+      promise_frames =
+        Enum.map(promised_ids, fn promised_stream_id ->
+          push_promise(
+            stream_id: stream_id,
+            hbf: promised_headers_hbf,
+            promised_stream_id: promised_stream_id,
+            flags: set_flags(:push_promise, [:end_headers])
+          )
+        end)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_frames(conn, promise_frames)
+
+      # Only five promises surface as responses; the rest are refused.
+      assert length(responses) == 5
+
+      reserved_ids =
+        for {id, %{state: :reserved_remote}} <- conn.streams, do: id
+
+      assert length(reserved_ids) == 5
+      assert reserved_ids == Enum.take(promised_ids, 5)
+
+      # Every refused promise gets a RST_STREAM with REFUSED_STREAM.
+      refused_ids = Enum.drop(promised_ids, 5)
+      rst_frames = recv_next_frames(length(refused_ids))
+
+      for {frame, expected_id} <- Enum.zip(rst_frames, refused_ids) do
+        assert rst_stream(stream_id: ^expected_id, error_code: :refused_stream) = frame
+      end
 
       assert HTTP2.open?(conn)
     end

@@ -224,6 +224,7 @@ defmodule Mint.HTTP2 do
     streams: %{},
     open_client_stream_count: 0,
     open_server_stream_count: 0,
+    reserved_server_stream_count: 0,
     ref_to_stream_id: %{},
 
     # Settings that the server communicates to the client.
@@ -1994,6 +1995,7 @@ defmodule Mint.HTTP2 do
 
               true ->
                 conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+                conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
                 conn = put_in(conn.streams[stream.id].state, :half_closed_local)
                 {conn, new_responses}
             end
@@ -2262,21 +2264,45 @@ defmodule Mint.HTTP2 do
          stream,
          promised_stream_id
        ) do
+    # The header block fragment must always be decoded to keep the HPACK decode
+    # table in sync with the server, even when we end up refusing the stream.
     {conn, headers} = decode_hbf(conn, hbf)
 
-    promised_stream = %{
-      id: promised_stream_id,
-      ref: make_ref(),
-      state: :reserved_remote,
-      send_window_size: conn.server_settings.initial_window_size,
-      receive_window_size: conn.client_settings.initial_window_size,
-      receive_window_remaining: conn.client_settings.initial_window_size,
-      received_first_headers?: false
-    }
+    # A reserved stream stays in `conn.streams` until its response HEADERS
+    # arrive, so promised streams have to be counted against the concurrency
+    # limit at promise time. Otherwise a server can pin an unbounded number of
+    # reserved streams by sending PUSH_PROMISE frames and never following up
+    # with the HEADERS that would open them.
+    server_stream_count = conn.open_server_stream_count + conn.reserved_server_stream_count
 
-    conn = put_in(conn.streams[promised_stream.id], promised_stream)
-    new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
-    {conn, [new_response | responses]}
+    if server_stream_count >= conn.client_settings.max_concurrent_streams do
+      conn = refuse_promised_stream(conn, promised_stream_id)
+      {conn, responses}
+    else
+      promised_stream = %{
+        id: promised_stream_id,
+        ref: make_ref(),
+        state: :reserved_remote,
+        send_window_size: conn.server_settings.initial_window_size,
+        receive_window_size: conn.client_settings.initial_window_size,
+        receive_window_remaining: conn.client_settings.initial_window_size,
+        received_first_headers?: false
+      }
+
+      conn = put_in(conn.streams[promised_stream.id], promised_stream)
+      conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
+      new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
+      {conn, [new_response | responses]}
+    end
+  end
+
+  defp refuse_promised_stream(conn, promised_stream_id) do
+    if open?(conn) do
+      rst_stream_frame = rst_stream(stream_id: promised_stream_id, error_code: :refused_stream)
+      send!(conn, Frame.encode(rst_stream_frame))
+    else
+      conn
+    end
   end
 
   defp assert_valid_promised_stream_id(conn, promised_stream_id) do
@@ -2508,6 +2534,11 @@ defmodule Mint.HTTP2 do
         # Stream initiated by the server.
         stream_open? and Integer.is_even(stream.id) ->
           update_in(conn.open_server_stream_count, &(&1 - 1))
+
+        # Stream reserved by the server through a PUSH_PROMISE, but whose
+        # response HEADERS never arrived to open it.
+        stream.state == :reserved_remote ->
+          update_in(conn.reserved_server_stream_count, &(&1 - 1))
 
         true ->
           conn
