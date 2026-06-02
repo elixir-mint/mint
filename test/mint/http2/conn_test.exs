@@ -963,6 +963,73 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a flood of CONTINUATION frames past max_header_list_size is a connection error",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Each CONTINUATION is individually under the limit, but together they
+      # accumulate past the advertised SETTINGS_MAX_HEADER_LIST_SIZE. The client
+      # must refuse to buffer the header block without bound rather than growing
+      # `headers_being_processed` until it runs out of memory.
+      chunk = :binary.copy(<<0>>, 400)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: "", flags: set_flags(:headers, [])),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "SETTINGS_MAX_HEADER_LIST_SIZE"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a single oversized HEADERS fragment past max_header_list_size is a connection error",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      oversized_hbf = :binary.copy(<<0>>, 2_000)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: oversized_hbf, flags: set_flags(:headers, []))
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "SETTINGS_MAX_HEADER_LIST_SIZE"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "client advertises a default SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
+      assert HTTP2.get_client_setting(conn, :max_header_list_size) == 256 * 1024
+    end
+
     test ":authority pseudo-header includes port", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
