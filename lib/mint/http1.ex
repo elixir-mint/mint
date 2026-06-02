@@ -48,6 +48,8 @@ defmodule Mint.HTTP1 do
 
     * `{:invalid_request_target, target}` - when the request target is invalid.
 
+    * `{:invalid_request_method, method}` - when the request method is invalid.
+
     * `:invalid_header` - when headers can't be parsed correctly.
 
     * `{:invalid_header_name, name}` - when a header name is invalid.
@@ -1174,6 +1176,10 @@ defmodule Mint.HTTP1 do
 
   def format_error({:invalid_request_target, target}) do
     "invalid request target: #{inspect(target)}"
+  end
+
+  def format_error({:invalid_request_method, method}) do
+    "invalid request method: #{inspect(method)}"
   end
 
   def format_error({:invalid_header_name, name}) do

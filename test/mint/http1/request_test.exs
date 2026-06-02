@@ -42,6 +42,31 @@ defmodule Mint.HTTP1.RequestTest do
       assert Request.encode("GET", "/", [{"foo", "bar\r\n"}], nil) ==
                {:error, {:invalid_header_value, "foo", "bar\r\n"}}
     end
+
+    test "method with CRLF is rejected" do
+      method = "GET / HTTP/1.1\r\nX-Smuggled: 1\r\nGET /admin"
+
+      assert Request.encode(method, "/", [], nil) ==
+               {:error, {:invalid_request_method, method}}
+    end
+
+    test "method with a space is rejected" do
+      assert Request.encode("GET /admin", "/", [], nil) ==
+               {:error, {:invalid_request_method, "GET /admin"}}
+    end
+
+    test "method with a control character is rejected" do
+      assert Request.encode("GET\t", "/", [], nil) ==
+               {:error, {:invalid_request_method, "GET\t"}}
+    end
+
+    test "custom token method is accepted" do
+      assert encode_request("PROPFIND", "/", [], nil) ==
+               request_string("""
+               PROPFIND / HTTP/1.1
+
+               """)
+    end
   end
 
   describe "encode_chunk/1" do

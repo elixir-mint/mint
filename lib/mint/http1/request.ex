@@ -4,6 +4,8 @@ defmodule Mint.HTTP1.Request do
   import Mint.HTTP1.Parse
 
   def encode(method, target, headers, body) do
+    validate_method!(method)
+
     body = [
       encode_request_line(method, target),
       encode_headers(headers),
@@ -43,6 +45,17 @@ defmodule Mint.HTTP1.Request do
   def encode_chunk(chunk) do
     length = IO.iodata_length(chunk)
     [Integer.to_string(length, 16), "\r\n", chunk, "\r\n"]
+  end
+
+  defp validate_method!(method) do
+    _ =
+      for <<char <- method>> do
+        unless is_tchar(char) do
+          throw({:mint, {:invalid_request_method, method}})
+        end
+      end
+
+    :ok
   end
 
   defp validate_header_name!(name) do
