@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.9.0
+
+### Security
+
+  * Validate the HTTP/1.1 request method as an RFC 9110 token, rejecting CRLF and other control characters. Forwarding attacker-controlled input as the request method was exposed to CRLF injection (request header injection and request smuggling). Fixes [GHSA-2pg6-44cx-c49v](https://github.com/elixir-mint/mint/security/advisories/GHSA-2pg6-44cx-c49v).
+  * Reject HTTP/1.1 `content-length` header values that are not strictly `1*DIGIT`, so signed values (such as `+0`) and embedded whitespace no longer parse as valid lengths. This parser disagreement with a strict fronting proxy was a response-smuggling primitive. Fixes [GHSA-mjqx-c6f6-7rc2](https://github.com/elixir-mint/mint/security/advisories/GHSA-mjqx-c6f6-7rc2).
+  * Bound the HTTP/2 accumulated header block by the locally advertised `SETTINGS_MAX_HEADER_LIST_SIZE` (now defaulting to 256 KB instead of `:infinity`), so a malicious server can no longer exhaust client memory with an unbounded chain of `CONTINUATION` frames. Fixes [GHSA-2p26-p43x-fhp8](https://github.com/elixir-mint/mint/security/advisories/GHSA-2p26-p43x-fhp8).
+  * Count reserved HTTP/2 streams against `max_concurrent_streams` at `PUSH_PROMISE` time and refuse promises past the limit with `RST_STREAM`, so a malicious server can no longer exhaust client memory by flooding `PUSH_PROMISE` frames. Fixes [GHSA-g586-ccqf-7x4r](https://github.com/elixir-mint/mint/security/advisories/GHSA-g586-ccqf-7x4r).
+
+### Bug Fixes and Improvements
+
+  * `Mint.HTTP.stream/2` now returns `:unknown` (not `:unknown_message`) when given a message it does not recognize.
+
 ## v1.8.0
 
 ### New features
