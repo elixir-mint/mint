@@ -14,6 +14,24 @@ defmodule Mint.HTTP1.ParseTest do
 
     assert content_length_header("-10") ==
              {:error, {:invalid_content_length_header, "-10"}}
+
+    assert content_length_header("+0") ==
+             {:error, {:invalid_content_length_header, "+0"}}
+
+    assert content_length_header("+123") ==
+             {:error, {:invalid_content_length_header, "+123"}}
+
+    assert content_length_header("") ==
+             {:error, {:invalid_content_length_header, ""}}
+
+    assert content_length_header("  100") ==
+             {:error, {:invalid_content_length_header, "  100"}}
+
+    assert content_length_header("1 0") ==
+             {:error, {:invalid_content_length_header, "1 0"}}
+
+    assert content_length_header("0x10") ==
+             {:error, {:invalid_content_length_header, "0x10"}}
   end
 
   test "connection_header/1" do

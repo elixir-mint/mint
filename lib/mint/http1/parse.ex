@@ -18,11 +18,18 @@ defmodule Mint.HTTP1.Parse do
   def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
 
   def content_length_header(string) do
-    case Integer.parse(String.trim_trailing(string)) do
-      {length, ""} when length >= 0 -> {:ok, length}
-      _other -> {:error, {:invalid_content_length_header, string}}
+    trimmed = String.trim_trailing(string)
+
+    if only_digits?(trimmed) do
+      {:ok, String.to_integer(trimmed)}
+    else
+      {:error, {:invalid_content_length_header, string}}
     end
   end
+
+  defp only_digits?(<<char>>) when is_digit(char), do: true
+  defp only_digits?(<<char, rest::binary>>) when is_digit(char), do: only_digits?(rest)
+  defp only_digits?(_other), do: false
 
   def connection_header(string) do
     split_into_downcase_tokens(string)
