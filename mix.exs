@@ -13,9 +13,9 @@ defmodule Mint.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
 
-      # Xref
-      xref: [
-        exclude: [
+      # Suppress "undefined function" warnings for optional/runtime deps.
+      elixirc_options: [
+        no_warn_undefined: [
           {:ssl, :cipher_suites, 1},
           {:public_key, :cacerts_get, 0},
           CAStore
