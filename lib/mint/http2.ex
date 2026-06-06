@@ -1041,6 +1041,9 @@ defmodule Mint.HTTP2 do
       {:error, %TransportError{reason: :closed}} ->
         handle_closed(conn)
 
+      {:error, %TransportError{reason: :timeout} = error} ->
+        {:error, conn, error, []}
+
       {:error, error} ->
         {:error, %{conn | state: :closed}, error, _responses = []}
     end
