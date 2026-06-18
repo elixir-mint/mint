@@ -1160,9 +1160,9 @@ defmodule Mint.HTTP2 do
     # If the port is the default for the scheme, don't add it to the :authority pseudo-header
     authority =
       if URI.default_port(scheme_string) == port do
-        hostname
+        Util.wrap_ipv6(hostname)
       else
-        "#{hostname}:#{port}"
+        "#{Util.wrap_ipv6(hostname)}:#{port}"
       end
 
     unless mode in [:active, :passive] do

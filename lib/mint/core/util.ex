@@ -3,6 +3,14 @@ defmodule Mint.Core.Util do
 
   alias Mint.Types
 
+  @spec wrap_ipv6(String.t()) :: String.t()
+  def wrap_ipv6(hostname) do
+    case :inet.parse_ipv6strict_address(String.to_charlist(hostname)) do
+      {:ok, _} -> "[#{hostname}]"
+      {:error, _} -> hostname
+    end
+  end
+
   @spec hostname(keyword(), String.t()) :: String.t()
   def hostname(opts, address) when is_list(opts) do
     case Keyword.fetch(opts, :hostname) do
