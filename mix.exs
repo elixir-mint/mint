@@ -2,7 +2,7 @@ defmodule Mint.MixProject do
   use Mix.Project
 
   @version "1.9.0"
-  @repo_url "https://github.com/elixir-mint/mint"
+  @repo_url "https://github.com/xinguanz/mint"
 
   def project do
     [
@@ -65,8 +65,11 @@ defmodule Mint.MixProject do
 
   defp package do
     [
+      name: "apollo_mint",
+      files: ~w[lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE.txt],
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @repo_url}
+      links: %{"GitHub" => @repo_url},
+      organization: "tubitv"
     ]
   end
 
