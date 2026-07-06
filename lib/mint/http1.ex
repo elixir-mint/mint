@@ -867,7 +867,11 @@ defmodule Mint.HTTP1 do
       length > byte_size(data) ->
         conn = put_in(conn.buffer, "")
         conn = put_in(conn.request.body, {:chunked, length - byte_size(data)})
-        conn = add_body_to_buffer(conn, data)
+        # Emit the partial chunk data right away instead of buffering it until
+        # the whole chunk arrives. Buffering would let a server that announces a
+        # huge chunk and then dribbles bytes force us to accumulate the entire
+        # (never-completed) chunk in memory (CVE-2026-56810).
+        {conn, responses} = add_body(conn, data, responses)
         {:ok, conn, responses}
 
       length <= byte_size(data) ->
@@ -921,12 +925,8 @@ defmodule Mint.HTTP1 do
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
 
   defp add_body(conn, data, responses) do
-    conn = add_body_to_buffer(conn, data)
+    conn = update_in(conn.request.data_buffer, &[&1 | data])
     collapse_body_buffer(conn, responses)
-  end
-
-  defp add_body_to_buffer(conn, data) do
-    update_in(conn.request.data_buffer, &[&1 | data])
   end
 
   defp collapse_body_buffer(conn, responses) do

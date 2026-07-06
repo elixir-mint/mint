@@ -276,14 +276,20 @@ defmodule Mint.HTTP1Test do
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
-    assert {:ok, _conn, [status, headers, data1, data2, done]} =
+    assert {:ok, _conn, [status, headers | rest]} =
              stream_message_bytewise(response, conn, [])
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert data1 == {:data, ref, "01"}
-    assert data2 == {:data, ref, "23"}
+
+    # When a chunk is streamed one byte at a time, its data is emitted as it
+    # arrives rather than buffered until the chunk completes, so the body may be
+    # split across several {:data, ...} responses.
+    {data_responses, [done]} = Enum.split(rest, -1)
     assert done == {:done, ref}
+    assert Enum.all?(data_responses, &match?({:data, ^ref, _}, &1))
+    body = data_responses |> Enum.map(fn {:data, ^ref, data} -> data end) |> IO.iodata_to_binary()
+    assert body == "0123"
   end
 
   test "body with chunked transfer-encoding streamed on chunk boundary", %{conn: conn} do
@@ -305,6 +311,27 @@ defmodule Mint.HTTP1Test do
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
     assert data1 == {:data, ref, "01"}
     assert data2 == {:data, ref, "23"}
+  end
+
+  test "chunked transfer-encoding emits partial chunk data before the chunk completes",
+       %{conn: conn} do
+    # Regression test for GHSA-c59h-fq4p-r36r: a server can announce a huge chunk
+    # and dribble bytes. Mint must emit the partial data as it arrives instead of
+    # buffering the whole (never-completed) chunk in memory.
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n7FFFFFFF\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    # Bytes belonging to the not-yet-complete chunk are emitted immediately.
+    assert {:ok, conn, [{:data, ^ref, "hello"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "hello"})
+
+    assert {:ok, conn, [{:data, ^ref, "world"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "world"})
+
+    # Nothing is retained in the body buffer between calls.
+    assert IO.iodata_to_binary(conn.request.data_buffer) == ""
   end
 
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
