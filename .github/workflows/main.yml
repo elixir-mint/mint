@@ -14,17 +14,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - erlang: "28.1"
-            elixir: "1.19"
+          - erlang: "29.0"
+            elixir: "1.20"
             lint: true
             coverage: true
             dialyzer: true
           # One version down.
-          - erlang: "27.2"
-            elixir: "1.18"
+          - erlang: "28.1"
+            elixir: "1.19"
           # Oldest version.
           - erlang: "24.3"
-            elixir: "1.12.3"
+            elixir: "1.15.8"
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
