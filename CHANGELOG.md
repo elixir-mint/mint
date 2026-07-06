@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.1
+
+### Security
+
+  * HTTP/1.1 chunked response bodies are now emitted as `{:data, ref, data}` tuples as soon as data from the chunked body is received. This prevents `CVE-2026-56810`: the previous behavior was to buffer body chunks according to their advertised length. An attacker could craft a chunked response with a very large chunk length, and Mint would keep accumulating incoming chunked bytes in memory until reaching that length—allowing the attacker to OOM the application using Mint. See also [the `GHSA-c59h-fq4p-r36r` GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-c59h-fq4p-r36r).
+
 ## v1.9.0
 
 ### Security
