@@ -1004,6 +1004,28 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
+    # Regression for GitHub Security Advisory GHSA-8pf6-g464-h6h9.
+    test "empty CONTINUATION frames do not grow the header block accumulator", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      empty_continuations =
+        List.duplicate(
+          continuation(stream_id: stream_id, hbf: "", flags: set_flags(:continuation, [])),
+          10_000
+        )
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: "", flags: set_flags(:headers, []))
+                 | empty_continuations
+               ])
+
+      assert {^stream_id, "", _callback, 0} = conn.headers_being_processed
+      assert HTTP2.open?(conn)
+    end
+
     @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
     test "a single oversized HEADERS fragment past max_header_list_size is a connection error",
          %{conn: conn} do

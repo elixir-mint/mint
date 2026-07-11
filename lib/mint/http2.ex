@@ -2438,16 +2438,23 @@ defmodule Mint.HTTP2 do
       conn = put_in(conn.headers_being_processed, nil)
       callback.(conn, responses, hbf, stream)
     else
-      new_size = acc_size + byte_size(hbf_chunk)
-      conn = assert_header_block_within_max_size(conn, new_size)
+      if byte_size(hbf_chunk) == 0 do
+        # An empty fragment does not contribute header-block data. Keeping the
+        # existing accumulator avoids adding an unbounded number of empty
+        # iodata nodes when END_HEADERS is withheld.
+        {conn, responses}
+      else
+        new_size = acc_size + byte_size(hbf_chunk)
+        conn = assert_header_block_within_max_size(conn, new_size)
 
-      conn =
-        put_in(
-          conn.headers_being_processed,
-          {stream_id, [hbf_acc, hbf_chunk], callback, new_size}
-        )
+        conn =
+          put_in(
+            conn.headers_being_processed,
+            {stream_id, [hbf_acc, hbf_chunk], callback, new_size}
+          )
 
-      {conn, responses}
+        {conn, responses}
+      end
     end
   end
 
@@ -2461,8 +2468,9 @@ defmodule Mint.HTTP2 do
   # CONTINUATION frames is buffered (in compressed form) until END_HEADERS
   # arrives. A server can withhold END_HEADERS and stream CONTINUATION frames
   # indefinitely, so the buffered size is bounded by the locally advertised
-  # SETTINGS_MAX_HEADER_LIST_SIZE. The compressed accumulator is never larger
-  # than the uncompressed header list it decodes to, so this never rejects a
+  # SETTINGS_MAX_HEADER_LIST_SIZE. Empty fragments are not retained in the
+  # accumulator. The compressed accumulator is never larger than the
+  # uncompressed header list it decodes to, so the size limit never rejects a
   # header block that fits within the advertised limit.
   defp assert_header_block_within_max_size(conn, size) do
     case conn.client_settings.max_header_list_size do
