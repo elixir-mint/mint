@@ -30,6 +30,7 @@ defmodule Mint.HTTP1 do
   @opaque t() :: %__MODULE__{}
 
   @user_agent "mint/" <> Mix.Project.config()[:version]
+  @default_max_header_list_size 256 * 1024
 
   @typedoc """
   An HTTP/1-specific error reason.
@@ -51,6 +52,10 @@ defmodule Mint.HTTP1 do
     * `{:invalid_request_method, method}` - when the request method is invalid.
 
     * `:invalid_header` - when headers can't be parsed correctly.
+
+    * `{:max_header_list_size_exceeded, size, max_size}` - when a response header section
+      or chunked trailer section exceeds the configured size limit. `size` is the number of
+      bytes received and `max_size` is the configured maximum.
 
     * `{:invalid_header_name, name}` - when a header name is invalid.
 
@@ -98,6 +103,7 @@ defmodule Mint.HTTP1 do
     :scheme_as_string,
     :case_sensitive_headers,
     :skip_target_validation,
+    :max_header_list_size,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -139,6 +145,10 @@ defmodule Mint.HTTP1 do
           [reason-phrase](https://datatracker.ietf.org/doc/html/rfc9112#name-status-line)
           for the status code if it is returned by the server in the status-line.
           This is only available for HTTP/1.1 connections. *Available since v1.8.0*.
+
+    * `:max_header_list_size` - (`t:pos_integer/0` or `:infinity`) the maximum number of
+      bytes allowed in a response header section or chunked trailer section. This includes
+      header names, values, and line delimiters. Defaults to 256 KiB. *Available since 1.9.2*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -195,6 +205,9 @@ defmodule Mint.HTTP1 do
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
 
+    max_header_list_size =
+      Keyword.get(opts, :max_header_list_size, @default_max_header_list_size)
+
     unless mode in [:active, :passive] do
       raise ArgumentError,
             "the :mode option must be either :active or :passive, got: #{inspect(mode)}"
@@ -203,6 +216,12 @@ defmodule Mint.HTTP1 do
     unless is_boolean(log?) do
       raise ArgumentError,
             "the :log option must be a boolean, got: #{inspect(log?)}"
+    end
+
+    unless max_header_list_size == :infinity or
+             (is_integer(max_header_list_size) and max_header_list_size > 0) do
+      raise ArgumentError,
+            ":max_header_list_size must be a positive integer or :infinity, got: #{inspect(max_header_list_size)}"
     end
 
     with :ok <- Util.inet_opts(transport, socket),
@@ -218,6 +237,7 @@ defmodule Mint.HTTP1 do
         log: log?,
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
         skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
+        max_header_list_size: max_header_list_size,
         optional_responses: validate_optional_response_values(opts)
       }
 
@@ -728,21 +748,35 @@ defmodule Mint.HTTP1 do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
 
-        case store_header(request, name, value) do
-          {:ok, request} -> decode_headers(conn, request, rest, responses, headers)
+        with {:ok, request} <- add_header_bytes(conn, request, byte_size(data) - byte_size(rest)),
+             {:ok, request} <- store_header(request, name, value) do
+          decode_headers(conn, request, rest, responses, headers)
+        else
           {:error, reason} -> {:error, conn, wrap_error(reason), responses}
         end
 
       {:ok, :eof, rest} ->
-        responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
-        request = %{request | state: :body, headers_buffer: []}
-        conn = %{conn | buffer: "", request: request}
-        decode(:body, conn, rest, responses)
+        case add_header_bytes(conn, request, byte_size(data) - byte_size(rest)) do
+          {:ok, request} ->
+            responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
+            request = %{request | state: :body, headers_buffer: [], headers_size: 0}
+            conn = %{conn | buffer: "", request: request}
+            decode(:body, conn, rest, responses)
+
+          {:error, reason} ->
+            {:error, conn, wrap_error(reason), responses}
+        end
 
       :more ->
-        request = %{request | headers_buffer: headers}
-        conn = %{conn | buffer: data, request: request}
-        {:ok, conn, responses}
+        case check_header_section_size(conn, request.headers_size + byte_size(data)) do
+          :ok ->
+            request = %{request | headers_buffer: headers}
+            conn = %{conn | buffer: data, request: request}
+            {:ok, conn, responses}
+
+          {:error, reason} ->
+            {:error, conn, wrap_error(reason), responses}
+        end
 
       :error ->
         {:error, conn, wrap_error(:invalid_header), responses}
@@ -766,6 +800,7 @@ defmodule Mint.HTTP1 do
         version: nil,
         status: nil,
         headers_buffer: [],
+        headers_size: 0,
         data_buffer: [],
         content_length: nil,
         connection: [],
@@ -885,24 +920,43 @@ defmodule Mint.HTTP1 do
   defp decode_trailer_headers(conn, data, responses, headers) do
     case Response.decode_header(data) do
       {:ok, {name, value}, rest} ->
-        headers = [{name, value} | headers]
-        decode_trailer_headers(conn, rest, responses, headers)
+        case add_header_bytes(conn, conn.request, byte_size(data) - byte_size(rest)) do
+          {:ok, request} ->
+            conn = %{conn | request: request}
+            headers = [{name, value} | headers]
+            decode_trailer_headers(conn, rest, responses, headers)
+
+          {:error, reason} ->
+            {:error, conn, wrap_error(reason), responses}
+        end
 
       {:ok, :eof, rest} ->
-        headers = Headers.remove_unallowed_trailer(headers)
+        case add_header_bytes(conn, conn.request, byte_size(data) - byte_size(rest)) do
+          {:ok, _request} ->
+            headers = Headers.remove_unallowed_trailer(headers)
 
-        responses = [
-          {:done, conn.request.ref}
-          | add_trailer_headers(headers, conn.request.ref, responses)
-        ]
+            responses = [
+              {:done, conn.request.ref}
+              | add_trailer_headers(headers, conn.request.ref, responses)
+            ]
 
-        conn = request_done(conn)
-        next_request(conn, rest, responses)
+            conn = request_done(conn)
+            next_request(conn, rest, responses)
+
+          {:error, reason} ->
+            {:error, conn, wrap_error(reason), responses}
+        end
 
       :more ->
-        request = %{conn.request | body: {:chunked, :trailer}, headers_buffer: headers}
-        conn = %{conn | buffer: data, request: request}
-        {:ok, conn, responses}
+        case check_header_section_size(conn, conn.request.headers_size + byte_size(data)) do
+          :ok ->
+            request = %{conn.request | body: {:chunked, :trailer}, headers_buffer: headers}
+            conn = %{conn | buffer: data, request: request}
+            {:ok, conn, responses}
+
+          {:error, reason} ->
+            {:error, conn, wrap_error(reason), responses}
+        end
 
       :error ->
         {:error, conn, wrap_error(:invalid_trailer_header), responses}
@@ -923,6 +977,23 @@ defmodule Mint.HTTP1 do
 
   defp add_trailer_headers(headers, request_ref, responses),
     do: [{:headers, request_ref, Enum.reverse(headers)} | responses]
+
+  defp add_header_bytes(conn, request, bytes) do
+    size = request.headers_size + bytes
+
+    with :ok <- check_header_section_size(conn, size) do
+      {:ok, %{request | headers_size: size}}
+    end
+  end
+
+  defp check_header_section_size(%{max_header_list_size: :infinity}, _size), do: :ok
+
+  defp check_header_section_size(%{max_header_list_size: max_size}, size)
+       when size <= max_size,
+       do: :ok
+
+  defp check_header_section_size(%{max_header_list_size: max_size}, size),
+    do: {:error, {:max_header_list_size_exceeded, size, max_size}}
 
   defp add_body(conn, data, responses) do
     conn = update_in(conn.request.data_buffer, &[&1 | data])
@@ -1084,6 +1155,7 @@ defmodule Mint.HTTP1 do
       version: nil,
       status: nil,
       headers_buffer: [],
+      headers_size: 0,
       data_buffer: [],
       content_length: nil,
       connection: [],
@@ -1172,6 +1244,11 @@ defmodule Mint.HTTP1 do
 
   def format_error(:invalid_header) do
     "invalid header"
+  end
+
+  def format_error({:max_header_list_size_exceeded, size, max_size}) do
+    "the response header or trailer section (#{size} bytes) exceeds the maximum allowed size of " <>
+      "#{max_size} bytes"
   end
 
   def format_error({:invalid_request_target, target}) do

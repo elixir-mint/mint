@@ -73,6 +73,26 @@ defmodule Mint.HTTP1Test do
     assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
   end
 
+  test "limits the size of a response header section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 10)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 11, 10}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
+  test "limits an incomplete response header section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 9)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 10, 9}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+  end
+
   test "status and headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -352,6 +372,19 @@ defmodule Mint.HTTP1Test do
     assert done == {:done, ref}
 
     assert conn.buffer == "XXX"
+  end
+
+  test "limits the size of a chunked trailer section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 30)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\nfoo: " <> String.duplicate("x", 25) <> "\r\n"
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 32, 30}},
+            [{:data, _, "X"}, {:headers, _, _}, {:status, _, 200}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
   end
 
   test "100 Continue informational response followed by final response", %{conn: conn} do

@@ -226,6 +226,10 @@ defmodule Mint.HTTP do
       section](#module-logging) in the module documentation. Defaults to `false`.
       *Available since v1.5.0*.
 
+    * `:max_header_list_size` - (positive integer or `:infinity`) the maximum size, in
+      **bytes**, of an HTTP/1 response header section or chunked trailer section. Defaults to
+      256 KiB. This option is only used for HTTP/1 connections. *Available since 1.9.2*.
+
   The following options are HTTP/1-specific and will force the connection
   to be an HTTP/1 connection.
 
