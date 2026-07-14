@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.2
+
+  * Cap HTTP/1 total header size for responses. This is a fix for **CVE-2026-58229** (GitHub advisory [GHSA-qrfr-wh4c-3qhw](https://github.com/elixir-mint/mint/security/advisories/GHSA-qrfr-wh4c-3qhw)).
+  * Do not store empty `CONTINUATION` (HTTP/2) frames. This is a fix for **CVE-2026-59246** (GitHub advisory [GHSA-8pf6-g464-h6h9](https://github.com/elixir-mint/mint/security/advisories/GHSA-8pf6-g464-h6h9)).
+
 ## v1.9.1
 
 ### Security
