@@ -147,8 +147,13 @@ defmodule Mint.HTTP2.Frame do
 
     {exclusive?, stream_dependency, weight, data} =
       if flag_set?(flags, :headers, :priority) do
-        <<exclusive::1, stream_dependency::31, weight::8, rest::binary>> = data
-        {exclusive == 1, stream_dependency, weight + 1, rest}
+        case data do
+          <<exclusive::1, stream_dependency::31, weight::8, rest::binary>> ->
+            {exclusive == 1, stream_dependency, weight + 1, rest}
+
+          _other ->
+            throw({:mint, {:frame_size_error, :headers}})
+        end
       else
         {nil, nil, nil, data}
       end
@@ -206,15 +211,20 @@ defmodule Mint.HTTP2.Frame do
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.6
   defp decode_push_promise(flags, stream_id, payload) do
     {data, padding} = decode_padding(:push_promise, flags, payload)
-    <<_reserved::1, promised_stream_id::31, header_block_fragment::binary>> = data
 
-    push_promise(
-      stream_id: stream_id,
-      flags: flags,
-      promised_stream_id: promised_stream_id,
-      hbf: header_block_fragment,
-      padding: padding
-    )
+    case data do
+      <<_reserved::1, promised_stream_id::31, header_block_fragment::binary>> ->
+        push_promise(
+          stream_id: stream_id,
+          flags: flags,
+          promised_stream_id: promised_stream_id,
+          hbf: header_block_fragment,
+          padding: padding
+        )
+
+      _other ->
+        throw({:mint, {:frame_size_error, :push_promise}})
+    end
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.7
@@ -228,15 +238,19 @@ defmodule Mint.HTTP2.Frame do
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.8
   defp decode_goaway(flags, stream_id, payload) do
-    <<_reserved::1, last_stream_id::31, error_code::32, debug_data::binary>> = payload
+    case payload do
+      <<_reserved::1, last_stream_id::31, error_code::32, debug_data::binary>> ->
+        goaway(
+          stream_id: stream_id,
+          flags: flags,
+          last_stream_id: last_stream_id,
+          error_code: humanize_error_code(error_code),
+          debug_data: debug_data
+        )
 
-    goaway(
-      stream_id: stream_id,
-      flags: flags,
-      last_stream_id: last_stream_id,
-      error_code: humanize_error_code(error_code),
-      debug_data: debug_data
-    )
+      _other ->
+        throw({:mint, {:frame_size_error, :goaway}})
+    end
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.9
