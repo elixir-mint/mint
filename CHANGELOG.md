@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.9.3
 
   * Prevent signed integers when parsing HTTP/1 chunk sizes. This is a fix for **CVE-2026-59249** ([GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-x3x7-96vm-6h2w)).
 
