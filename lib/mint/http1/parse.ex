@@ -7,6 +7,12 @@ defmodule Mint.HTTP1.Parse do
   defmacro is_comma(char), do: quote(do: unquote(char) == ?,)
   defmacro is_vchar(char), do: quote(do: unquote(char) in 33..126)
 
+  defmacro is_hex_digit(char) do
+    quote do
+      is_digit(unquote(char)) or unquote(char) in ?a..?f or unquote(char) in ?A..?F
+    end
+  end
+
   defmacro is_tchar(char) do
     quote do
       is_digit(unquote(char)) or is_alpha(unquote(char)) or unquote(char) in ~c"!#$%&'*+-.^_`|~"
@@ -16,6 +22,23 @@ defmodule Mint.HTTP1.Parse do
   def ignore_until_crlf(<<>>), do: :more
   def ignore_until_crlf(<<"\r\n", rest::binary>>), do: {:ok, rest}
   def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
+
+  def chunk_size(<<char, rest::binary>>) when is_hex_digit(char) do
+    parse_hex_prefix(rest, hex_digit_value(char))
+  end
+
+  def chunk_size(_other), do: :error
+
+  defp parse_hex_prefix(<<char, rest::binary>>, acc) when is_hex_digit(char) do
+    parse_hex_prefix(rest, acc * 16 + hex_digit_value(char))
+  end
+
+  defp parse_hex_prefix(<<>>, _acc), do: :more
+  defp parse_hex_prefix(rest, acc), do: {:ok, acc, rest}
+
+  defp hex_digit_value(char) when is_digit(char), do: char - ?0
+  defp hex_digit_value(char) when char in ?a..?f, do: char - ?a + 10
+  defp hex_digit_value(char) when char in ?A..?F, do: char - ?A + 10
 
   def content_length_header(string) do
     trimmed = String.trim_trailing(string)

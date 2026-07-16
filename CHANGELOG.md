@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+  * Prevent signed integers when parsing HTTP/1 chunk sizes. This is a fix for **CVE-2026-59249** ([GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-x3x7-96vm-6h2w)).
+
 ## v1.9.2
 
   * Cap HTTP/1 total header size for responses. This is a fix for **CVE-2026-58229** (GitHub advisory [GHSA-qrfr-wh4c-3qhw](https://github.com/elixir-mint/mint/security/advisories/GHSA-qrfr-wh4c-3qhw)).

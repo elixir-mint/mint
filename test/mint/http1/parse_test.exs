@@ -4,6 +4,18 @@ defmodule Mint.HTTP1.ParseTest do
 
   import Mint.HTTP1.Parse
 
+  test "chunk_size/1" do
+    assert chunk_size("0\r\n") == {:ok, 0, "\r\n"}
+    assert chunk_size("aF;extension\r\n") == {:ok, 175, ";extension\r\n"}
+    assert chunk_size("2meta\r\n") == {:ok, 2, "meta\r\n"}
+    assert chunk_size("F") == :more
+
+    assert chunk_size("+5\r\n") == :error
+    assert chunk_size("+0\r\n") == :error
+    assert chunk_size("-0\r\n") == :error
+    assert chunk_size("") == :error
+  end
+
   test "content_length_header/1" do
     assert content_length_header("0") == {:ok, 0}
     assert content_length_header("100") == {:ok, 100}

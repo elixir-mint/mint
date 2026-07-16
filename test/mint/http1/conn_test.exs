@@ -290,6 +290,19 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  for chunk_size <- ["+5", "+0", "-0"] do
+    test "rejects signed chunk size #{chunk_size}", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+          unquote(chunk_size) <> "\r\nHELLO\r\n0\r\n\r\n"
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_chunk_size}, _responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+    end
+  end
+
   test "body with chunked transfer-encoding streamed bytewise", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 

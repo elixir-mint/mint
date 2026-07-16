@@ -847,21 +847,21 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_body({:chunked, nil}, conn, data, request_ref, responses) do
-    case Integer.parse(data, 16) do
-      {_size, ""} ->
+    case Parse.chunk_size(data) do
+      :more ->
         conn = put_in(conn.buffer, data)
         conn = put_in(conn.request.body, {:chunked, nil})
         {:ok, conn, responses}
 
-      {0, rest} ->
+      {:ok, 0, rest} ->
         # Manually collapse the body buffer since we're done with the body
         {conn, responses} = collapse_body_buffer(conn, responses)
         decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
 
-      {size, rest} when size > 0 ->
+      {:ok, size, rest} ->
         decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
 
-      _other ->
+      :error ->
         {:error, conn, wrap_error(:invalid_chunk_size), responses}
     end
   end
