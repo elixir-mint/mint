@@ -29,6 +29,10 @@ defmodule Mint.HttpBin do
     get_env_port("TINYPROXY_AUTH_PORT", 8889)
   end
 
+  def https_proxy_port() do
+    get_env_port("SQUID_HTTPS_PORT", 8890)
+  end
+
   def https_transport_opts() do
     [cacertfile: "caddy_storage/pki/authorities/local/root.crt"]
   end

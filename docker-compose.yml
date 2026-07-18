@@ -11,6 +11,13 @@ services:
     ports:
       - "${TINYPROXY_AUTH_PORT:-8889}:8888"
 
+  proxy-https:
+    build: ./test/docker/squid-https
+    ports:
+      # Bound to loopback: this is an unauthenticated open proxy, it must not
+      # be reachable from other hosts while the test suite runs.
+      - "127.0.0.1:${SQUID_HTTPS_PORT:-8890}:3129"
+
   httpbin:
     image: docker.io/kennethreitz/httpbin:latest
     platform: linux/amd64
