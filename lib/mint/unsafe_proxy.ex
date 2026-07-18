@@ -212,7 +212,7 @@ defmodule Mint.UnsafeProxy do
   # already provided one) so Mint.HTTP1's `put_new` leaves the origin's Host in
   # place.
   defp put_new_host_header(headers, conn) do
-    if Enum.any?(headers, fn {name, _value} -> String.downcase(name, :ascii) == "host" end) do
+    if Enum.any?(headers, fn {name, _value} -> Mint.Core.Headers.lower_raw(name) == "host" end) do
       headers
     else
       [{"Host", host_header_value(conn)} | headers]
