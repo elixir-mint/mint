@@ -81,7 +81,7 @@ defmodule Mint.UnsafeProxy do
         body \\ nil
       ) do
     path = request_line(conn, path)
-    headers = headers ++ conn.proxy_headers
+    headers = put_new_host_header(headers, conn) ++ conn.proxy_headers
 
     case module.request(state, method, path, headers, body) do
       {:ok, state, request} -> {:ok, %{conn | state: state}, request}
@@ -203,5 +203,29 @@ defmodule Mint.UnsafeProxy do
   @impl true
   def request_body_window(%__MODULE__{module: module, state: state}, ref) do
     module.request_body_window(state, ref)
+  end
+
+  # When proxying over plain HTTP, the request is sent to the proxy but its Host
+  # header must identify the origin server, not the proxy (RFC 7230, sec. 5.4).
+  # Mint.HTTP1 would otherwise default the Host header to the proxy's address,
+  # since its connection points at the proxy. We set it here (unless the caller
+  # already provided one) so Mint.HTTP1's `put_new` leaves the origin's Host in
+  # place.
+  defp put_new_host_header(headers, conn) do
+    if Enum.any?(headers, fn {name, _value} -> String.downcase(name, :ascii) == "host" end) do
+      headers
+    else
+      [{"Host", host_header_value(conn)} | headers]
+    end
+  end
+
+  # Mirrors the default-port handling in Mint.HTTP1: omit the port when it is the
+  # default for the scheme.
+  defp host_header_value(%UnsafeProxy{scheme: scheme, hostname: hostname, port: port}) do
+    if URI.default_port(Atom.to_string(scheme)) == port do
+      hostname
+    else
+      "#{hostname}:#{port}"
+    end
   end
 end
