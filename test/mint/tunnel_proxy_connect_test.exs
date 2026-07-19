@@ -37,6 +37,16 @@ defmodule Mint.TunnelProxyConnectTest do
     assert merge_body(rest, request) == "hello"
   end
 
+  test "IPv6 address targets produce a bracketed CONNECT authority" do
+    {proxy_port, proxy_ref} = start_capturing_proxy()
+
+    assert {:error, _reason} =
+             HTTP.connect(:https, "::1", 443, proxy: {:http, "localhost", proxy_port, []})
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert head =~ "CONNECT [::1]:443 HTTP/1.1\r\n"
+  end
+
   # Starts a one-shot CONNECT proxy that accepts a single connection, reports
   # the raw CONNECT request head to the test process, replies with the given
   # response, and then blindly relays bytes to the requested host.
@@ -67,6 +77,27 @@ defmodule Mint.TunnelProxyConnectTest do
       :ok = :gen_tcp.send(socket, connect_response)
       :ok = :inet.setopts(socket, active: true)
       relay(socket, origin_socket)
+    end)
+
+    {port, ref}
+  end
+
+  # Starts a one-shot server that accepts a single connection, reports the raw
+  # request head to the test process, and closes the connection.
+  defp start_capturing_proxy do
+    test_pid = self()
+    ref = make_ref()
+
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, mode: :binary, packet: :raw, active: false, reuseaddr: true)
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    spawn_link(fn ->
+      {:ok, socket} = :gen_tcp.accept(listen_socket)
+      send(test_pid, {ref, :connect, recv_request_head(socket)})
+      :gen_tcp.close(socket)
+      :gen_tcp.close(listen_socket)
     end)
 
     {port, ref}

@@ -18,7 +18,7 @@ defmodule Mint.TunnelProxy do
     {_scheme, address, port, opts} = host
     hostname = Mint.Core.Util.hostname(opts, address)
 
-    path = "#{hostname}:#{port}"
+    path = connect_authority(hostname, port)
 
     with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_address, proxy_port, proxy_opts),
          timeout_deadline = timeout_deadline(proxy_opts),
@@ -105,6 +105,16 @@ defmodule Mint.TunnelProxy do
 
   defp handle_responses(_ref, _timeout_deadline, []) do
     :more
+  end
+
+  # IPv6 addresses must be enclosed in square brackets in the authority-form
+  # request target (RFC 3986, section 3.2.2).
+  defp connect_authority(hostname, port) do
+    if String.contains?(hostname, ":") do
+      "[#{hostname}]:#{port}"
+    else
+      "#{hostname}:#{port}"
+    end
   end
 
   defp timeout_deadline(opts) do
