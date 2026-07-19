@@ -92,7 +92,7 @@ defmodule Mint.TunnelProxy do
       {:status, ^ref, status} ->
         {:error, wrap_error({:proxy, {:unexpected_status, status}})}
 
-      {:headers, ^ref, headers} when responses == [] ->
+      {:headers, ^ref, headers} when responses == [] or responses == [{:done, ref}] ->
         {:done, headers}
 
       {:headers, ^ref, _headers} ->

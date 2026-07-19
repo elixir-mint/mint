@@ -1093,7 +1093,13 @@ defmodule Mint.HTTP1 do
       method == "HEAD" or status in [204, 304] ->
         {:ok, :none}
 
-      # method == "CONNECT" and status in 200..299 -> nil
+      # RFC9110 9.3.6:
+      # > A server MUST NOT send any Transfer-Encoding or Content-Length header
+      # > fields in a 2xx (Successful) response to CONNECT. A client MUST ignore
+      # > any Content-Length or Transfer-Encoding header fields received in a
+      # > successful response to CONNECT.
+      method == "CONNECT" and status in 200..299 ->
+        {:ok, :none}
 
       request.transfer_encoding != [] && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
