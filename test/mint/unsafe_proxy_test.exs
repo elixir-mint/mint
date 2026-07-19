@@ -11,8 +11,8 @@ defmodule Mint.UnsafeProxyTest do
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", HttpBin.proxy_port()},
-               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+               {:http, "localhost", HttpBin.proxy_port(), []},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port(), []}
              )
 
     assert {:ok, conn, request} = UnsafeProxy.request(conn, "GET", "/", [], nil)
@@ -73,8 +73,8 @@ defmodule Mint.UnsafeProxyTest do
   test "Mint.HTTP.protocol/1 on an unsafe proxy connection" do
     assert {:ok, %UnsafeProxy{} = conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", HttpBin.proxy_port()},
-               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+               {:http, "localhost", HttpBin.proxy_port(), []},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port(), []}
              )
 
     assert Mint.HTTP.protocol(conn) == :http1
@@ -86,8 +86,8 @@ defmodule Mint.UnsafeProxyTest do
 
     assert {:ok, %UnsafeProxy{state: %{socket: socket}} = conn} =
              UnsafeProxy.connect(
-               {:http, "localhost", HttpBin.proxy_port()},
-               {:http, HttpBin.proxy_host(), HttpBin.http_port()}
+               {:http, "localhost", HttpBin.proxy_port(), []},
+               {:http, HttpBin.proxy_host(), HttpBin.http_port(), []}
              )
 
     assert is_connection_message(conn, {:tcp, socket, "foo"}) == true

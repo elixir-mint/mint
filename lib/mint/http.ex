@@ -432,10 +432,9 @@ defmodule Mint.HTTP do
       {:ok, {proxy_scheme, proxy_address, proxy_port, proxy_opts}} ->
         case Util.scheme_to_transport(scheme) do
           Transport.TCP ->
-            proxy = {proxy_scheme, proxy_address, proxy_port}
-            host = {scheme, address, port}
-            opts = Keyword.merge(opts, proxy_opts)
-            UnsafeProxy.connect(proxy, host, opts)
+            proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}
+            host = {scheme, address, port, opts}
+            UnsafeProxy.connect(proxy, host)
 
           Transport.SSL ->
             proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}

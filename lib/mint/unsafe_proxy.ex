@@ -16,16 +16,16 @@ defmodule Mint.UnsafeProxy do
 
   @opaque t() :: %UnsafeProxy{}
 
-  @type host_triple() :: {Types.scheme(), address :: Types.address(), :inet.port_number()}
+  @type host_tuple() ::
+          {Types.scheme(), address :: Types.address(), :inet.port_number(), opts :: keyword()}
 
-  @spec connect(host_triple(), host_triple(), opts :: keyword()) ::
-          {:ok, t()} | {:error, Types.error()}
-  def connect(proxy, host, opts \\ []) do
-    {proxy_scheme, proxy_address, proxy_port} = proxy
-    {scheme, address, port} = host
+  @spec connect(host_tuple(), host_tuple()) :: {:ok, t()} | {:error, Types.error()}
+  def connect(proxy, host) do
+    {proxy_scheme, proxy_address, proxy_port, proxy_opts} = proxy
+    {scheme, address, port, opts} = host
     hostname = Mint.Core.Util.hostname(opts, address)
 
-    with {:ok, state} <- Mint.HTTP1.connect(proxy_scheme, proxy_address, proxy_port, opts) do
+    with {:ok, state} <- Mint.HTTP1.connect(proxy_scheme, proxy_address, proxy_port, proxy_opts) do
       conn = %UnsafeProxy{
         scheme: scheme,
         hostname: hostname,
