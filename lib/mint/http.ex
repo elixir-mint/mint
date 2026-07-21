@@ -296,6 +296,39 @@ defmodule Mint.HTTP do
       this time, `connect/4` returns a `Mint.HTTPError` with reason
       `{:proxy, :tunnel_timeout}`. Defaults to `30_000` (30 seconds).
 
+  ### Proxying over HTTP/2
+
+  The `:proxy` option always speaks HTTP/1 to the proxy. The connection tunneled
+  *through* the proxy can still be HTTP/2 (negotiated via ALPN), but the `CONNECT`
+  exchange with the proxy itself is HTTP/1. Mint doesn't drive an HTTP/2 connection
+  to the proxy from `connect/4` on purpose: the benefit of HTTP/2 `CONNECT` is
+  multiplexing many tunnels over a single proxy connection, which means sharing that
+  connection across Mint connections. That is the job of a connection pool built on
+  top of Mint, not of a single connection.
+
+  To tunnel through a proxy over HTTP/2, connect to the proxy with `Mint.HTTP2` and
+  open one `CONNECT` stream per tunnel (see the "CONNECT requests" section in
+  `Mint.HTTP2.request/5`):
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, proxy_host, proxy_port)
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+  Once the proxy replies with a `{:status, ref, 200}` response, the stream is a byte
+  tunnel: send bytes to the target with `Mint.HTTP2.stream_request_body/3` and receive
+  bytes from the target as `{:data, ref, data}` responses.
+
+  To run TLS (or a whole Mint connection) *inside* such a tunnel, you need a relay:
+  `:ssl` can't run over an arbitrary byte stream, so a process has to own the proxy
+  connection and relay bytes between the `CONNECT` stream and a local TCP socket. The
+  inner connection then dials the relay while keeping the identity of the real host
+  through the `:hostname` option:
+
+      Mint.HTTP.connect(:https, relay_address, relay_port, hostname: "example.com")
+
+  so that SNI, certificate verification, and the request `Host` header all target the
+  real host. This is the natural shape for pooling libraries, which can multiplex many
+  tunnels over one proxy connection.
+
   ## Transport options
 
   The options specified in `:transport_opts` are passed to the module that
@@ -610,6 +643,12 @@ defmodule Mint.HTTP do
   to your request. If you're using HTTP/2 and streaming the request, you may provide the
   `content-length` header yourself. If you're using HTTP/1, Mint will do chunked
   transfer-encoding when a content-length is not provided (see `Mint.HTTP1.request/5`).
+
+  ## CONNECT requests
+
+  For requests with the `CONNECT` method, `path` is the target of the tunnel in
+  *authority form* (`"host:port"`), not a path. See `Mint.HTTP2.request/5` for HTTP/2
+  tunnel semantics, including the extended CONNECT protocol.
 
   ## Examples
 

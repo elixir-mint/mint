@@ -1151,18 +1151,18 @@ defmodule Mint.HTTP2Test do
       assert cookie == "a=b; c=d; e=f; g=h"
     end
 
-    test "a CONNECT request omits :scheme and :path pseudo-headers", %{conn: conn} do
-      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", [], nil)
+    test "a CONNECT request uses path as :authority and omits :scheme and :path", %{conn: conn} do
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames [headers(hbf: hbf) = frame]
 
-      refute hbf
-             |> server_decode_headers()
-             |> List.keymember?(":scheme", 0)
+      assert [
+               {":method", "CONNECT"},
+               {":authority", "example.com:443"},
+               {"user-agent", _}
+             ] = server_decode_headers(hbf)
 
-      refute hbf
-             |> server_decode_headers()
-             |> List.keymember?(":path", 0)
+      refute flag_set?(headers(frame, :flags), :headers, :end_stream)
 
       assert HTTP2.open?(conn)
     end
@@ -1176,13 +1176,15 @@ defmodule Mint.HTTP2Test do
         {":protocol", "websocket"}
       ]
 
-      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", headers, :stream)
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/ws", headers, :stream)
 
       assert_recv_frames [headers(hbf: hbf)]
 
+      connection_authority = conn.authority
+
       assert [
                {":method", "CONNECT"},
-               {":authority", _},
+               {":authority", ^connection_authority},
                {":scheme", _},
                {":path", "/ws"},
                {":protocol", "websocket"},
@@ -2405,6 +2407,172 @@ defmodule Mint.HTTP2Test do
 
     test "get_client_setting/2", %{conn: conn} do
       assert HTTP2.get_client_setting(conn, :max_concurrent_streams) == 100
+    end
+  end
+
+  describe "CONNECT tunnels" do
+    test "tunnels bytes in both directions", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:80", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "hello")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "hello") = data_frame]
+      refute flag_set?(data(data_frame, :flags), :data, :end_stream)
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "world"}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "world", flags: set_flags(:data, []))
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "again")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "again")]
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "content-length: 0 on the response does not end the tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}, {"content-length", "0"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "tunneled", flags: set_flags(:data, []))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, [{"content-length", "0"}]},
+               {:data, ref, "tunneled"}
+             ]
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "out")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "out")]
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "an END_STREAM from the server closes the whole tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "bye", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:data, ref, "bye"},
+               {:done, ref}
+             ]
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "x")
+      assert_http2_error error, :unknown_request_to_stream
+
+      assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.open?(conn)
+    end
+
+    test "an :eof from the client half-closes the tunnel and data can still be received",
+         %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "last")
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, :eof)
+
+      assert_recv_frames [
+        data(stream_id: ^stream_id, data: "last") = data1,
+        data(stream_id: ^stream_id, data: "") = data2
+      ]
+
+      refute flag_set?(data(data1, :flags), :data, :end_stream)
+      assert flag_set?(data(data2, :flags), :data, :end_stream)
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "still coming"}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "still coming", flags: set_flags(:data, []))
+               ])
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, ""}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert_recv_frames []
+
+      assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.open?(conn)
+    end
+
+    test "a CONNECT request with a nil body opens a receive-only tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], nil)
+
+      assert_recv_frames [headers(stream_id: stream_id) = headers_frame]
+      assert flag_set?(headers(headers_frame, :flags), :headers, :end_stream)
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn,
+              [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "in"}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "in", flags: set_flags(:data, []))
+               ])
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "x")
+      assert_http2_error error, :request_is_not_streaming
+
+      assert HTTP2.open?(conn)
     end
   end
 
