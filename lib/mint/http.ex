@@ -230,9 +230,6 @@ defmodule Mint.HTTP do
       **bytes**, of an HTTP/1 response header section or chunked trailer section. Defaults to
       256 KiB. This option is only used for HTTP/1 connections. *Available since 1.9.2*.
 
-  The following options are HTTP/1-specific and will force the connection
-  to be an HTTP/1 connection.
-
     * `:proxy` - a `{scheme, address, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.
 
@@ -278,15 +275,17 @@ defmodule Mint.HTTP do
   You can set up proxying through the `:proxy` option, which is a tuple
   `{scheme, address, port, opts}` that identifies the proxy to connect to.
   Once a proxied connection is returned, the proxy is transparent to you and you
-  can use the connection like a normal HTTP/1 connection.
+  can use the connection like a normal connection.
 
-  If the `scheme` is `:http`, we will connect to the host in the most compatible
-  way, supporting older proxy servers. Data will be sent in clear text.
+  If the connection scheme is `:http`, requests are forwarded through the proxy
+  in the most compatible way, supporting older proxy servers. Data will be sent
+  in clear text.
 
-  If the connection scheme is `:https`, we will connect to the host with a tunnel
-  through the proxy. Using `:https` for both the proxy and the connection scheme
-  is not supported, it is recommended to use `:https` for the end host connection
-  instead of the proxy.
+  If the connection scheme is `:https`, a tunnel through the proxy is established
+  with the `CONNECT` method. If the proxy `scheme` is `:http`, the `CONNECT`
+  request is sent in clear text; if it is `:https`, the connection to the proxy
+  uses TLS and the TLS session to the host is nested inside it. *HTTPS proxies
+  for HTTPS connections are available since v1.10.0*.
 
   ## Transport options
 
@@ -413,6 +412,11 @@ defmodule Mint.HTTP do
   Using a proxy:
 
       proxy = {:http, "myproxy.example.com", 80, []}
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
+
+  Using an HTTPS proxy:
+
+      proxy = {:https, "myproxy.example.com", 443, []}
       {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
 
   Forcing the connection to be an HTTP/2 connection:

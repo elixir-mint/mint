@@ -114,6 +114,47 @@ defmodule Mint.TunnelProxyTest do
     assert merge_body(responses, request) =~ "mint/"
   end
 
+  test "200 response through an HTTPS proxy - https://httpbin.org" do
+    assert {:ok, conn} =
+             Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
+               proxy:
+                 {:https, "localhost", HttpBin.https_proxy_port(),
+                  [transport_opts: [verify: :verify_none]]},
+               transport_opts: HttpBin.https_transport_opts()
+             )
+
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
+    assert {:ok, _conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert is_list(headers)
+    assert merge_body(responses, request) =~ "httpbin"
+  end
+
+  test "200 response through an HTTPS proxy with explicit http2 - https://httpbin.org" do
+    assert {:ok, conn} =
+             Mint.HTTP.connect(:https, HttpBin.proxy_host(), HttpBin.https_port(),
+               proxy:
+                 {:https, "localhost", HttpBin.https_proxy_port(),
+                  [transport_opts: [verify: :verify_none]]},
+               transport_opts: HttpBin.https_transport_opts(),
+               protocols: [:http2]
+             )
+
+    assert conn.__struct__ == Mint.HTTP2
+
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/user-agent", [], nil)
+    assert {:ok, _conn, responses} = receive_stream(conn)
+
+    assert [status, headers | responses] = responses
+    assert {:status, ^request, 200} = status
+    assert {:headers, ^request, headers} = headers
+    assert is_list(headers)
+    assert merge_body(responses, request) =~ "mint/"
+  end
+
   test "200 response without explicit http2 - https://httpbin.org" do
     assert {:ok, conn} =
              Mint.TunnelProxy.connect(
@@ -135,29 +176,5 @@ defmodule Mint.TunnelProxyTest do
     assert {:headers, ^request, headers} = headers
     assert is_list(headers)
     assert merge_body(responses, request) =~ "mint/"
-  end
-
-  @tag :skip
-  test "do not support nested HTTPS connections - https://httpbin.org" do
-    assert {:ok, conn} =
-             Mint.TunnelProxy.connect(
-               {:https, "localhost", HttpBin.proxy_port(), []},
-               {:https, HttpBin.proxy_host(), HttpBin.https_port(),
-                [transport_opts: HttpBin.https_transport_opts()]}
-             )
-
-    assert conn.__struct__ == Mint.HTTP1
-
-    assert [{"proxy-agent", <<"tinyproxy/", _version::binary>>}] =
-             Mint.HTTP.get_proxy_headers(conn)
-
-    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
-    assert {:ok, _conn, responses} = receive_stream(conn)
-
-    assert [status, headers | responses] = responses
-    assert {:status, ^request, 200} = status
-    assert {:headers, ^request, headers} = headers
-    assert is_list(headers)
-    assert merge_body(responses, request) =~ "httpbin"
   end
 end

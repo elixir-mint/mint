@@ -117,6 +117,9 @@ defmodule Mint.Negotiate do
       {:ok, transport_state} ->
         alpn_negotiate(new_scheme, transport_state, hostname, port, opts)
 
+      {:error, %TransportError{} = error} ->
+        {:error, error}
+
       {:error, reason} ->
         {:error, %TransportError{reason: reason}}
     end

@@ -1,4 +1,4 @@
-lib/mint/tunnel_proxy.ex:49
+lib/mint/tunnel_proxy.ex:50
 lib/mint/http1.ex:999
 lib/mint/unsafe_proxy.ex:173
 lib/mint/unsafe_proxy.ex:198
