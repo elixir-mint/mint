@@ -37,6 +37,24 @@ defmodule Mint.TunnelProxyConnectTest do
     assert merge_body(rest, request) == "hello"
   end
 
+  test "a proxy that stalls the CONNECT response yields a tunnel timeout error" do
+    proxy_port = start_silent_proxy()
+
+    assert {:error, %Mint.HTTPError{reason: {:proxy, :tunnel_timeout}}} =
+             HTTP.connect(:https, "localhost", 443,
+               proxy: {:http, "localhost", proxy_port, [tunnel_timeout: 50]}
+             )
+  end
+
+  test "an already-elapsed tunnel deadline yields a tunnel timeout error instead of crashing" do
+    proxy_port = start_silent_proxy()
+
+    assert {:error, %Mint.HTTPError{reason: {:proxy, :tunnel_timeout}}} =
+             HTTP.connect(:https, "localhost", 443,
+               proxy: {:http, "localhost", proxy_port, [tunnel_timeout: -1]}
+             )
+  end
+
   test "IPv6 address targets produce a bracketed CONNECT authority" do
     {proxy_port, proxy_ref} = start_capturing_proxy()
 
@@ -80,6 +98,25 @@ defmodule Mint.TunnelProxyConnectTest do
     end)
 
     {port, ref}
+  end
+
+  # Starts a one-shot proxy that accepts a single connection and never
+  # responds.
+  defp start_silent_proxy do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, mode: :binary, packet: :raw, active: false, reuseaddr: true)
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    spawn_link(fn ->
+      {:ok, socket} = :gen_tcp.accept(listen_socket)
+
+      receive do
+        :stop -> :gen_tcp.close(socket)
+      end
+    end)
+
+    port
   end
 
   # Starts a one-shot server that accepts a single connection, reports the raw
