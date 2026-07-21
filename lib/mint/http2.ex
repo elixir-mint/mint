@@ -524,10 +524,11 @@ defmodule Mint.HTTP2 do
 
   You can open a tunnel to a target host through the server with the `CONNECT`
   method ([RFC 9113, section 8.5](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.5)).
-  For `CONNECT` requests, `path` is not a path: it's the host and port of the tunnel
-  target, such as `"example.com:443"` (IPv6 addresses must be enclosed in square
-  brackets). Mint sends it as the `:authority` pseudo-header and omits the `:scheme`
-  and `:path` pseudo-headers. *Available since v1.10.0*.
+  For `CONNECT` requests (other than extended CONNECT, see below), `path` is not a
+  path: it's the host and port of the tunnel target, such as `"example.com:443"`
+  (IPv6 addresses must be enclosed in square brackets). Mint sends it as the
+  `:authority` pseudo-header and omits the `:scheme` and `:path` pseudo-headers.
+  *Available since v1.10.0*.
 
   Pass `:stream` as the body. Once the server replies with a 2xx status, the stream
   becomes a tunnel: iodata you pass to `stream_request_body/3` is delivered to the
@@ -547,8 +548,11 @@ defmodule Mint.HTTP2 do
   ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441.html)), which is used to bootstrap
   protocols such as WebSocket over HTTP/2. If you pass a `:protocol` pseudo-header in
   `headers`, the request is treated as an extended CONNECT request: you're expected to
-  also pass the `:scheme` and `:path` pseudo-headers explicitly, and Mint sets
-  `:authority` to the connection's authority, as in a normal request.
+  also pass the `:scheme` and `:path` pseudo-headers explicitly (the `path` argument is
+  not used), and Mint sets `:authority` to the connection's authority, as in a normal
+  request. Note that servers only allow extended CONNECT after advertising the
+  `:enable_connect_protocol` setting (see `get_server_setting/2`); Mint doesn't
+  enforce this, so it's up to you to check the setting first.
   """
   @impl true
   @spec request(

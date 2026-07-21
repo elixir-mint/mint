@@ -325,9 +325,12 @@ defmodule Mint.HTTP do
 
       Mint.HTTP.connect(:https, relay_address, relay_port, hostname: "example.com")
 
-  so that SNI, certificate verification, and the request `Host` header all target the
-  real host. This is the natural shape for pooling libraries, which can multiplex many
-  tunnels over one proxy connection.
+  so that SNI and certificate verification target the real host. Note that the default
+  request `Host` header (HTTP/1) and `:authority` pseudo-header (HTTP/2) contain the
+  port of the connection, which is the relay's port: either make the relay listen on
+  the target's port, or (on HTTP/1) pass an explicit `host` header with each request.
+  This is the natural shape for pooling libraries, which can multiplex many tunnels
+  over one proxy connection.
 
   ## Transport options
 
@@ -648,7 +651,7 @@ defmodule Mint.HTTP do
 
   For requests with the `CONNECT` method, `path` is the target of the tunnel in
   *authority form* (`"host:port"`), not a path. See `Mint.HTTP2.request/5` for HTTP/2
-  tunnel semantics, including the extended CONNECT protocol.
+  tunnel semantics and for the extended CONNECT protocol, where `path` doesn't apply.
 
   ## Examples
 
