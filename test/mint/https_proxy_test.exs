@@ -111,7 +111,8 @@ defmodule Mint.HTTPSProxyTest do
     end
 
     test "verifies the host certificate through the tunnel" do
-      %{server_config: server_config, client_config: client_config} = pkix_test_chain()
+      %{server_config: server_config, client_config: client_config} =
+        Mint.TestCertificates.pkix_test_chain()
 
       {:ok, proxy_port, proxy_ref} = TunnelProxyServer.start(server_config)
       {:ok, origin_port, _origin_ref} = start_http1_origin(server_config)
@@ -134,7 +135,8 @@ defmodule Mint.HTTPSProxyTest do
 
     @tag :capture_log
     test "fails when the host certificate is not trusted" do
-      %{server_config: server_config, client_config: client_config} = pkix_test_chain()
+      %{server_config: server_config, client_config: client_config} =
+        Mint.TestCertificates.pkix_test_chain()
 
       {:ok, proxy_port, proxy_ref} = TunnelProxyServer.start(server_config)
       {:ok, origin_port, _origin_ref} = start_http1_origin()
@@ -269,23 +271,5 @@ defmodule Mint.HTTPSProxyTest do
       {:ok, data} = :ssl.recv(socket, 0, 10_000)
       recv_until_blank_line(socket, buffer <> data)
     end
-  end
-
-  defp pkix_test_chain do
-    san_extension = {:Extension, {2, 5, 29, 17}, false, [dNSName: ~c"localhost"]}
-    cert_opts = [digest: :sha256, key: {:rsa, 2048, 17}]
-
-    :public_key.pkix_test_data(%{
-      server_chain: %{
-        root: cert_opts,
-        intermediates: [],
-        peer: cert_opts ++ [extensions: [san_extension]]
-      },
-      client_chain: %{
-        root: cert_opts,
-        intermediates: [],
-        peer: cert_opts
-      }
-    })
   end
 end

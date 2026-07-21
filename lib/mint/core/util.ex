@@ -3,7 +3,7 @@ defmodule Mint.Core.Util do
 
   alias Mint.Types
 
-  @spec hostname(keyword(), String.t()) :: String.t()
+  @spec hostname(keyword(), Types.address()) :: String.t()
   def hostname(opts, address) when is_list(opts) do
     case Keyword.fetch(opts, :hostname) do
       {:ok, hostname} ->

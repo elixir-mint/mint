@@ -45,7 +45,9 @@ defmodule Mint.UnsafeProxyOptsTest do
   end
 
   test "the target :hostname option is not used to verify the proxy certificate" do
-    %{server_config: server_config, client_config: client_config} = pkix_test_chain()
+    %{server_config: server_config, client_config: client_config} =
+      Mint.TestCertificates.pkix_test_chain()
+
     {proxy_port, proxy_ref} = start_tls_proxy(server_config)
 
     assert {:ok, conn} =
@@ -144,23 +146,5 @@ defmodule Mint.UnsafeProxyOptsTest do
       {:ok, data} = :gen_tcp.recv(socket, 0, 2000)
       recv_tcp_request_head(socket, buffer <> data)
     end
-  end
-
-  defp pkix_test_chain do
-    san_extension = {:Extension, {2, 5, 29, 17}, false, [dNSName: ~c"localhost"]}
-    cert_opts = [digest: :sha256, key: {:rsa, 2048, 17}]
-
-    :public_key.pkix_test_data(%{
-      server_chain: %{
-        root: cert_opts,
-        intermediates: [],
-        peer: cert_opts ++ [extensions: [san_extension]]
-      },
-      client_chain: %{
-        root: cert_opts,
-        intermediates: [],
-        peer: cert_opts
-      }
-    })
   end
 end
