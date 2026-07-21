@@ -17,7 +17,7 @@ defmodule Mint.TunnelProxyConnectTest do
   ]
 
   test "tunnels through a proxy that sends content-length: 0 in the CONNECT response" do
-    origin_port = start_tls_origin()
+    {origin_port, _origin_ref} = start_tls_origin()
 
     {proxy_port, proxy_ref} =
       start_connect_proxy("HTTP/1.1 200 Connection established\r\ncontent-length: 0\r\n\r\n")
@@ -63,6 +63,103 @@ defmodule Mint.TunnelProxyConnectTest do
 
     assert_receive {^proxy_ref, :connect, head}, 2000
     assert head =~ "CONNECT [::1]:443 HTTP/1.1\r\n"
+  end
+
+  test "the CONNECT authority and Host header use the address, not the :hostname identity" do
+    {proxy_port, proxy_ref} = start_capturing_proxy()
+
+    assert {:error, _reason} =
+             HTTP.connect(:https, "93.184.216.34", 443,
+               hostname: "example.com",
+               proxy: {:http, "localhost", proxy_port, []}
+             )
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert head =~ "CONNECT 93.184.216.34:443 HTTP/1.1\r\n"
+    assert host_header(head) == "host: 93.184.216.34:443"
+    refute head =~ "example.com"
+  end
+
+  test "a caller-supplied host header in :proxy_headers is not overridden" do
+    {proxy_port, proxy_ref} = start_capturing_proxy()
+
+    assert {:error, _reason} =
+             HTTP.connect(:https, "example.com", 443,
+               proxy: {:http, "localhost", proxy_port, []},
+               proxy_headers: [{"host", "other.example"}]
+             )
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert host_header(head) == "host: other.example"
+  end
+
+  test ":inet tuple addresses are formatted in the CONNECT authority" do
+    {proxy_port, proxy_ref} = start_capturing_proxy()
+
+    assert {:error, _reason} =
+             HTTP.connect(:https, {127, 0, 0, 1}, 443,
+               hostname: "localhost",
+               proxy: {:http, "localhost", proxy_port, []}
+             )
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert head =~ "CONNECT 127.0.0.1:443 HTTP/1.1\r\n"
+  end
+
+  test "IPv6 tuple addresses produce a bracketed CONNECT authority" do
+    {proxy_port, proxy_ref} = start_capturing_proxy()
+
+    assert {:error, _reason} =
+             HTTP.connect(:https, {0, 0, 0, 0, 0, 0, 0, 1}, 443,
+               hostname: "localhost",
+               proxy: {:http, "localhost", proxy_port, []}
+             )
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert head =~ "CONNECT [::1]:443 HTTP/1.1\r\n"
+  end
+
+  test "the tunnel TLS session verifies the certificate against the :hostname identity" do
+    %{server_config: server_config, client_config: client_config} =
+      Mint.TestCertificates.pkix_test_chain()
+
+    {origin_port, origin_ref} = start_tls_origin(server_config)
+    {proxy_port, proxy_ref} = start_connect_proxy("HTTP/1.1 200 OK\r\n\r\n")
+
+    assert {:ok, conn} =
+             HTTP.connect(:https, "127.0.0.1", origin_port,
+               hostname: "localhost",
+               proxy: {:http, "localhost", proxy_port, []},
+               transport_opts: [cacerts: client_config[:cacerts]]
+             )
+
+    assert_receive {^proxy_ref, :connect, head}, 2000
+    assert head =~ "CONNECT 127.0.0.1:#{origin_port} HTTP/1.1\r\n"
+
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
+
+    assert_receive {^origin_ref, :request, origin_head}, 2000
+    assert host_header(origin_head) == "host: localhost:#{origin_port}"
+
+    assert {:ok, _conn, responses} = receive_stream(conn)
+    assert [{:status, ^request, 200}, {:headers, ^request, _headers} | rest] = responses
+    assert merge_body(rest, request) == "hello"
+  end
+
+  @tag :capture_log
+  test "certificate verification fails when the :hostname identity does not match" do
+    %{server_config: server_config, client_config: client_config} =
+      Mint.TestCertificates.pkix_test_chain()
+
+    {origin_port, _origin_ref} = start_tls_origin(server_config)
+    {proxy_port, _proxy_ref} = start_connect_proxy("HTTP/1.1 200 OK\r\n\r\n")
+
+    assert {:error, %Mint.TransportError{}} =
+             HTTP.connect(:https, "127.0.0.1", origin_port,
+               hostname: "wrong.example",
+               proxy: {:http, "localhost", proxy_port, []},
+               transport_opts: [cacerts: client_config[:cacerts]]
+             )
   end
 
   # Starts a one-shot CONNECT proxy that accepts a single connection, reports
@@ -140,23 +237,31 @@ defmodule Mint.TunnelProxyConnectTest do
     {port, ref}
   end
 
-  defp start_tls_origin do
+  defp start_tls_origin(ssl_opts \\ @cert_opts) do
+    test_pid = self()
+    ref = make_ref()
     socket_opts = [mode: :binary, packet: :raw, active: false, reuseaddr: true]
-    {:ok, listen_socket} = :ssl.listen(0, socket_opts ++ @cert_opts)
+    {:ok, listen_socket} = :ssl.listen(0, socket_opts ++ ssl_opts)
     {:ok, {_address, port}} = :ssl.sockname(listen_socket)
 
     spawn_link(fn ->
       {:ok, socket} = :ssl.transport_accept(listen_socket)
-      {:ok, socket} = :ssl.handshake(socket, 10_000)
-      _request = recv_ssl_request_head(socket)
-      :ok = :ssl.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello")
 
-      receive do
-        :stop -> :ok
+      case :ssl.handshake(socket, 10_000) do
+        {:ok, socket} ->
+          send(test_pid, {ref, :request, recv_ssl_request_head(socket)})
+          :ok = :ssl.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello")
+
+          receive do
+            :stop -> :ok
+          end
+
+        {:error, _reason} ->
+          :ok
       end
     end)
 
-    port
+    {port, ref}
   end
 
   defp recv_request_head(socket, buffer \\ "") do
@@ -175,6 +280,13 @@ defmodule Mint.TunnelProxyConnectTest do
       {:ok, data} = :ssl.recv(socket, 0, 2000)
       recv_ssl_request_head(socket, buffer <> data)
     end
+  end
+
+  defp host_header(head) do
+    head
+    |> String.split("\r\n")
+    |> Enum.find(&(&1 |> String.downcase() |> String.starts_with?("host:")))
+    |> String.downcase()
   end
 
   defp relay(client_socket, origin_socket) do
