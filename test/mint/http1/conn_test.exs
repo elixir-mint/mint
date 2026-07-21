@@ -144,6 +144,42 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "no body in 2xx response to CONNECT request", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
+
+    assert conn.buffer == "XXX"
+  end
+
+  test "content-length is ignored in 2xx response to CONNECT request", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert conn.buffer == ""
+  end
+
+  test "transfer-encoding and content-length are ignored in 2xx response to CONNECT request",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\ncontent-length: 10\r\n\r\n"
+
+    assert {:ok, _conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
+  test "non-2xx response to CONNECT request has a body", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 407 Proxy Authentication Required\r\ncontent-length: 6\r\n\r\ndenied"
+
+    assert {:ok, _conn, [_status, _headers, {:data, ^ref, "denied"}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
   test "status, headers, and body", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
