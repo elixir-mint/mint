@@ -287,6 +287,15 @@ defmodule Mint.HTTP do
   uses TLS and the TLS session to the host is nested inside it. *HTTPS proxies
   for HTTPS connections are available since v1.10.0*.
 
+  The `opts` in the `:proxy` tuple are the options of the connection to the proxy
+  itself and support the same options as `connect/4`. Tunnel proxies additionally
+  support:
+
+    * `:tunnel_timeout` - the maximum time (in milliseconds) to wait for the proxy
+      to reply to the `CONNECT` request. If the tunnel is not established within
+      this time, `connect/4` returns a `Mint.HTTPError` with reason
+      `{:proxy, :tunnel_timeout}`. Defaults to `30_000` (30 seconds).
+
   ## Transport options
 
   The options specified in `:transport_opts` are passed to the module that

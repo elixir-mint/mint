@@ -56,7 +56,7 @@ defmodule Mint.TunnelProxy do
   end
 
   defp receive_response(conn, ref, timeout_deadline) do
-    timeout = timeout_deadline - System.monotonic_time(:millisecond)
+    timeout = max(timeout_deadline - System.monotonic_time(:millisecond), 0)
     socket = HTTP1.get_socket(conn)
 
     receive do
