@@ -519,6 +519,40 @@ defmodule Mint.HTTP2 do
   body by initially passing `:stream` as the body and sending the body in chunks using
   `stream_request_body/3` and using `get_window_size/2` to get the window size of the
   request and connection.
+
+  ## CONNECT requests
+
+  You can open a tunnel to a target host through the server with the `CONNECT`
+  method ([RFC 9113, section 8.5](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.5)).
+  For `CONNECT` requests (other than extended CONNECT, see below), `path` is not a
+  path: it's the host and port of the tunnel target, such as `"example.com:443"`
+  (IPv6 addresses must be enclosed in square brackets). Mint sends it as the
+  `:authority` pseudo-header and omits the `:scheme` and `:path` pseudo-headers.
+  *Available since v1.10.0*.
+
+  Pass `:stream` as the body. Once the server replies with a 2xx status, the stream
+  becomes a tunnel: iodata you pass to `stream_request_body/3` is delivered to the
+  tunnel target, and bytes coming from the target are returned by `stream/2` as
+  `{:data, request_ref, data}` responses. The tunnel counts towards the limit of
+  concurrent requests for as long as it's open.
+
+  Mint doesn't support the TCP-style half-close that RFC 9113 describes for tunnels:
+  when the server ends its side of the stream, Mint considers the whole tunnel closed,
+  returns `{:done, request_ref}`, and doesn't let you send more data for that request.
+  If instead you end your side first (by passing `:eof` to `stream_request_body/3`),
+  you keep receiving data until the server ends the stream.
+
+  ### Extended CONNECT
+
+  Mint also supports the extended CONNECT protocol
+  ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441.html)), which is used to bootstrap
+  protocols such as WebSocket over HTTP/2. If you pass a `:protocol` pseudo-header in
+  `headers`, the request is treated as an extended CONNECT request: you're expected to
+  also pass the `:scheme` and `:path` pseudo-headers explicitly (the `path` argument is
+  not used), and Mint sets `:authority` to the connection's authority, as in a normal
+  request. Note that servers only allow extended CONNECT after advertising the
+  `:enable_connect_protocol` setting (see `get_server_setting/2`); Mint doesn't
+  enforce this, so it's up to you to check the setting first.
   """
   @impl true
   @spec request(
@@ -1606,9 +1640,21 @@ defmodule Mint.HTTP2 do
 
   defp add_pseudo_headers(headers, conn, method, path) do
     if same_method?(method, "CONNECT") do
+      # In extended CONNECT (RFC 8441) the caller passes :scheme, :path, and
+      # :protocol explicitly and :authority is the origin, as in a normal
+      # request. In plain CONNECT (RFC 9113, section 8.5) the request target
+      # is the host and port of the tunnel destination, which request/5
+      # receives as its "path" argument.
+      authority =
+        if List.keymember?(headers, ":protocol", 0) do
+          conn.authority
+        else
+          path
+        end
+
       [
         {":method", method},
-        {":authority", conn.authority}
+        {":authority", authority}
         | headers
       ]
     else
