@@ -950,7 +950,7 @@ defmodule Mint.HTTP do
   > #### Hanging Waiting for Bytes {: .warning}
   >
   > If `byte_count` is greater than `0` and the socket doesn't receive
-  > *at least* `byte_count` bytes withing the `timeout`, then the function
+  > *at least* `byte_count` bytes within the `timeout`, then the function
   > will block for the duration of `timeout` and then return a timeout error.
   > This behavior is the same as the `recv` function in [`:gen_tcp`](`:gen_tcp`)
   > and [`:ssl`](`:ssl`).
