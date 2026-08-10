@@ -37,7 +37,7 @@ defmodule Mint.HTTP2.Frame do
 
   @spec inspect(tuple()) :: String.t()
 
-  for {type, _code} <- @types do
+  for {type, _code} <- Enum.sort(@types) do
     def inspect(frame) when is_record(frame, unquote(type)) do
       unquote(String.upcase(Atom.to_string(type))) <> Kernel.inspect(unquote(type)(frame))
     end
@@ -63,7 +63,7 @@ defmodule Mint.HTTP2.Frame do
   @spec flag_set?(byte(), atom(), atom()) :: boolean()
   def flag_set?(flags, frame, flag_name)
 
-  for {frame, flags} <- @flags,
+  for {frame, flags} <- Enum.sort(@flags),
       {flag_name, flag_value} <- flags do
     defp set_flag(flags, unquote(frame), unquote(flag_name)), do: bor(flags, unquote(flag_value))
 
@@ -121,7 +121,7 @@ defmodule Mint.HTTP2.Frame do
     :more
   end
 
-  for {frame, type} <- @types do
+  for {frame, type} <- Enum.sort(@types) do
     function = :"decode_#{frame}"
 
     defp decode_contents(unquote(type), flags, stream_id, payload) do
@@ -482,7 +482,7 @@ defmodule Mint.HTTP2.Frame do
     0x0D => :http_1_1_required
   }
 
-  for {code, human_code} <- error_codes do
+  for {code, human_code} <- Enum.sort(error_codes) do
     defp humanize_error_code(unquote(code)), do: unquote(human_code)
     defp dehumanize_error_code(unquote(human_code)), do: unquote(code)
   end
