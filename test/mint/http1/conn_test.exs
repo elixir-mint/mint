@@ -1273,6 +1273,106 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  describe "stream_headers option" do
+    setup %{port: port} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: true)
+      assert_receive {_server_ref, server_socket}
+      [conn: conn, server_socket: server_socket]
+    end
+
+    test "emits all complete headers from a chunk at once when stream_headers is true", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send two complete headers plus start of third header in one chunk
+      # This should emit the two complete headers together
+      assert {:ok, conn, [headers1]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\nQux"})
+
+      assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers1
+
+      # Complete the third header and end headers section
+      assert {:ok, _conn, [headers2]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, ": Quux\r\n\r\n"})
+
+      assert {:headers, ^ref, [{"qux", "Quux"}]} = headers2
+    end
+
+    test "emits multiple headers from one packet together", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\n\r\n"})
+
+      assert [headers] = responses
+      assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
+    end
+
+    test "handles partial headers with streaming", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send first header with partial second header
+      assert {:ok, conn, [header1]} = HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
+      assert {:headers, ^ref, [{"foo", "Bar"}]} = header1
+
+      # Complete second header and end headers
+      assert {:ok, _conn, [header2]} = HTTP1.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
+      assert {:headers, ^ref, [{"baz", "Boz"}]} = header2
+    end
+
+    test "streams trailer headers from same chunk together", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "5\r\nhello\r\n"})
+      assert [{:data, ^ref, "hello"}] = responses
+
+      # Send last chunk and trailer headers in one chunk
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "0\r\nX-Trailer-1: value1\r\nX-Trailer-2: value2\r\n\r\n"}
+               )
+
+      assert [trailers, done] = responses
+      assert {:headers, ^ref, [{"x-trailer-1", "value1"}, {"x-trailer-2", "value2"}]} = trailers
+      assert {:done, ^ref} = done
+    end
+
+    test "filters unallowed trailer headers when streaming", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      # Send last chunk with allowed and unallowed trailer headers
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket,
+                  "0\r\nContent-Length: 100\r\nX-Custom-Trailer: allowed\r\n\r\n"}
+               )
+
+      # Content-Length should be filtered out, only X-Custom-Trailer should appear
+      assert [trailer, done] = responses
+      assert {:headers, ^ref, [{"x-custom-trailer", "allowed"}]} = trailer
+      assert {:done, ^ref} = done
+    end
+  end
+
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
 end
