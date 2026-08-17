@@ -1338,9 +1338,12 @@ defmodule Mint.HTTP1Test do
 
       # Send a complete header ending exactly at packet boundary (no subsequent bytes)
       assert {:ok, conn, responses} =
-               HTTP1.stream(conn, {:tcp, conn.socket, "X-Progress: 50\r\n"})
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "X-Progress: 50\r\nX-Other: value\r\n"}
+               )
 
-      assert [{:headers, ^ref, [{"x-progress", "50"}]}] = responses
+      assert [{:headers, ^ref, [{"x-progress", "50"}, {"x-other", "value"}]}] = responses
 
       # Send another complete header ending exactly at packet boundary
       assert {:ok, conn, responses} =
