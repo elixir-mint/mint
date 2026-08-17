@@ -1014,13 +1014,14 @@ defmodule Mint.HTTP1 do
     with :more <- Response.decode_header(data) do
       data_size = byte_size(data)
 
-      with <<_::binary-size(^data_size - 1), ?\n>> <- data do
-        case Response.decode_header(<<data::binary, 0>>) do
-          {:ok, {name, value}, <<0>>} -> {:ok, {name, value}, ""}
-          result -> result
-        end
-      else
-        _ -> :more
+      case data do
+        <<_::binary-size(^data_size - 1), ?\n>> ->
+          with {:ok, {name, value}, <<0>>} <- Response.decode_header(<<data::binary, 0>>) do
+            {:ok, {name, value}, ""}
+          end
+
+        _ ->
+          :more
       end
     end
   end
