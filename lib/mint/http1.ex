@@ -751,7 +751,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_headers(conn, request, data, responses, headers) do
-    case Response.decode_header(data) do
+    case do_decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
 
@@ -942,7 +942,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_trailer_headers(conn, data, responses, headers) do
-    case Response.decode_header(data) do
+    case do_decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         case add_header_bytes(conn, conn.request, byte_size(data) - byte_size(rest)) do
           {:ok, request} ->
@@ -1001,6 +1001,25 @@ defmodule Mint.HTTP1 do
 
       :error ->
         {:error, conn, wrap_error(:invalid_trailer_header), responses}
+    end
+  end
+
+  defp do_decode_header(data, false), do: Response.decode_header(data)
+
+  defp do_decode_header(data, true) do
+    # By default, :erlang.decode_packet/3 asks for more data when a packet
+    # containing a full header ends with a line feed (likely to handle line
+    # folding). If we get a :more response on a packet that ends with a line
+    # feed, we append a sentinel byte and attempt to decode again.
+    with :more <- Response.decode_header(data) do
+      data_size = byte_size(data)
+
+      with <<_::binary-size(data_size - 1), 10>> <- data,
+           {:ok, {name, value}, rest} <- Response.decode_header(<<data::binary, 0>>) do
+        {:ok, {name, value}, binary_part(rest, 0, byte_size(rest) - 1)}
+      else
+        _ -> :more
+      end
     end
   end
 

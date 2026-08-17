@@ -1280,10 +1280,13 @@ defmodule Mint.HTTP1Test do
       [conn: conn, server_socket: server_socket]
     end
 
-    test "emits all complete headers from a chunk at once when stream_headers is true", %{conn: conn} do
+    test "emits all complete headers from a chunk at once when stream_headers is true", %{
+      conn: conn
+    } do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
-      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
       # Send two complete headers plus start of third header in one chunk
       # This should emit the two complete headers together
@@ -1302,7 +1305,8 @@ defmodule Mint.HTTP1Test do
     test "emits multiple headers from one packet together", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
-      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
       assert {:ok, _conn, responses} =
                HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\n\r\n"})
@@ -1314,7 +1318,8 @@ defmodule Mint.HTTP1Test do
     test "handles partial headers with streaming", %{conn: conn} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
-      assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
       # Send first header with partial second header
       assert {:ok, conn, [header1]} = HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
@@ -1323,6 +1328,29 @@ defmodule Mint.HTTP1Test do
       # Complete second header and end headers
       assert {:ok, _conn, [header2]} = HTTP1.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
       assert {:headers, ^ref, [{"baz", "Boz"}]} = header2
+    end
+
+    test "emits header immediately when packet ends exactly after LF", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send a complete header ending exactly at packet boundary (no subsequent bytes)
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Progress: 50\r\n"})
+
+      assert [{:headers, ^ref, [{"x-progress", "50"}]}] = responses
+
+      # Send another complete header ending exactly at packet boundary
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Progress: 100\r\n"})
+
+      assert [{:headers, ^ref, [{"x-progress", "100"}]}] = responses
+
+      # End the header section
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "\r\n"})
+      assert [] = responses
     end
 
     test "streams trailer headers from same chunk together", %{conn: conn} do
@@ -1370,6 +1398,39 @@ defmodule Mint.HTTP1Test do
       assert [trailer, done] = responses
       assert {:headers, ^ref, [{"x-custom-trailer", "allowed"}]} = trailer
       assert {:done, ^ref} = done
+    end
+
+    test "emits trailer header immediately when packet ends exactly after LF", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "5\r\nhello\r\n"})
+      assert [{:data, ^ref, "hello"}] = responses
+
+      # Send last chunk (ending exactly at boundary)
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "0\r\n"})
+      assert [] = responses
+
+      # Send a complete trailer header ending exactly at packet boundary (no subsequent bytes)
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Trailer-1: value1\r\n"})
+
+      assert [{:headers, ^ref, [{"x-trailer-1", "value1"}]}] = responses
+
+      # Send another complete trailer header ending exactly at packet boundary
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Trailer-2: value2\r\n"})
+
+      assert [{:headers, ^ref, [{"x-trailer-2", "value2"}]}] = responses
+
+      # End the trailer section
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "\r\n"})
+      assert [{:done, ^ref}] = responses
     end
   end
 
