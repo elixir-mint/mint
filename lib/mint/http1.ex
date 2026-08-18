@@ -104,6 +104,7 @@ defmodule Mint.HTTP1 do
     :case_sensitive_headers,
     :skip_target_validation,
     :max_header_list_size,
+    :stream_headers,
     requests: :queue.new(),
     state: :closed,
     buffer: "",
@@ -149,6 +150,11 @@ defmodule Mint.HTTP1 do
     * `:max_header_list_size` - (`t:pos_integer/0` or `:infinity`) the maximum number of
       bytes allowed in a response header section or chunked trailer section. This includes
       header names, values, and line delimiters. Defaults to 256 KiB. *Available since 1.9.2*.
+
+    * `:stream_headers` - (`t:boolean/0`) if set to `true`, response headers and trailer headers
+      will be emitted as they are parsed, rather than buffered until the complete header section
+      is received. When enabled, you may receive multiple `{:headers, ref, headers}` responses
+      for a single request. Defaults to `false`. *Available since v1.10.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -238,6 +244,7 @@ defmodule Mint.HTTP1 do
         case_sensitive_headers: Keyword.get(opts, :case_sensitive_headers, false),
         skip_target_validation: Keyword.get(opts, :skip_target_validation, false),
         max_header_list_size: max_header_list_size,
+        stream_headers: Keyword.get(opts, :stream_headers, false),
         optional_responses: validate_optional_response_values(opts)
       }
 
@@ -744,7 +751,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_headers(conn, request, data, responses, headers) do
-    case Response.decode_header(data) do
+    case decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
 
@@ -758,7 +765,13 @@ defmodule Mint.HTTP1 do
       {:ok, :eof, rest} ->
         case add_header_bytes(conn, request, byte_size(data) - byte_size(rest)) do
           {:ok, request} ->
-            responses = [{:headers, request.ref, Enum.reverse(headers)} | responses]
+            responses =
+              if conn.stream_headers and headers == [] do
+                responses
+              else
+                [{:headers, request.ref, Enum.reverse(headers)} | responses]
+              end
+
             request = %{request | state: :body, headers_buffer: [], headers_size: 0}
             conn = %{conn | buffer: "", request: request}
             decode(:body, conn, rest, responses)
@@ -770,7 +783,19 @@ defmodule Mint.HTTP1 do
       :more ->
         case check_header_section_size(conn, request.headers_size + byte_size(data)) do
           :ok ->
-            request = %{request | headers_buffer: headers}
+            {responses, headers_buffer} =
+              cond do
+                not conn.stream_headers ->
+                  {responses, headers}
+
+                headers != [] ->
+                  {[{:headers, request.ref, Enum.reverse(headers)} | responses], []}
+
+                true ->
+                  {responses, []}
+              end
+
+            request = %{request | headers_buffer: headers_buffer}
             conn = %{conn | buffer: data, request: request}
             {:ok, conn, responses}
 
@@ -918,7 +943,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_trailer_headers(conn, data, responses, headers) do
-    case Response.decode_header(data) do
+    case decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         case add_header_bytes(conn, conn.request, byte_size(data) - byte_size(rest)) do
           {:ok, request} ->
@@ -950,7 +975,24 @@ defmodule Mint.HTTP1 do
       :more ->
         case check_header_section_size(conn, conn.request.headers_size + byte_size(data)) do
           :ok ->
-            request = %{conn.request | body: {:chunked, :trailer}, headers_buffer: headers}
+            {responses, headers_buffer} =
+              cond do
+                not conn.stream_headers ->
+                  {responses, headers}
+
+                headers != [] ->
+                  responses =
+                    headers
+                    |> Headers.remove_unallowed_trailer()
+                    |> add_trailer_headers(conn.request.ref, responses)
+
+                  {responses, []}
+
+                true ->
+                  {responses, []}
+              end
+
+            request = %{conn.request | body: {:chunked, :trailer}, headers_buffer: headers_buffer}
             conn = %{conn | buffer: data, request: request}
             {:ok, conn, responses}
 
@@ -960,6 +1002,28 @@ defmodule Mint.HTTP1 do
 
       :error ->
         {:error, conn, wrap_error(:invalid_trailer_header), responses}
+    end
+  end
+
+  defp decode_header(data, false = _stream_headers), do: Response.decode_header(data)
+
+  defp decode_header(data, true = _stream_headers) do
+    # By default, :erlang.decode_packet/3 asks for more data when a packet
+    # containing a full header ends with a line feed (likely to handle line
+    # folding). If we get a :more response on a packet that ends with a line
+    # feed, we append a sentinel byte and attempt to decode again.
+    with :more <- Response.decode_header(data) do
+      data_size = byte_size(data)
+
+      case data do
+        <<_::binary-size(^data_size - 1), ?\n>> ->
+          with {:ok, {name, value}, <<0>>} <- Response.decode_header(<<data::binary, 0>>) do
+            {:ok, {name, value}, ""}
+          end
+
+        _ ->
+          :more
+      end
     end
   end
 
