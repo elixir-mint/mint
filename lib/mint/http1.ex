@@ -751,7 +751,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_headers(conn, request, data, responses, headers) do
-    case do_decode_header(data, conn.stream_headers) do
+    case decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         headers = [{name, value} | headers]
 
@@ -766,9 +766,10 @@ defmodule Mint.HTTP1 do
         case add_header_bytes(conn, request, byte_size(data) - byte_size(rest)) do
           {:ok, request} ->
             responses =
-              case {conn.stream_headers, headers} do
-                {true, []} -> responses
-                {_, headers} -> [{:headers, request.ref, Enum.reverse(headers)} | responses]
+              if conn.stream_headers and headers == [] do
+                responses
+              else
+                [{:headers, request.ref, Enum.reverse(headers)} | responses]
               end
 
             request = %{request | state: :body, headers_buffer: [], headers_size: 0}
@@ -942,7 +943,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_trailer_headers(conn, data, responses, headers) do
-    case do_decode_header(data, conn.stream_headers) do
+    case decode_header(data, conn.stream_headers) do
       {:ok, {name, value}, rest} ->
         case add_header_bytes(conn, conn.request, byte_size(data) - byte_size(rest)) do
           {:ok, request} ->
@@ -1004,9 +1005,9 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp do_decode_header(data, false = _stream_headers), do: Response.decode_header(data)
+  defp decode_header(data, false = _stream_headers), do: Response.decode_header(data)
 
-  defp do_decode_header(data, true = _stream_headers) do
+  defp decode_header(data, true = _stream_headers) do
     # By default, :erlang.decode_packet/3 asks for more data when a packet
     # containing a full header ends with a line feed (likely to handle line
     # folding). If we get a :more response on a packet that ends with a line
