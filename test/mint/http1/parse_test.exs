@@ -16,6 +16,16 @@ defmodule Mint.HTTP1.ParseTest do
     assert chunk_size("") == :error
   end
 
+  test "chunk_size/1 limits the size to 16 hexadecimal digits" do
+    max_chunk_size = String.duplicate("F", 16)
+
+    assert chunk_size(max_chunk_size <> "\r\n") ==
+             {:ok, 0xFFFFFFFFFFFFFFFF, "\r\n"}
+
+    assert chunk_size(max_chunk_size) == :more
+    assert chunk_size("0" <> max_chunk_size) == :error
+  end
+
   test "content_length_header/1" do
     assert content_length_header("0") == {:ok, 0}
     assert content_length_header("100") == {:ok, 100}

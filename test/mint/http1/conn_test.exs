@@ -351,6 +351,22 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "rejects a chunk size longer than 16 digits when streamed bytewise", %{conn: conn} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    conn =
+      Enum.reduce(1..16, conn, fn _index, conn ->
+        assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "0"})
+        conn
+      end)
+
+    assert {:error, _conn, %HTTPError{reason: :invalid_chunk_size}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "0"})
+  end
+
   test "body with chunked transfer-encoding streamed bytewise", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 

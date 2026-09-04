@@ -1,6 +1,9 @@
 defmodule Mint.HTTP1.Parse do
   @moduledoc false
 
+  # Bound the parse work and keep the chunk size within an unsigned 64-bit value.
+  @max_chunk_size_digits 16
+
   defmacro is_digit(char), do: quote(do: unquote(char) in ?0..?9)
   defmacro is_alpha(char), do: quote(do: unquote(char) in ?a..?z or unquote(char) in ?A..?Z)
   defmacro is_whitespace(char), do: quote(do: unquote(char) in ~c"\s\t")
@@ -24,17 +27,21 @@ defmodule Mint.HTTP1.Parse do
   def ignore_until_crlf(<<_char, rest::binary>>), do: ignore_until_crlf(rest)
 
   def chunk_size(<<char, rest::binary>>) when is_hex_digit(char) do
-    parse_hex_prefix(rest, hex_digit_value(char))
+    parse_hex_prefix(rest, hex_digit_value(char), 1)
   end
 
   def chunk_size(_other), do: :error
 
-  defp parse_hex_prefix(<<char, rest::binary>>, acc) when is_hex_digit(char) do
-    parse_hex_prefix(rest, acc * 16 + hex_digit_value(char))
+  defp parse_hex_prefix(<<char, _rest::binary>>, _acc, @max_chunk_size_digits)
+       when is_hex_digit(char),
+       do: :error
+
+  defp parse_hex_prefix(<<char, rest::binary>>, acc, digit_count) when is_hex_digit(char) do
+    parse_hex_prefix(rest, acc * 16 + hex_digit_value(char), digit_count + 1)
   end
 
-  defp parse_hex_prefix(<<>>, _acc), do: :more
-  defp parse_hex_prefix(rest, acc), do: {:ok, acc, rest}
+  defp parse_hex_prefix(<<>>, _acc, _digit_count), do: :more
+  defp parse_hex_prefix(rest, acc, _digit_count), do: {:ok, acc, rest}
 
   defp hex_digit_value(char) when is_digit(char), do: char - ?0
   defp hex_digit_value(char) when char in ?a..?f, do: char - ?a + 10
