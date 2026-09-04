@@ -227,8 +227,9 @@ defmodule Mint.HTTP do
       *Available since v1.5.0*.
 
     * `:max_header_list_size` - (positive integer or `:infinity`) the maximum size, in
-      **bytes**, of an HTTP/1 response header section or chunked trailer section. Defaults to
-      256 KiB. This option is only used for HTTP/1 connections. *Available since 1.9.2*.
+      **bytes**, of an HTTP/1 response line, header section, or chunked trailer section.
+      Defaults to 256 KiB. This option is only used for HTTP/1 connections.
+      *Available since 1.9.2*.
 
     * `:proxy` - a `{scheme, address, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.

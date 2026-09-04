@@ -50,6 +50,18 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
+  test "limits an incomplete response status line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 51)
+    assert byte_size(line) == 64
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, line})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
   test "headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -401,6 +413,32 @@ defmodule Mint.HTTP1Test do
 
     # Nothing is retained in the body buffer between calls.
     assert IO.iodata_to_binary(conn.request.data_buffer) == ""
+  end
+
+  test "limits an incomplete chunk-size line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("f", 64)})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "f"})
+  end
+
+  test "limits an incomplete chunk-extension line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5;"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("x", 63)})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
   end
 
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do

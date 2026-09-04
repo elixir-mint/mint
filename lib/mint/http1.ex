@@ -47,6 +47,10 @@ defmodule Mint.HTTP1 do
 
     * `:invalid_status_line` - when the HTTP/1 status line is invalid.
 
+    * `{:response_line_too_long, size, max_size}` - when a response status line,
+      chunk-size line, or chunk-extension line exceeds the configured size limit.
+      `size` is the number of bytes received and `max_size` is the configured maximum.
+
     * `{:invalid_request_target, target}` - when the request target is invalid.
 
     * `{:invalid_request_method, method}` - when the request method is invalid.
@@ -148,8 +152,9 @@ defmodule Mint.HTTP1 do
           This is only available for HTTP/1.1 connections. *Available since v1.8.0*.
 
     * `:max_header_list_size` - (`t:pos_integer/0` or `:infinity`) the maximum number of
-      bytes allowed in a response header section or chunked trailer section. This includes
-      header names, values, and line delimiters. Defaults to 256 KiB. *Available since 1.9.2*.
+      bytes allowed in a response status line, chunk-size line, chunk-extension line,
+      header section, or chunked trailer section. This includes header names, values,
+      and line delimiters. Defaults to 256 KiB. *Available since 1.9.2*.
 
     * `:stream_headers` - (`t:boolean/0`) if set to `true`, response headers and trailer headers
       will be emitted as they are parsed, rather than buffered until the complete header section
@@ -727,8 +732,7 @@ defmodule Mint.HTTP1 do
         decode(:headers, conn, rest, responses)
 
       :more ->
-        conn = put_in(conn.buffer, data)
-        {:ok, conn, responses}
+        buffer_response_line(conn, data, responses)
 
       :error ->
         {:error, conn, wrap_error(:invalid_status_line), responses}
@@ -874,9 +878,7 @@ defmodule Mint.HTTP1 do
   defp decode_body({:chunked, nil}, conn, data, request_ref, responses) do
     case Parse.chunk_size(data) do
       :more ->
-        conn = put_in(conn.buffer, data)
-        conn = put_in(conn.request.body, {:chunked, nil})
-        {:ok, conn, responses}
+        buffer_response_line(conn, data, responses, {:chunked, nil})
 
       {:ok, 0, rest} ->
         # Manually collapse the body buffer since we're done with the body
@@ -897,9 +899,7 @@ defmodule Mint.HTTP1 do
         decode_body({:chunked, size}, conn, rest, request_ref, responses)
 
       :more ->
-        conn = put_in(conn.buffer, data)
-        conn = put_in(conn.request.body, {:chunked, :metadata, size})
-        {:ok, conn, responses}
+        buffer_response_line(conn, data, responses, {:chunked, :metadata, size})
     end
   end
 
@@ -1074,6 +1074,34 @@ defmodule Mint.HTTP1 do
         {conn, [{:data, conn.request.ref, data} | responses]}
     end
   end
+
+  defp buffer_response_line(conn, data, responses, body_state \\ nil) do
+    case check_response_line_size(conn, byte_size(data)) do
+      :ok ->
+        conn = put_in(conn.buffer, data)
+
+        conn =
+          if body_state == nil do
+            conn
+          else
+            put_in(conn.request.body, body_state)
+          end
+
+        {:ok, conn, responses}
+
+      {:error, reason} ->
+        {:error, conn, wrap_error(reason), responses}
+    end
+  end
+
+  defp check_response_line_size(%{max_header_list_size: :infinity}, _size), do: :ok
+
+  defp check_response_line_size(%{max_header_list_size: max_size}, size)
+       when size <= max_size,
+       do: :ok
+
+  defp check_response_line_size(%{max_header_list_size: max_size}, size),
+    do: {:error, {:response_line_too_long, size, max_size}}
 
   defp store_header(%{content_length: nil} = request, "content-length", value) do
     with {:ok, content_length} <- Parse.content_length_header(value),
@@ -1310,6 +1338,10 @@ defmodule Mint.HTTP1 do
 
   def format_error(:invalid_status_line) do
     "invalid status line"
+  end
+
+  def format_error({:response_line_too_long, size, max_size}) do
+    "the response line (#{size} bytes) exceeds the maximum allowed size of #{max_size} bytes"
   end
 
   def format_error(:invalid_header) do
