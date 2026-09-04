@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.10.0
+
+This is a minor version bump with *no breaking changes*. Please do upgrade from 1.9.x versions as it contains fixes for two recently-published CVEs.
+
+**Security fixes**:
+
+  * Set bounds for a HTTP/1 server's returned *status line* and *chunk-extension line*. Previous, `Mint.HTTP1` would parse these without any size cap, allowing a malicious actor to stream bytes indefinitely, exhausting the client's host memory. This is a fix for **CVE-2026-82728** (GitHub advisory [GHSA-g83f-2j6r-q6m4](https://github.com/elixir-mint/mint/security/advisories/GHSA-g83f-2j6r-q6m4)).
+  * Set a bound for chunked responses chunk-size field in `Mint.HTTP1`, which prevents an attack where the malicious actor could send a chunk size made of a huge run of hex digits and burn CPU on the client host. This is a fix for **CVE-2026-82729** (GitHub advisory [GHSA-7p8w-j234-7qc8](https://github.com/elixir-mint/mint/security/advisories/GHSA-7p8w-j234-7qc8)).
+
+New features:
+
+  * Support processing HTTP/1.1 headers as they arrive.
+  * Add support for HTTPS proxies for HTTPS connections.
+
+Bug fixes:
+
+  * Send origin `Host` header for plain-HTTP proxied requests.
+  * Fix `CONNECT` response framing and IPv6 authority in tunnel proxies.
+  * Fix a bug where we would "leak" target options into the proxy connection in forward-proxy mode.
+  * Return a tunnel timeout error when the `CONNECT` deadline elapses.
+  * Fix hostname/address handling in tunnel proxiesFix hostname/address handling in tunnel proxies.
+  * Use the request target as the `CONNECT` `:authority` in `Mint.HTTP2`.
+
 ## v1.9.3
 
   * Prevent signed integers when parsing HTTP/1 chunk sizes. This is a fix for **CVE-2026-59249** ([GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-x3x7-96vm-6h2w)).
