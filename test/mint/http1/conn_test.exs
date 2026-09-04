@@ -436,11 +436,12 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
     assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    conn = %{conn | max_header_list_size: 15}
 
     assert {:ok, conn, []} =
-             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("f", 64)})
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("f", 15)})
 
-    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 16, 15}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "f"})
   end
 
