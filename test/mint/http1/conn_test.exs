@@ -1,7 +1,7 @@
 defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
-  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
+  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer, TransportError}
 
   require Mint.HTTP
 
@@ -128,7 +128,7 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "BODY2"})
 
     assert {:ok, conn, [{:done, ^ref}]} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "body with content-length", %{conn: conn} do
@@ -202,7 +202,7 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "connection: close", %{conn: conn} do
@@ -212,7 +212,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "connection: keep-alive", %{conn: conn} do
@@ -232,7 +232,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "implicit connection: keep-alive on http/1.1", %{conn: conn} do
@@ -252,7 +252,17 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: :more_than_one_content_length_header},
             [{:status, _ref, 200}]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
+  end
+
+  test "error with invalid status line", %{conn: conn} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HELLO 200 OK\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_status_line}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert_closed_and_released(conn)
   end
 
   test "raises error connecting with invalid optional_responses params", %{port: port} do
@@ -628,7 +638,7 @@ defmodule Mint.HTTP1Test do
   test "close/1", %{conn: conn} do
     assert HTTP1.open?(conn)
     assert {:ok, conn} = HTTP1.close(conn)
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "close/1 an already closed connection with default inet_backend does not cause error", %{
@@ -638,7 +648,7 @@ defmodule Mint.HTTP1Test do
     # ignore the returned conn, otherwise transport.close/1 will not be called
     assert {:ok, _conn} = HTTP1.close(conn)
     assert {:ok, conn} = HTTP1.close(conn)
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   if List.to_integer(:erlang.system_info(:otp_release)) < 23 do
@@ -1077,6 +1087,25 @@ defmodule Mint.HTTP1Test do
                  """)
       end
     end
+
+    test "RST from the server does not leave an open socket" do
+      # we need to test passive because in active mode, the VM kills the port automatically
+      {:ok, port, server_ref} = TestServer.start()
+      {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      # send the RST
+      :inet.setopts(server_socket, linger: {true, 0})
+      :gen_tcp.close(server_socket)
+
+      # wait until the RST arrives
+      assert {:error, _} = :gen_tcp.recv(conn.socket, 0, 1000)
+
+      assert {:error, conn, %TransportError{reason: :closed}} =
+               HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert_closed_and_released(conn)
+    end
   end
 
   describe "streaming requests" do
@@ -1290,6 +1319,28 @@ defmodule Mint.HTTP1Test do
       assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:data, ^ref4, "XXXXX"}, {:done, ^ref4}] =
                responses
     end
+
+    test "RST from the server does not leave an open socket" do
+      # we need to test passive because in active mode, the VM kills the port automatically
+      {:ok, port, server_ref} = TestServer.start()
+      {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      assert {:ok, conn, ref} =
+               HTTP1.request(conn, "GET", "/", [], :stream)
+
+      # send the RST
+      :inet.setopts(server_socket, linger: {true, 0})
+      :gen_tcp.close(server_socket)
+
+      # wait until the RST arrives
+      assert {:error, _} = :gen_tcp.recv(conn.socket, 0, 1000)
+
+      assert {:error, conn, %TransportError{reason: :closed}} =
+               HTTP1.stream_request_body(conn, ref, "chunk")
+
+      assert_closed_and_released(conn)
+    end
   end
 
   defp request_string(string) do
@@ -1494,4 +1545,9 @@ defmodule Mint.HTTP1Test do
 
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
+
+  defp assert_closed_and_released(conn) do
+    refute HTTP1.open?(conn)
+    assert Port.info(conn.socket) == nil
+  end
 end
