@@ -1126,6 +1126,16 @@ defmodule Mint.HTTP1 do
     {:ok, request}
   end
 
+  # A successful CONNECT switches the connection to tunnel mode, so the
+  # response's HTTP version and Connection headers no longer determine the
+  # lifetime of the underlying socket. In particular, HTTP/1.0 responses are
+  # otherwise treated as non-persistent and would close the newly-established
+  # tunnel before the caller can use it.
+  defp request_done(%{request: %{method: "CONNECT", status: status}} = conn)
+       when status in 200..299 do
+    pop_request(conn)
+  end
+
   defp request_done(%{request: request} = conn) do
     conn = pop_request(conn)
 

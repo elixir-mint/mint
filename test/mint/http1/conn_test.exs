@@ -165,6 +165,18 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "HTTP/1.0 2xx response to CONNECT leaves the tunnel socket open", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(
+               conn,
+               {:tcp, conn.socket, "HTTP/1.0 200 Connection established\r\n\r\n"}
+             )
+
+    assert HTTP1.open?(conn)
+  end
+
   test "content-length is ignored in 2xx response to CONNECT request", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"

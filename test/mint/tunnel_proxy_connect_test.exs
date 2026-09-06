@@ -37,6 +37,26 @@ defmodule Mint.TunnelProxyConnectTest do
     assert merge_body(rest, request) == "hello"
   end
 
+  test "tunnels through a proxy that sends an HTTP/1.0 CONNECT response" do
+    {origin_port, _origin_ref} = start_tls_origin()
+
+    {proxy_port, _proxy_ref} =
+      start_connect_proxy(
+        "HTTP/1.0 200 Connection established\r\nProxy-agent: tinyproxy/1.11.1\r\n\r\n"
+      )
+
+    assert {:ok, conn} =
+             HTTP.connect(:https, "localhost", origin_port,
+               proxy: {:http, "localhost", proxy_port, []},
+               transport_opts: [verify: :verify_none]
+             )
+
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
+    assert {:ok, _conn, responses} = receive_stream(conn)
+    assert [{:status, ^request, 200}, {:headers, ^request, _headers} | rest] = responses
+    assert merge_body(rest, request) == "hello"
+  end
+
   test "a proxy that stalls the CONNECT response yields a tunnel timeout error" do
     proxy_port = start_silent_proxy()
 
