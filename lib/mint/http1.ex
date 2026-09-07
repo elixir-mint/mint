@@ -363,7 +363,8 @@ defmodule Mint.HTTP1 do
       end
     else
       {:error, %TransportError{reason: :closed} = error} ->
-        {:error, %{conn | state: :closed}, error}
+        conn = internal_close(conn)
+        {:error, conn, error}
 
       {:error, %error_module{} = error} when error_module in [HTTPError, TransportError] ->
         {:error, conn, error}
@@ -432,7 +433,8 @@ defmodule Mint.HTTP1 do
         {:ok, conn}
 
       {:error, %TransportError{reason: :closed} = error} ->
-        {:error, %{conn | state: :closed}, error}
+        conn = internal_close(conn)
+        {:error, conn, error}
 
       {:error, error} ->
         {:error, conn, error}
@@ -465,7 +467,8 @@ defmodule Mint.HTTP1 do
         {:ok, conn}
 
       {:error, %TransportError{reason: :closed} = error} ->
-        {:error, %{conn | state: :closed}, error}
+        conn = internal_close(conn)
+        {:error, conn, error}
 
       {:error, error} ->
         {:error, conn, error}
@@ -546,13 +549,13 @@ defmodule Mint.HTTP1 do
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, conn, reason, responses} ->
-        conn = put_in(conn.state, :closed)
+        conn = internal_close(conn)
         {:error, conn, reason, responses}
     end
   end
 
   defp handle_close(%__MODULE__{request: request} = conn) do
-    conn = put_in(conn.state, :closed)
+    conn = internal_close(conn)
     conn = request_done(conn)
 
     if request && request.body == :until_closed do
