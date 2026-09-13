@@ -1901,13 +1901,12 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "server sends invalid WINDOW_UPDATE on a stream that is in the half-closed (remote) state (RFC9113§5.1)",
-         %{conn: conn} do
+    test "a WINDOW_UPDATE on a stream the server has ended is ignored", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, reason, responses} =
+      assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id,
@@ -1918,16 +1917,30 @@ defmodule Mint.HTTP2Test do
                  window_update(stream_id: stream_id, window_size_increment: 1000)
                ])
 
-      assert Enum.reverse(responses) == [
+      assert responses == [
                {:status, ref, 200},
                {:headers, ref, []},
                {:data, ref, ""},
                {:done, ref}
              ]
 
-      assert_http2_error reason, {:stream_not_found, ^stream_id}
+      assert HTTP2.open?(conn)
+    end
 
-      # Conn stays open.
+    test "a WINDOW_UPDATE on a stream the client cancelled is ignored", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert_recv_frames [
+        headers(stream_id: stream_id),
+        rst_stream(stream_id: stream_id, error_code: :cancel)
+      ]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 window_update(stream_id: stream_id, window_size_increment: 1000)
+               ])
+
       assert HTTP2.open?(conn)
     end
 
