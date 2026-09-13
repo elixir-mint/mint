@@ -1051,6 +1051,8 @@ defmodule Mint.HTTP1 do
   end
 
   defp validate_header(name, value, rest) do
+    value = Parse.trim_trailing_whitespace(value)
+
     if Response.valid_header_name?(name) and Response.valid_header_value?(value) do
       {:ok, {name, value}, rest}
     else

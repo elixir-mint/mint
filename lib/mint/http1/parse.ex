@@ -102,18 +102,18 @@ defmodule Mint.HTTP1.Parse do
   defp chunk_extensions(_data, _state), do: :error
 
   def content_length_header(string) do
-    trimmed = trim_trailing_whitespace(string)
-
-    if ParsingTools.only_digits?(trimmed) do
-      {:ok, String.to_integer(trimmed)}
+    if ParsingTools.only_digits?(string) do
+      {:ok, String.to_integer(string)}
     else
       {:error, {:invalid_content_length_header, string}}
     end
   end
 
-  defp trim_trailing_whitespace(<<>>), do: <<>>
+  # RFC 9112 5.1: optional whitespace after the field value is not part of it.
+  # :erlang.decode_packet/3 strips the leading whitespace but keeps the trailing one.
+  def trim_trailing_whitespace(<<>>), do: <<>>
 
-  defp trim_trailing_whitespace(string) do
+  def trim_trailing_whitespace(string) do
     prefix_size = byte_size(string) - 1
 
     case string do

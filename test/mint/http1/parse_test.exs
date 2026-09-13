@@ -96,9 +96,12 @@ defmodule Mint.HTTP1.ParseTest do
   test "content_length_header/1" do
     assert content_length_header("0") == {:ok, 0}
     assert content_length_header("100") == {:ok, 100}
-    assert content_length_header("200  ") == {:ok, 200}
-    assert content_length_header("200\t") == {:ok, 200}
-    assert content_length_header("200 \t ") == {:ok, 200}
+
+    assert content_length_header("200  ") ==
+             {:error, {:invalid_content_length_header, "200  "}}
+
+    assert content_length_header("200\t") ==
+             {:error, {:invalid_content_length_header, "200\t"}}
 
     assert content_length_header("200\v") ==
              {:error, {:invalid_content_length_header, "200\v"}}

@@ -188,6 +188,40 @@ defmodule Mint.HTTP1Test do
     assert_closed_and_released(conn)
   end
 
+  test "trailing whitespace in header values is trimmed", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\nfoo: bar \t \r\nbaz: \t\r\ntransfer-encoding: chunked \r\n\r\n" <>
+          "1\r\nX\r\n0\r\nmy-trailer: value\t\r\n\r\n"
+
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, headers},
+               {:data, ^ref, "X"},
+               {:headers, ^ref, trailers},
+               {:done, ^ref}
+             ] = responses
+
+      assert headers == [{"foo", "bar"}, {"baz", ""}, {"transfer-encoding", "chunked"}]
+      assert trailers == [{"my-trailer", "value"}]
+    end
+  end
+
+  test "trailing whitespace in content-length is trimmed", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1 \t\r\n\r\nX"
+
+    assert {:ok, _conn, [_status, {:headers, ^ref, headers}, {:data, ^ref, "X"}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert headers == [{"content-length", "1"}]
+  end
+
   test "header values with obs-text are accepted", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\nfoo: b\xC3\xA4r\r\ncontent-length: 0\r\n\r\n"
