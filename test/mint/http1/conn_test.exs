@@ -50,6 +50,35 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
+  test "status line with an empty reason phrase", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, _conn, [{:status, ^ref, 204}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 204\r\n"})
+  end
+
+  test "invalid status lines", %{port: port} do
+    lines = [
+      "HTTP/1.1 2000 OK\r\n",
+      "HTTP/1.1 99 OK\r\n",
+      "HTTP/2.0 200 OK\r\n",
+      "HTTP/0.9 200 OK\r\n",
+      "HTTP/1.10 200 OK\r\n",
+      "HTTP/1.1 200 O\0K\r\n",
+      "HTTP/1.1 200 OK\r\r\n",
+      "HTTP/1.1 200OK\r\n"
+    ]
+
+    for line <- lines do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_status_line}, []} =
+               HTTP1.stream(conn, {:tcp, conn.socket, line}),
+             "expected #{inspect(line)} to be rejected"
+    end
+  end
+
   test "limits an incomplete response status line", %{port: port} do
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)

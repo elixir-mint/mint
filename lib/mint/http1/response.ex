@@ -5,8 +5,13 @@ defmodule Mint.HTTP1.Response do
 
   def decode_status_line(binary) do
     case :erlang.decode_packet(:http_bin, binary, []) do
-      {:ok, {:http_response, version, status, reason}, rest} ->
-        {:ok, {version, status, reason}, rest}
+      {:ok, {:http_response, {1, minor} = version, status, reason}, rest}
+      when minor in 0..9 and status in 100..999 ->
+        if valid_reason_phrase?(reason) do
+          {:ok, {version, status, reason}, rest}
+        else
+          :error
+        end
 
       {:ok, _other, _rest} ->
         :error
@@ -37,6 +42,14 @@ defmodule Mint.HTTP1.Response do
         :error
     end
   end
+
+  # RFC 9112 4: reason-phrase = 1*( HTAB / SP / VCHAR / obs-text )
+  defp valid_reason_phrase?(<<char, rest::binary>>)
+       when char == ?\t or char in 32..126 or char in 128..255,
+       do: valid_reason_phrase?(rest)
+
+  defp valid_reason_phrase?(<<>>), do: true
+  defp valid_reason_phrase?(_other), do: false
 
   def obs_fold?(value), do: :binary.match(value, "\n") != :nomatch
 
