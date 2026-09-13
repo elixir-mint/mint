@@ -1269,6 +1269,48 @@ defmodule Mint.HTTP1Test do
   end
 
   describe "streaming requests" do
+    test "response arriving before the request body is complete",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "10"}], :stream)
+      _ = receive_request_string(server_socket)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
+
+      response = "HTTP/1.1 413 Payload Too Large\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:ok, conn, [{:status, ^ref, 413}, {:headers, ^ref, _}, {:done, ^ref}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert HTTP1.open?(conn)
+      assert HTTP1.open_request_count(conn) == 0
+
+      assert {:error, conn, %HTTPError{reason: :request_body_is_streaming}} =
+               HTTP1.request(conn, "GET", "/", [], nil)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+      assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    end
+
+    test "100 Continue before the request body is streamed",
+         %{conn: conn, server_socket: server_socket} do
+      headers = [{"expect", "100-continue"}, {"content-length", "5"}]
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", headers, :stream)
+      _ = receive_request_string(server_socket)
+
+      assert {:ok, conn, [{:status, ^ref, 100}, {:headers, ^ref, []}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 100 Continue\r\n\r\n"})
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+
+      response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+    end
+
     test "transfer-encoding is set to chunked if not set already, and content is chunked",
          %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)

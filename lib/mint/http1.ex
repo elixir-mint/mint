@@ -350,17 +350,19 @@ defmodule Mint.HTTP1 do
            ),
          :ok <- transport.send(socket, iodata) do
       request_ref = make_ref()
-      request = new_request(request_ref, method, body, encoding)
+      conn = enqueue_request(conn, new_request(request_ref, method))
 
-      case request.state do
-        {:stream_request, _} ->
-          conn = %{conn | streaming_request: request}
-          {:ok, conn, request_ref}
+      # The request is enqueued right away so that a response the server
+      # sends before the body is complete (such as 100 Continue or an early
+      # 413) is parsed rather than treated as unexpected data.
+      conn =
+        if body == :stream do
+          %{conn | streaming_request: %{ref: request_ref, encoding: encoding}}
+        else
+          conn
+        end
 
-        _ ->
-          conn = enqueue_request(conn, request)
-          {:ok, conn, request_ref}
-      end
+      {:ok, conn, request_ref}
     else
       {:error, %TransportError{reason: :closed} = error} ->
         conn = internal_close(conn)
@@ -406,17 +408,15 @@ defmodule Mint.HTTP1 do
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
   def stream_request_body(
-        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{encoding: :identity, ref: ref}} = conn,
         ref,
         :eof
       ) do
-    request = %{conn.streaming_request | state: :status}
-    conn = enqueue_request(%{conn | streaming_request: nil}, request)
-    {:ok, conn}
+    {:ok, %{conn | streaming_request: nil}}
   end
 
   def stream_request_body(
-        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{encoding: :identity, ref: ref}} = conn,
         ref,
         {:eof, _trailer_headers}
       ) do
@@ -424,7 +424,7 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{streaming_request: %{state: {:stream_request, :identity}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{encoding: :identity, ref: ref}} = conn,
         ref,
         body
       ) do
@@ -442,25 +442,16 @@ defmodule Mint.HTTP1 do
   end
 
   def stream_request_body(
-        %__MODULE__{streaming_request: %{state: {:stream_request, :chunked}, ref: ref}} = conn,
+        %__MODULE__{streaming_request: %{encoding: :chunked, ref: ref}} = conn,
         ref,
         chunk
       ) do
     with {:ok, chunk} <- validate_chunk(conn, chunk),
          :ok <- conn.transport.send(conn.socket, Request.encode_chunk(chunk)) do
       case chunk do
-        :eof ->
-          request = %{conn.streaming_request | state: :status}
-          conn = enqueue_request(%{conn | streaming_request: nil}, request)
-          {:ok, conn}
-
-        {:eof, _trailer_headers} ->
-          request = %{conn.streaming_request | state: :status}
-          conn = enqueue_request(%{conn | streaming_request: nil}, request)
-          {:ok, conn}
-
-        _other ->
-          {:ok, conn}
+        :eof -> {:ok, %{conn | streaming_request: nil}}
+        {:eof, _trailer_headers} -> {:ok, %{conn | streaming_request: nil}}
+        _other -> {:ok, conn}
       end
     else
       :empty_chunk ->
@@ -635,10 +626,8 @@ defmodule Mint.HTTP1 do
   @spec open_request_count(t()) :: non_neg_integer()
   def open_request_count(%__MODULE__{} = conn) do
     case conn do
-      %{request: nil, streaming_request: nil} -> 0
-      %{request: nil} -> 1
-      %{streaming_request: nil} -> 1 + :queue.len(conn.requests)
-      _ -> 2 + :queue.len(conn.requests)
+      %{request: nil} -> 0
+      _ -> 1 + :queue.len(conn.requests)
     end
   end
 
@@ -1272,17 +1261,10 @@ defmodule Mint.HTTP1 do
     :ok
   end
 
-  defp new_request(ref, method, body, encoding) do
-    state =
-      if body == :stream do
-        {:stream_request, encoding}
-      else
-        :status
-      end
-
+  defp new_request(ref, method) do
     %{
       ref: ref,
-      state: state,
+      state: :status,
       method: method,
       version: nil,
       status: nil,
