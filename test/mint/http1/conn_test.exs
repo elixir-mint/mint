@@ -147,6 +147,33 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "empty header names are rejected", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+      response = "HTTP/1.1 200 OK\r\n: bar\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:error, conn, %HTTPError{reason: :invalid_header}, [{:status, ^ref, 200}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert_closed_and_released(conn)
+    end
+  end
+
+  test "empty trailer names are rejected", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\n: bar\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_trailer_header}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}] = responses
+    assert_closed_and_released(conn)
+  end
+
   test "trailer values with control characters are rejected", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 

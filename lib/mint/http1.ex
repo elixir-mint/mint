@@ -1051,7 +1051,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp validate_header(name, value, rest) do
-    if Response.valid_header_value?(value) do
+    if Response.valid_header_name?(name) and Response.valid_header_value?(value) do
       {:ok, {name, value}, rest}
     else
       :error

@@ -1,6 +1,8 @@
 defmodule Mint.HTTP1.Response do
   @moduledoc false
 
+  import Mint.HTTP1.Parse
+
   alias Mint.Core.Headers
 
   def decode_status_line(binary) do
@@ -52,6 +54,14 @@ defmodule Mint.HTTP1.Response do
   defp valid_reason_phrase?(_other), do: false
 
   def obs_fold?(value), do: :binary.match(value, "\n") != :nomatch
+
+  # RFC 9110 5.1: field-name = token, token = 1*tchar
+  def valid_header_name?(<<>>), do: false
+  def valid_header_name?(name), do: tchars?(name)
+
+  defp tchars?(<<char, rest::binary>>) when is_tchar(char), do: tchars?(rest)
+  defp tchars?(<<>>), do: true
+  defp tchars?(_other), do: false
 
   # RFC 9110 5.5: field-value = *field-content, field-vchar = VCHAR / obs-text,
   # with HTAB and SP allowed between field-vchars. A recipient of CR, LF or NUL
