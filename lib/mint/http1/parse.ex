@@ -102,12 +102,26 @@ defmodule Mint.HTTP1.Parse do
   defp chunk_extensions(_data, _state), do: :error
 
   def content_length_header(string) do
-    trimmed = String.trim_trailing(string)
+    trimmed = trim_trailing_whitespace(string)
 
     if ParsingTools.only_digits?(trimmed) do
       {:ok, String.to_integer(trimmed)}
     else
       {:error, {:invalid_content_length_header, string}}
+    end
+  end
+
+  defp trim_trailing_whitespace(<<>>), do: <<>>
+
+  defp trim_trailing_whitespace(string) do
+    prefix_size = byte_size(string) - 1
+
+    case string do
+      <<prefix::binary-size(^prefix_size), char>> when is_whitespace(char) ->
+        trim_trailing_whitespace(prefix)
+
+      _other ->
+        string
     end
   end
 
