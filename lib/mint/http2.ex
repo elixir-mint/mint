@@ -1212,11 +1212,13 @@ defmodule Mint.HTTP2 do
 
     validate_client_settings!(client_settings_params)
     # If the port is the default for the scheme, don't add it to the :authority pseudo-header
+    uri_host = Util.uri_host(hostname)
+
     authority =
       if URI.default_port(scheme_string) == port do
-        hostname
+        uri_host
       else
-        "#{hostname}:#{port}"
+        "#{uri_host}:#{port}"
       end
 
     unless mode in [:active, :passive] do

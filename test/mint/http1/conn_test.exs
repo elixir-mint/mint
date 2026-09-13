@@ -780,6 +780,22 @@ defmodule Mint.HTTP1Test do
     assert {:error, _conn, %HTTPError{reason: :closed}} = HTTP1.request(conn, "GET", "/", [], nil)
   end
 
+  test "IPv6 literal hostnames are bracketed in the host header",
+       %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, hostname: "::1")
+    assert_receive {^server_ref, server_socket}
+    {:ok, _conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert receive_request_string(server_socket) ==
+             request_string("""
+             GET / HTTP/1.1
+             host: [::1]:#{port}
+             user-agent: #{mint_user_agent()}
+
+             \
+             """)
+  end
+
   test "open_request_count/1", %{conn: conn} do
     assert HTTP1.open_request_count(conn) == 0
 

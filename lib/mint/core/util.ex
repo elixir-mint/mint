@@ -17,6 +17,16 @@ defmodule Mint.Core.Util do
     end
   end
 
+  # RFC 9112 3.2.2 and RFC 3986 3.2.2: an IPv6 literal in the Host header or the
+  # :authority pseudo-header must be enclosed in square brackets.
+  @spec uri_host(String.t()) :: String.t()
+  def uri_host(hostname) do
+    case :inet.parse_ipv6strict_address(String.to_charlist(hostname)) do
+      {:ok, _address} -> "[" <> hostname <> "]"
+      {:error, :einval} -> hostname
+    end
+  end
+
   @spec inet_opts(:gen_tcp | :ssl, :gen_tcp.socket() | :ssl.sslsocket()) :: :ok | {:error, term()}
   def inet_opts(transport, socket) do
     with {:ok, opts} <- transport.getopts(socket, [:sndbuf, :recbuf, :buffer]),
