@@ -105,6 +105,26 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
   end
 
+  test "obsolete line folding in header values is replaced with a space", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nFoo: bar\r\n baz\r\nBar: one\r\n\t  two\n three\r\n" <>
+        "transfer-encoding: chunked\r\n\r\n0\r\nMy-Trailer: a\r\n b\r\n\r\n"
+
+    assert {:ok, _conn, [status, headers, trailers, done]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, 200}
+
+    assert headers ==
+             {:headers, ref,
+              [{"foo", "bar baz"}, {"bar", "one two three"}, {"transfer-encoding", "chunked"}]}
+
+    assert trailers == {:headers, ref, [{"my-trailer", "a b"}]}
+    assert done == {:done, ref}
+  end
+
   test "status and headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -1513,6 +1533,26 @@ defmodule Mint.HTTP1Test do
                HTTP1.stream(conn, {:tcp, conn.socket, ": Quux\r\n\r\n"})
 
       assert {:headers, ^ref, [{"qux", "Quux"}]} = headers2
+    end
+
+    test "rejects obsolete line folding in header values", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_header}, [_status]} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: bar\r\n baz\r\n\r\n"}
+               )
+    end
+
+    test "rejects a folded continuation line arriving after its header", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status, {:headers, ^ref, [{"foo", "bar"}]}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: bar\r\n"})
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_header}, []} =
+               HTTP1.stream(conn, {:tcp, conn.socket, " baz\r\n\r\n"})
     end
 
     test "emits multiple headers from one packet together", %{conn: conn} do

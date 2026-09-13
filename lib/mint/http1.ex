@@ -159,7 +159,9 @@ defmodule Mint.HTTP1 do
     * `:stream_headers` - (`t:boolean/0`) if set to `true`, response headers and trailer headers
       will be emitted as they are parsed, rather than buffered until the complete header section
       is received. When enabled, you may receive multiple `{:headers, ref, headers}` responses
-      for a single request. Defaults to `false`. *Available since v1.10.0*.
+      for a single request, and header values that use obsolete line folding are rejected
+      with an `:invalid_header` error instead of being unfolded. Defaults to `false`.
+      *Available since v1.10.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
@@ -1011,25 +1013,39 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp decode_header(data, false = _stream_headers), do: Response.decode_header(data)
+  defp decode_header(data, false = _stream_headers) do
+    case Response.decode_header(data) do
+      {:ok, {name, value}, rest} -> {:ok, {name, Response.replace_obs_fold(value)}, rest}
+      other -> other
+    end
+  end
 
   defp decode_header(data, true = _stream_headers) do
     # By default, :erlang.decode_packet/3 asks for more data when a packet
     # containing a full header ends with a line feed (likely to handle line
     # folding). If we get a :more response on a packet that ends with a line
     # feed, we append a sentinel byte and attempt to decode again.
-    with :more <- Response.decode_header(data) do
-      data_size = byte_size(data)
+    #
+    # Headers are emitted before the next line is seen, so a folded
+    # continuation line can't be joined to its header. Folds are rejected.
+    result =
+      with :more <- Response.decode_header(data) do
+        data_size = byte_size(data)
 
-      case data do
-        <<_::binary-size(^data_size - 1), ?\n>> ->
-          with {:ok, {name, value}, <<0>>} <- Response.decode_header(<<data::binary, 0>>) do
-            {:ok, {name, value}, ""}
-          end
+        case data do
+          <<_::binary-size(^data_size - 1), ?\n>> ->
+            with {:ok, {name, value}, <<0>>} <- Response.decode_header(<<data::binary, 0>>) do
+              {:ok, {name, value}, ""}
+            end
 
-        _ ->
-          :more
+          _ ->
+            :more
+        end
       end
+
+    case result do
+      {:ok, {_name, value}, _rest} = ok -> if Response.obs_fold?(value), do: :error, else: ok
+      other -> other
     end
   end
 
