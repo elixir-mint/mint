@@ -545,6 +545,27 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn, :read)
     end
 
+    test "responses before a GOAWAY error are returned in order", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{}, error, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers([{":status", "200"}]),
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [])),
+                 goaway(last_stream_id: stream_id, error_code: :protocol_error, debug_data: "")
+               ])
+
+      assert_http2_error error, {:server_closed_connection, :protocol_error, ""}
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "hello"}] = responses
+    end
+
     test "with GOAWAY with :no_error and responses after the GOAWAY frame", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -2067,7 +2088,7 @@ defmodule Mint.HTTP2Test do
                  window_update(stream_id: stream_id, window_size_increment: 1000)
                ])
 
-      assert Enum.reverse(responses) == [
+      assert responses == [
                {:status, ref, 200},
                {:headers, ref, []},
                {:data, ref, ""},

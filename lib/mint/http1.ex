@@ -550,7 +550,7 @@ defmodule Mint.HTTP1 do
 
       {:error, conn, reason, responses} ->
         conn = internal_close(conn)
-        {:error, conn, reason, responses}
+        {:error, conn, reason, Enum.reverse(responses)}
     end
   end
 

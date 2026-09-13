@@ -217,6 +217,17 @@ defmodule Mint.HTTP1Test do
     assert_closed_and_released(conn)
   end
 
+  test "responses before an error are returned in order", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nhello\r\nXX"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_chunk_size}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "hello"}] = responses
+    assert_closed_and_released(conn)
+  end
+
   test "connection: close", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\nconnection: close\r\n\r\nX"
@@ -572,7 +583,7 @@ defmodule Mint.HTTP1Test do
         "1\r\nX\r\n0\r\nfoo: " <> String.duplicate("x", 25) <> "\r\n"
 
     assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 32, 30}},
-            [{:data, _, "X"}, {:headers, _, _}, {:status, _, 200}]} =
+            [{:status, _, 200}, {:headers, _, _}, {:data, _, "X"}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
   end
 

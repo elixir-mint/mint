@@ -1045,7 +1045,7 @@ defmodule Mint.HTTP2 do
         other
     end
   catch
-    :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
+    :throw, {:mint, conn, error, responses} -> {:error, conn, error, Enum.reverse(responses)}
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -1091,7 +1091,7 @@ defmodule Mint.HTTP2 do
         {:error, %{conn | state: :closed}, error, _responses = []}
     end
   catch
-    :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
+    :throw, {:mint, conn, error, responses} -> {:error, conn, error, Enum.reverse(responses)}
   end
 
   def recv(_conn, _byte_count, _timeout) do
