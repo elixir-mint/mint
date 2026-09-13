@@ -815,6 +815,21 @@ defmodule Mint.HTTP1 do
     end
   end
 
+  # A successful CONNECT switches the connection to tunnel mode, so bytes after
+  # the header section belong to the tunnel rather than to another response.
+  defp decode_body(
+         :none,
+         %{request: %{method: "CONNECT", status: status}} = conn,
+         data,
+         request_ref,
+         responses
+       )
+       when status in 200..299 do
+    conn = request_done(conn)
+    responses = [{:done, request_ref} | responses]
+    {:ok, %{conn | buffer: data}, responses}
+  end
+
   defp decode_body(:none, conn, data, request_ref, responses) do
     conn = request_done(conn)
     responses = [{:done, request_ref} | responses]
@@ -1032,10 +1047,14 @@ defmodule Mint.HTTP1 do
     end
   end
 
+  defp next_request(%{request: nil} = conn, "", responses) do
+    {:ok, %{conn | buffer: ""}, responses}
+  end
+
+  # Bytes left over after the last in-flight response would otherwise be
+  # delivered as the response to whichever request is issued next.
   defp next_request(%{request: nil} = conn, data, responses) do
-    # TODO: Figure out if we should keep buffering even though there are no
-    # requests in flight
-    {:ok, %{conn | buffer: data}, responses}
+    {:error, conn, wrap_error({:unexpected_data, data}), responses}
   end
 
   defp next_request(conn, data, responses) do

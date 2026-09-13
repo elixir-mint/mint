@@ -141,9 +141,9 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "012345678"})
 
     assert {:ok, conn, [{:data, ^ref, "9"}, {:done, ^ref}]} =
-             HTTP1.stream(conn, {:tcp, conn.socket, "9XXX"})
+             HTTP1.stream(conn, {:tcp, conn.socket, "9"})
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
     assert HTTP1.open?(conn)
   end
 
@@ -151,9 +151,9 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, ref} = HTTP1.request(conn, "HEAD", "/", [], nil)
 
     assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
-             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\n"})
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   test "no body in 2xx response to CONNECT request", %{conn: conn} do
@@ -214,6 +214,31 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
+    assert_closed_and_released(conn)
+  end
+
+  test "data after the last in-flight response is an error", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
+    extra = "HTTP/1.1 404 Not Found\r\ncontent-length: 1\r\n\r\nY"
+
+    assert {:error, conn, %HTTPError{reason: {:unexpected_data, ^extra}}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response <> extra})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}, {:done, ^ref}] =
+             responses
+
+    assert_closed_and_released(conn)
+  end
+
+  test "data after the last in-flight bodiless response is an error", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response <> "X"})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}] = responses
     assert_closed_and_released(conn)
   end
 
@@ -406,7 +431,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
+        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -417,7 +442,7 @@ defmodule Mint.HTTP1Test do
     assert data2 == {:data, ref, "23"}
     assert done == {:done, ref}
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   for chunk_size <- ["+5", "+0", "-0"] do
@@ -608,7 +633,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\nXXX"
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -620,7 +645,7 @@ defmodule Mint.HTTP1Test do
     assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
     assert done == {:done, ref}
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   test "limits the size of a chunked trailer section", %{port: port} do
