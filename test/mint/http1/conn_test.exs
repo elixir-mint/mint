@@ -94,6 +94,65 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "x"})
   end
 
+  test "limits a complete response status line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 50) <> "\r\n"
+    assert byte_size(line) == 65
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, line <> "content-length: 0\r\n\r\n"})
+  end
+
+  test "allows a complete response status line of exactly the limit", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 49) <> "\r\n"
+    assert byte_size(line) == 64
+
+    assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, line <> "content-length: 0\r\n\r\n"})
+  end
+
+  test "limits a response status line that is completed by a later read", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 50) <> "\r\n"
+    {first, second} = String.split_at(line, 63)
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, first})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, second})
+  end
+
+  test "limits a response status line after an informational response", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 50) <> "\r\n"
+    data = "HTTP/1.1 100 Continue\r\n\r\n" <> line <> "content-length: 0\r\n\r\n"
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}},
+            [{:status, ^ref, 100}, {:headers, ^ref, []}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, data})
+  end
+
+  test "limits the status line of a pipelined response", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, _ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 50) <> "\r\n"
+    data = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n" <> line <> "content-length: 0\r\n\r\n"
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}},
+            [{:status, ^ref1, 200}, {:headers, ^ref1, _}, {:done, ^ref1}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, data})
+  end
+
   test "headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -118,23 +177,23 @@ defmodule Mint.HTTP1Test do
   end
 
   test "limits the size of a response header section", %{port: port} do
-    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 10)
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 20)
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
-    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\nfoo: bar\r\n"})
 
-    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 11, 10}}, []} =
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 21, 20}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "x"})
   end
 
   test "limits an incomplete response header section", %{port: port} do
-    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 9)
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 19)
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
     assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
 
-    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 10, 9}}, []} =
-             HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 20, 19}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\nfoo: bar\r\n"})
   end
 
   test "header values with control characters are rejected", %{port: port} do
@@ -772,10 +831,51 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert {:ok, conn, []} =
-             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("x", 63)})
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("x", 62)})
 
     assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
+  test "limits a complete chunk-extension line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    line = "5;" <> String.duplicate("x", 61) <> "\r\n"
+    assert byte_size(line) == 65
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, line <> "hello\r\n0\r\n\r\n"})
+  end
+
+  test "counts the chunk size in the chunk-extension line limit", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    line = "0000000000000005;" <> String.duplicate("x", 46) <> "\r\n"
+    assert byte_size(line) == 65
+    {first, second} = String.split_at(line, 40)
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, first})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, second <> "hello\r\n0\r\n\r\n"})
+  end
+
+  test "limits a complete last-chunk line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    line = "0;" <> String.duplicate("x", 61) <> "\r\n"
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}},
+            [{:data, ^ref, "hello"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "5\r\nhello\r\n" <> line <> "\r\n"})
   end
 
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
