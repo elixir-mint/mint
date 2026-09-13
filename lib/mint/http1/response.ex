@@ -53,6 +53,17 @@ defmodule Mint.HTTP1.Response do
 
   def obs_fold?(value), do: :binary.match(value, "\n") != :nomatch
 
+  # RFC 9110 5.5: field-value = *field-content, field-vchar = VCHAR / obs-text,
+  # with HTAB and SP allowed between field-vchars. A recipient of CR, LF or NUL
+  # must reject the message or replace them, and other control characters are
+  # not allowed at all.
+  def valid_header_value?(<<char, rest::binary>>)
+      when char == ?\t or char in 32..126 or char in 128..255,
+      do: valid_header_value?(rest)
+
+  def valid_header_value?(<<>>), do: true
+  def valid_header_value?(_other), do: false
+
   # RFC 9112 5.2: a user agent must replace each received obs-fold with one or
   # more SP octets before interpreting the field value.
   def replace_obs_fold(value) do

@@ -1015,7 +1015,7 @@ defmodule Mint.HTTP1 do
 
   defp decode_header(data, false = _stream_headers) do
     case Response.decode_header(data) do
-      {:ok, {name, value}, rest} -> {:ok, {name, Response.replace_obs_fold(value)}, rest}
+      {:ok, {name, value}, rest} -> validate_header(name, Response.replace_obs_fold(value), rest)
       other -> other
     end
   end
@@ -1027,7 +1027,8 @@ defmodule Mint.HTTP1 do
     # feed, we append a sentinel byte and attempt to decode again.
     #
     # Headers are emitted before the next line is seen, so a folded
-    # continuation line can't be joined to its header. Folds are rejected.
+    # continuation line can't be joined to its header. Folds are rejected by
+    # the value validation since they contain a line feed.
     result =
       with :more <- Response.decode_header(data) do
         data_size = byte_size(data)
@@ -1044,8 +1045,16 @@ defmodule Mint.HTTP1 do
       end
 
     case result do
-      {:ok, {_name, value}, _rest} = ok -> if Response.obs_fold?(value), do: :error, else: ok
+      {:ok, {name, value}, rest} -> validate_header(name, value, rest)
       other -> other
+    end
+  end
+
+  defp validate_header(name, value, rest) do
+    if Response.valid_header_value?(value) do
+      {:ok, {name, value}, rest}
+    else
+      :error
     end
   end
 

@@ -134,6 +134,43 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
   end
 
+  test "header values with control characters are rejected", %{port: port} do
+    for value <- ["b\rar", "b\0ar", "b\x7Far", "b\x01ar"], stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+      response = "HTTP/1.1 200 OK\r\nfoo: " <> value <> "\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:error, conn, %HTTPError{reason: :invalid_header}, [{:status, ^ref, 200}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert_closed_and_released(conn)
+    end
+  end
+
+  test "trailer values with control characters are rejected", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\nfoo: b\0ar\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_trailer_header}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}] = responses
+    assert_closed_and_released(conn)
+  end
+
+  test "header values with obs-text are accepted", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\nfoo: b\xC3\xA4r\r\ncontent-length: 0\r\n\r\n"
+
+    assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, headers}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert headers == [{"foo", "bär"}, {"content-length", "0"}]
+  end
+
   test "obsolete line folding in header values is replaced with a space", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
