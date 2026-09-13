@@ -373,6 +373,34 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "pipelined response after a bodiless response in the same message", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    responses =
+      "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n" <>
+        "HTTP/1.1 204 No Content\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, responses})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:done, ^ref1},
+             {:status, ^ref2, 204},
+             {:headers, ^ref2, []},
+             {:done, ^ref2},
+             {:status, ^ref3, 200},
+             {:headers, ^ref3, _},
+             {:data, ^ref3, "XXXXX"},
+             {:done, ^ref3}
+           ] = responses
+
+    assert conn.buffer == ""
+  end
+
   test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 

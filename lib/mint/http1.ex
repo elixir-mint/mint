@@ -816,10 +816,9 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_body(:none, conn, data, request_ref, responses) do
-    conn = put_in(conn.buffer, data)
     conn = request_done(conn)
     responses = [{:done, request_ref} | responses]
-    {:ok, conn, responses}
+    next_request(conn, data, responses)
   end
 
   # Informational (1xx) responses have no body and must not finalize the
