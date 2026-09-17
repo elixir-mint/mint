@@ -2062,6 +2062,76 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "server pushes" do
+    test "a PUSH_PROMISE on a stream the client cancelled resets the promised stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert_recv_frames [
+        headers(stream_id: stream_id),
+        rst_stream(stream_id: stream_id, error_code: :cancel)
+      ]
+
+      hbf = server_encode_headers([{":method", "GET"}, {"x-promised", "value"}])
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 ),
+                 ping(opaque_data: <<0::64>>)
+               ])
+
+      assert HTTP2.open?(conn)
+
+      assert_recv_frames [
+        rst_stream(stream_id: 2, error_code: :cancel),
+        ping(opaque_data: <<0::64>>)
+      ]
+
+      # The header block was decoded, so the HPACK table is still in sync.
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{}, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"x-promised", "value"}],
+                  [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, [{"x-promised", "value"}]}, {:done, ^ref}] =
+               responses
+    end
+
+    test "a PUSH_PROMISE with CONTINUATIONs on a stream the client cancelled resets the promised stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert_recv_frames [
+        headers(stream_id: stream_id),
+        rst_stream(stream_id: stream_id, error_code: :cancel)
+      ]
+
+      <<hbf1::1-bytes, hbf2::binary>> = server_encode_headers([{":method", "GET"}, {"a", "b"}])
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 push_promise(stream_id: stream_id, hbf: hbf1, promised_stream_id: 2),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert HTTP2.open?(conn)
+      assert_recv_frames [rst_stream(stream_id: 2, error_code: :cancel)]
+    end
+
     test "a PUSH_PROMISE frame and a few CONTINUATION frames are received",
          %{conn: conn} do
       promised_stream_id = 4
