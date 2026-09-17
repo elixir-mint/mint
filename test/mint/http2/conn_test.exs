@@ -2165,6 +2165,41 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "misbehaving server" do
+    test "sends DATA before the response HEADERS", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [data(stream_id: stream_id, data: "hello")])
+
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "DATA frame received before the response HEADERS frame"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "sends DATA after an interim response but before the final HEADERS", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "100"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "hello")
+               ])
+
+      assert [{:status, ^ref, 100}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "DATA frame received before the response HEADERS frame"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
     test "sends a frame with the wrong stream id", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
@@ -2425,12 +2460,18 @@ defmodule Mint.HTTP2Test do
 
       assert {:ok, %HTTP2{} = _conn, responses} =
                stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
                  data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
                ])
 
       assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
 
-      assert responses == [{:data, ref, ""}, {:done, ref}]
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:data, ref, ""},
+               {:done, ref}
+             ]
     end
 
     test "get_window_size/2 raises if the request is not found", %{conn: conn} do
@@ -2606,6 +2647,47 @@ defmodule Mint.HTTP2Test do
                    client_settings: [initial_window_size: 100_000]
                  ]
 
+    test "padding of DATA frames counts towards the receive windows", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Each payload is 9_201 bytes: 1 byte of pad length, 9_000 bytes of data
+      # and 200 bytes of padding. 7 frames drop both windows to 35_593, below the
+      # 40_000 threshold, and the refill has to cover the whole payloads.
+      chunk = String.duplicate("a", 9_000)
+      padding = String.duplicate("p", 200)
+
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk, padding: padding)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 64_407),
+        window_update(stream_id: ^stream_id, window_size_increment: 64_407)
+      ]
+
+      assert conn.receive_window_remaining == 100_000
+      assert conn.streams[stream_id].receive_window_remaining == 100_000
+    end
+
+    test "a PADDED DATA frame with no data and no padding counts its pad length byte",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "", padding: "")
+               ])
+
+      assert conn.receive_window_remaining == 99_999
+      assert conn.streams[stream_id].receive_window_remaining == 99_999
+    end
+
     test "does not send WINDOW_UPDATE until remaining window drops below threshold",
          %{conn: conn} do
       {conn, _ref} = open_request(conn)
@@ -2617,7 +2699,10 @@ defmodule Mint.HTTP2Test do
 
       frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
 
-      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+      assert {:ok, %HTTP2{} = _conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
 
       assert_recv_frames []
     end
@@ -2634,7 +2719,10 @@ defmodule Mint.HTTP2Test do
 
       frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
 
-      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+      assert {:ok, %HTTP2{} = _conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
 
       assert_recv_frames [
         window_update(stream_id: 0, window_size_increment: 60_000),
@@ -2663,7 +2751,10 @@ defmodule Mint.HTTP2Test do
       chunk = String.duplicate("a", 10_000)
       frames = for _ <- 1..46, do: data(stream_id: stream_id, data: chunk)
 
-      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+      assert {:ok, %HTTP2{} = _conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
 
       assert_recv_frames [
         window_update(stream_id: 0, window_size_increment: 460_000),

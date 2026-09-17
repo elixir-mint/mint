@@ -1873,7 +1873,9 @@ defmodule Mint.HTTP2 do
 
     # Regardless of whether we have the stream or not, we need to abide by flow
     # control rules so we still refill the client window for the stream_id we got.
-    window_size_increment = byte_size(data) + byte_size(padding || "")
+    # RFC 9113 6.1: the whole payload is flow controlled, including the Pad Length
+    # byte and the padding.
+    window_size_increment = byte_size(data) + padding_size(padding)
 
     conn =
       if window_size_increment > 0 do
@@ -1887,27 +1889,36 @@ defmodule Mint.HTTP2 do
         assert_stream_in_state(conn, stream, [:open, :half_closed_local])
         body_size = stream.body_size + byte_size(data)
 
-        if stream.content_length && body_size > stream.content_length do
-          conn = close_stream!(conn, stream.id, :protocol_error)
+        cond do
+          # RFC 9113 8.1: a response starts with a HEADERS frame, so DATA before
+          # the final response headers is a malformed response.
+          not stream.received_first_headers? ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            debug_data = "DATA frame received before the response HEADERS frame"
+            {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
 
-          debug_data =
-            if stream.content_length == 0 do
-              "received DATA for a response that must not have content"
+          stream.content_length && body_size > stream.content_length ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+
+            debug_data =
+              if stream.content_length == 0 do
+                "received DATA for a response that must not have content"
+              else
+                "the response body exceeds the content-length header value of " <>
+                  "#{stream.content_length}"
+              end
+
+            {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
+
+          true ->
+            conn = put_in(conn.streams[stream.id].body_size, body_size)
+            responses = [{:data, stream.ref, data} | responses]
+
+            if flag_set?(flags, :data, :end_stream) do
+              end_remote_stream(conn, stream, responses)
             else
-              "the response body exceeds the content-length header value of " <>
-                "#{stream.content_length}"
+              {conn, responses}
             end
-
-          {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
-        else
-          conn = put_in(conn.streams[stream.id].body_size, body_size)
-          responses = [{:data, stream.ref, data} | responses]
-
-          if flag_set?(flags, :data, :end_stream) do
-            end_remote_stream(conn, stream, responses)
-          else
-            {conn, responses}
-          end
         end
 
       :error ->
@@ -1915,6 +1926,9 @@ defmodule Mint.HTTP2 do
         {conn, responses}
     end
   end
+
+  defp padding_size(nil), do: 0
+  defp padding_size(padding), do: byte_size(padding) + 1
 
   # Accounts for `data_size` bytes arriving on the connection and on
   # `stream_id`. Sends a WINDOW_UPDATE for either window only once its
