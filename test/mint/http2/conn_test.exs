@@ -2098,6 +2098,33 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    test "cancelling a promised request resets the promised stream", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, promised_ref, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, %HTTP2{} = conn} = HTTP2.cancel_request(conn, promised_ref)
+      assert_recv_frames [rst_stream(stream_id: 2, error_code: :cancel)]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 {:headers, 2, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+
+      assert HTTP2.open?(conn)
+      assert HTTP2.open_request_count(conn) == 1
+    end
+
     test "a pushed response ending with its HEADERS frame sends no RST_STREAM", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -3973,6 +4000,62 @@ defmodule Mint.HTTP2Test do
       assert flag_set?(continuation(trailer_headers2, :flags), :continuation, :end_headers)
 
       assert server_decode_headers(trailer_hbf1 <> trailer_hbf2) == trailer_headers
+    end
+
+    test "trailers keep the open request count", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn} =
+               HTTP2.stream_request_body(conn, ref, {:eof, [{"x-trailer", "value"}]})
+
+      assert_recv_frames [headers(stream_id: ^stream_id)]
+      assert HTTP2.open_request_count(conn) == 1
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+
+      assert HTTP2.open_request_count(conn) == 0
+    end
+
+    test "trailers on a request whose body has ended return an error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: _stream_id)]
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.stream_request_body(conn, ref, {:eof, [{"x-trailer", "value"}]})
+
+      assert_http2_error error, :request_is_not_streaming
+      refute_receive {:ssl, _socket, _data}, 100
+      assert HTTP2.open_request_count(conn) == 1
+    end
+
+    test "trailers on a promised request return an error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, promised_ref, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.stream_request_body(conn, promised_ref, {:eof, [{"x-trailer", "value"}]})
+
+      assert_http2_error error, :request_is_not_streaming
+      refute_receive {:ssl, _socket, _data}, 100
+
+      assert {conn.open_client_stream_count, conn.open_server_stream_count,
+              conn.reserved_server_stream_count} == {1, 0, 1}
+
+      assert conn.streams[2].state == :reserved_remote
     end
 
     test "unallowed trailer headers cause an error", %{conn: conn} do

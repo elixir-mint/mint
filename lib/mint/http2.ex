@@ -1415,6 +1415,13 @@ defmodule Mint.HTTP2 do
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailers}) do
+    stream = fetch_stream!(conn, stream_id)
+
+    if stream.state != :open do
+      error = wrap_error(:request_is_not_streaming)
+      throw({:mint, conn, error})
+    end
+
     trailers = Headers.from_raw(trailers)
 
     if unallowed_trailer_header = Headers.find_unallowed_trailer(trailers) do
@@ -1423,7 +1430,10 @@ defmodule Mint.HTTP2 do
     end
 
     trailer_headers = Headers.to_raw(trailers, _case_sensitive = false)
-    encode_headers(conn, stream_id, trailer_headers, [:end_headers, :end_stream])
+    enabled_flags = [:end_headers, :end_stream]
+    {conn, payload} = encode_header_block(conn, stream_id, trailer_headers, enabled_flags)
+    conn = put_in(conn.streams[stream_id].state, :half_closed_local)
+    {conn, payload}
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, iodata) do
@@ -1445,12 +1455,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp encode_headers(conn, stream_id, headers, enabled_flags) do
-    assert_headers_smaller_than_max_header_list_size(conn, headers)
-
-    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-    {hbf, conn} = get_and_update_in(conn.encode_table, &HPAX.encode(headers, &1))
-
-    payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
+    {conn, payload} = encode_header_block(conn, stream_id, headers, enabled_flags)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
@@ -1458,6 +1463,15 @@ defmodule Mint.HTTP2 do
     conn = update_in(conn.open_client_stream_count, &(&1 + 1))
 
     {conn, payload}
+  end
+
+  defp encode_header_block(conn, stream_id, headers, enabled_flags) do
+    assert_headers_smaller_than_max_header_list_size(conn, headers)
+
+    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
+    {hbf, conn} = get_and_update_in(conn.encode_table, &HPAX.encode(headers, &1))
+
+    {conn, headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)}
   end
 
   defp assert_headers_smaller_than_max_header_list_size(
@@ -2615,6 +2629,7 @@ defmodule Mint.HTTP2 do
         }
 
         conn = put_in(conn.streams[promised_stream.id], promised_stream)
+        conn = put_in(conn.ref_to_stream_id[promised_stream.ref], promised_stream.id)
         conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
         new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
         {conn, [new_response | responses]}
