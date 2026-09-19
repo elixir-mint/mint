@@ -105,7 +105,8 @@ defmodule Mint.HTTP1.FuzzTest do
       {6, constant({"GET", nil})},
       {2, constant({"POST", "x"})},
       {2, constant({"POST", :stream})},
-      {1, constant({"HEAD", nil})}
+      {1, constant({"HEAD", nil})},
+      {1, constant({"CONNECT", nil})}
     ])
   end
 
@@ -130,6 +131,9 @@ defmodule Mint.HTTP1.FuzzTest do
             close? <- boolean(),
             mode <- member_of([:active, :active, :passive]),
             stream_headers? <- boolean(),
+            max_header_list_size <- member_of([262_144, 262_144, 300, 100]),
+            case_sensitive_headers? <- boolean(),
+            status_reason? <- boolean(),
             extra <-
               frequency([
                 {8, constant("")},
@@ -158,6 +162,9 @@ defmodule Mint.HTTP1.FuzzTest do
         close?: close?,
         mode: mode,
         stream_headers?: stream_headers?,
+        max_header_list_size: max_header_list_size,
+        case_sensitive_headers?: case_sensitive_headers?,
+        status_reason?: status_reason?,
         extra: extra
       }
     end
@@ -187,17 +194,20 @@ defmodule Mint.HTTP1.FuzzTest do
     {:ok, conn} =
       HTTP1.connect(:http, "localhost", port,
         mode: scenario.mode,
-        stream_headers: scenario.stream_headers?
+        stream_headers: scenario.stream_headers?,
+        max_header_list_size: scenario.max_header_list_size,
+        case_sensitive_headers: scenario.case_sensitive_headers?,
+        optional_responses: if(scenario.status_reason?, do: [:status_reason], else: [])
       )
 
     {:ok, server_socket} = Task.await(accept)
     :ok = :gen_tcp.close(listen_socket)
 
-    {conn, refs} =
-      Enum.reduce(methods, {conn, []}, fn {method, body}, {conn, refs} ->
+    {conn, refs, meta} =
+      Enum.reduce(methods, {conn, [], %{}}, fn {method, body}, {conn, refs, meta} ->
         case HTTP1.request(conn, method, "/", [], body) do
-          {:ok, conn, ref} -> {conn, refs ++ [ref]}
-          {:error, conn, _reason} -> {conn, refs}
+          {:ok, conn, ref} -> {conn, refs ++ [ref], Map.put(meta, ref, new_meta(method))}
+          {:error, conn, _reason} -> {conn, refs, meta}
         end
       end)
 
@@ -209,6 +219,7 @@ defmodule Mint.HTTP1.FuzzTest do
       bytes: bytes,
       refs: refs,
       tracker: Enum.into(refs, %{}, &{&1, :new}),
+      meta: meta,
       chunks: Stream.cycle(scenario.chunk_sizes),
       index: 0,
       server_socket: server_socket,
@@ -237,6 +248,8 @@ defmodule Mint.HTTP1.FuzzTest do
     :gen_tcp.close(server_socket)
     drain_mailbox()
   end
+
+  defp new_meta(method), do: %{method: method, status: nil, content_length: nil, body_size: 0}
 
   defp describe(state) do
     "scenario: #{inspect(state.scenario, limit: :infinity)}\nbytes: #{inspect(state.bytes, limit: :infinity)}\nlog: #{inspect(state.log, limit: :infinity)}"
@@ -332,7 +345,8 @@ defmodule Mint.HTTP1.FuzzTest do
   defp client_op(conn, {:request, {method, body}}, state) do
     case HTTP1.request(conn, method, "/", [], body) do
       {:ok, conn, ref} ->
-        {conn, %{state | refs: state.refs ++ [ref], tracker: Map.put(state.tracker, ref, :new)}}
+        state = %{state | refs: state.refs ++ [ref], tracker: Map.put(state.tracker, ref, :new)}
+        {conn, put_in(state.meta[ref], new_meta(method))}
 
       {:error, conn, _reason} ->
         {conn, state}
@@ -343,6 +357,14 @@ defmodule Mint.HTTP1.FuzzTest do
     state = check_responses(responses, state)
 
     if HTTP1.open?(conn) do
+      expected_open = Enum.count(state.tracker, fn {_ref, ref_state} -> ref_state != :done end)
+
+      if HTTP1.open_request_count(conn) != expected_open do
+        flunk(
+          "open_request_count #{HTTP1.open_request_count(conn)} but #{expected_open} unfinished requests, responses #{inspect(responses)}\n#{describe(state)}"
+        )
+      end
+
       {:open, conn, state}
     else
       if HTTP1.open_request_count(conn) != 0 do
@@ -380,11 +402,12 @@ defmodule Mint.HTTP1.FuzzTest do
   defp check_responses(responses, state) do
     stream_headers? = state.scenario.stream_headers?
 
-    tracker =
-      Enum.reduce(responses, state.tracker, fn response, tracker ->
+    {tracker, meta} =
+      Enum.reduce(responses, {state.tracker, state.meta}, fn response, {tracker, meta} ->
         ref = elem(response, 1)
         ref_state = Map.get(tracker, ref, :unknown)
         tag = elem(response, 0)
+        meta = update_meta(meta, response, ref_state, state)
 
         next =
           case {tag, ref_state} do
@@ -400,6 +423,9 @@ defmodule Mint.HTTP1.FuzzTest do
 
             {:error, _} ->
               :done
+
+            {:status_reason, s} when s in [:interim, :headers_pending] ->
+              s
 
             {:status, s} when s == :new or (s == :interim and stream_headers?) ->
               if elem(response, 2) in 100..199 and elem(response, 2) != 101,
@@ -436,11 +462,68 @@ defmodule Mint.HTTP1.FuzzTest do
               )
           end
 
-        Map.put(tracker, ref, next)
+        {Map.put(tracker, ref, next), meta}
       end)
 
-    %{state | tracker: tracker}
+    %{state | tracker: tracker, meta: meta}
   end
+
+  # RFC 9112 6.3: a content-length body has exactly that many bytes, and responses
+  # to HEAD, 204 and 304 responses and 2xx responses to CONNECT have no body.
+  defp update_meta(meta, {:status, ref, status}, _ref_state, _state) when is_map_key(meta, ref) do
+    put_in(meta[ref].status, status)
+  end
+
+  defp update_meta(meta, {:headers, ref, headers}, :headers_pending, _state)
+       when is_map_key(meta, ref) do
+    values = for {name, value} <- headers, String.downcase(name) == "content-length", do: value
+
+    chunked? =
+      Enum.any?(headers, fn {name, _} -> String.downcase(name) == "transfer-encoding" end)
+
+    case values do
+      [value] when not chunked? ->
+        if value =~ ~r/^[0-9]+$/,
+          do: put_in(meta[ref].content_length, String.to_integer(value)),
+          else: meta
+
+      _ ->
+        meta
+    end
+  end
+
+  defp update_meta(meta, {:data, ref, data}, _ref_state, _state) when is_map_key(meta, ref) do
+    update_in(meta[ref].body_size, &(&1 + byte_size(data)))
+  end
+
+  defp update_meta(meta, {:done, ref}, _ref_state, state) when is_map_key(meta, ref) do
+    %{method: method, status: status, content_length: content_length, body_size: body_size} =
+      meta[ref]
+
+    # A 101 response hands the connection to another protocol, whose bytes are
+    # delivered as data whatever the request method was.
+    bodiless? =
+      status != 101 and
+        (method == "HEAD" or status in [204, 304] or
+           (method == "CONNECT" and status in 200..299))
+
+    cond do
+      bodiless? and body_size > 0 ->
+        flunk(
+          "#{method} #{status} response completed with #{body_size} body bytes\n#{describe(state)}"
+        )
+
+      not bodiless? and status != 101 and content_length != nil and body_size != content_length ->
+        flunk(
+          "response completed with #{body_size} body bytes but content-length #{content_length}\n#{describe(state)}"
+        )
+
+      true ->
+        meta
+    end
+  end
+
+  defp update_meta(meta, _response, _ref_state, _state), do: meta
 
   ## Rendering
 
