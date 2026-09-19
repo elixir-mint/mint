@@ -1943,7 +1943,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_hbf = server_encode_headers([{":method", "GET"}])
+      promised_hbf = server_encode_headers(promised_headers())
       hbf1 = server_encode_headers([{":status", "200"}])
       hbf2 = server_encode_headers([{":status", "200"}])
       trailer_hbf = server_encode_headers([{"x-trailer", "some value"}])
@@ -1975,7 +1975,7 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert [
-               {:push_promise, ^ref, promised_ref, [{":method", "GET"}]},
+               {:push_promise, ^ref, promised_ref, promised_headers},
                {:status, ^ref, 200},
                {:headers, ^ref, []},
                {:done, ^ref},
@@ -1985,6 +1985,7 @@ defmodule Mint.HTTP2Test do
                {:done, promised_ref}
              ] = responses
 
+      assert promised_headers == promised_headers()
       assert HTTP2.open?(conn)
     end
 
@@ -2062,6 +2063,247 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "server pushes" do
+    for {variant, fields} <- [
+          missing_scheme: [{":method", "GET"}, {":authority", "localhost"}, {":path", "/"}],
+          empty_scheme: [
+            {":method", "GET"},
+            {":scheme", ""},
+            {":authority", "localhost"},
+            {":path", "/"}
+          ],
+          missing_authority: [{":method", "GET"}, {":scheme", "https"}, {":path", "/"}],
+          empty_authority: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", ""},
+            {":path", "/"}
+          ],
+          empty_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", ""}
+          ],
+          asterisk_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "*"}
+          ],
+          relative_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "style.css"}
+          ],
+          unsafe_method: [
+            {":method", "POST"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"}
+          ],
+          duplicate_method: [
+            {":method", "GET"},
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"}
+          ],
+          uppercase_name: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"Foo", "bar"}
+          ],
+          control_in_value: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"foo", "a\nb"}
+          ],
+          connection_header: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"connection", "keep-alive"}
+          ],
+          te_other_than_trailers: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"te", "gzip"}
+          ],
+          content: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"content-length", "1"}
+          ],
+          invalid_content_length: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/"},
+            {"content-length", "zero"}
+          ]
+        ] do
+      test "a PUSH_PROMISE with #{variant} in the promised request resets the promised stream",
+           %{conn: conn} do
+        {conn, _ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, []} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(unquote(fields)),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        assert_recv_frames [rst_stream(stream_id: 2, error_code: :protocol_error)]
+        refute Map.has_key?(conn.streams, 2)
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for {variant, fields} <- [
+          te_trailers: [{"te", "trailers"}],
+          mixed_case_te_trailers: [{"te", "Trailers"}],
+          zero_content_length: [{"content-length", "00"}]
+        ] do
+      test "a PUSH_PROMISE with #{variant} in the promised request is accepted",
+           %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        promised_headers = promised_headers() ++ unquote(fields)
+
+        assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        refute_receive {:ssl, _socket, _data}, 100
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for {name, promised_stream_id} <- [
+          {"zero", 0},
+          {"odd", 3},
+          {"not greater than the previous promised ID", 2}
+        ] do
+      test "a PUSH_PROMISE with a #{name} promised stream ID is a connection error",
+           %{conn: conn} do
+        {conn, _ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, [{:push_promise, _, _, _}]} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers()),
+                     promised_stream_id: 4,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        assert {:error, %HTTP2{} = conn, error, []} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers()),
+                     promised_stream_id: unquote(promised_stream_id),
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ "promised stream ID"
+        assert_recv_frames [goaway(last_stream_id: 4, error_code: :protocol_error)]
+        refute HTTP2.open?(conn)
+      end
+    end
+
+    test "a PUSH_PROMISE on a server-initiated stream is a connection error", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, _, promised_ref, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, %HTTP2{} = conn,
+              [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}]} =
+               stream_frames(conn, [{:headers, 2, [{":status", "200"}], [:end_headers]}])
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: 2,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 4,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "PUSH_PROMISE frame on server-initiated stream 2"
+      refute HTTP2.open?(conn)
+    end
+
+    test "a pushed response in flight is not affected by a GOAWAY", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, promised_ref, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 4,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, %HTTP2{} = conn,
+              [{:status, ^promised_ref, 200}, {:headers, ^promised_ref, []}]} =
+               stream_frames(conn, [{:headers, 4, [{":status", "200"}], [:end_headers]}])
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 goaway(last_stream_id: stream_id, error_code: :no_error, debug_data: "")
+               ])
+
+      assert {:ok, %HTTP2{}, [{:data, ^promised_ref, "body"}, {:done, ^promised_ref}]} =
+               stream_frames(conn, [
+                 data(stream_id: 4, data: "body", flags: set_flags(:data, [:end_stream]))
+               ])
+    end
+
     test "a PUSH_PROMISE on a stream the client cancelled resets the promised stream",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
@@ -2141,7 +2383,7 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       # Promised headers.
-      headers = [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
+      headers = promised_headers() ++ [{"foo", "bar"}, {"baz", "bong"}]
 
       <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = server_encode_headers(headers)
 
@@ -2176,7 +2418,7 @@ defmodule Mint.HTTP2Test do
              ] = responses
 
       assert is_reference(promised_ref)
-      assert headers == [{":method", "GET"}, {"foo", "bar"}, {"baz", "bong"}]
+      assert headers == promised_headers() ++ [{"foo", "bar"}, {"baz", "bong"}]
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -2209,7 +2451,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      hbf = server_encode_headers([{":method", "GET"}])
+      hbf = server_encode_headers(promised_headers())
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -2234,7 +2476,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+      promised_headers_hbf = server_encode_headers(promised_headers())
       normal_headers_hbf = server_encode_headers([{":status", "200"}])
 
       assert {:error, %HTTP2{} = conn, error, _responses} =
@@ -2259,7 +2501,9 @@ defmodule Mint.HTTP2Test do
                ])
 
       assert_http2_error error, {:protocol_error, debug_data}
-      assert debug_data =~ "stream with ID 4 already exists and can't be reserved by the server"
+
+      assert debug_data =~
+               "promised stream ID 4 is not greater than the last promised stream ID 4"
 
       refute HTTP2.open?(conn)
     end
@@ -2271,7 +2515,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+      promised_headers_hbf = server_encode_headers(promised_headers())
       normal_headers_hbf = server_encode_headers([{":status", "200"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
@@ -2320,7 +2564,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+      promised_headers_hbf = server_encode_headers(promised_headers())
 
       # The server promises many more streams than the client's limit but never
       # follows up with the response HEADERS for any of them. Each promise must
@@ -2362,6 +2606,28 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "misbehaving server" do
+    test "the GOAWAY sent on a connection error carries the last promised stream ID",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, _, _, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 6,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      data = IO.iodata_to_binary(encode_raw(_ping = 0x06, 0x00, 3, <<0::64>>))
+      assert {:error, %HTTP2{}, _error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
+
+      assert_recv_frames [goaway(last_stream_id: 6, error_code: :protocol_error)]
+    end
+
     test "an extension frame in the middle of a header block is a connection error",
          %{conn: conn} do
       {conn, _ref} = open_request(conn)
@@ -4084,6 +4350,10 @@ defmodule Mint.HTTP2Test do
     {server, headers} = TestServer.decode_headers(server, hbf)
     Process.put(@server_pdict_key, server)
     headers
+  end
+
+  defp promised_headers do
+    [{":method", "GET"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}]
   end
 
   defp open_request(conn, body \\ nil) do

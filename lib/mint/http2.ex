@@ -191,6 +191,9 @@ defmodule Mint.HTTP2 do
 
     # Fields of the connection.
     buffer: "",
+    # Highest stream ID the server has promised through PUSH_PROMISE. Promised IDs must
+    # increase, and it is the last server-initiated stream reported in GOAWAY frames.
+    last_promised_stream_id: 0,
     # `send_window_size` is the client *send* window for the connection
     # — how much request-body data we're allowed to send to the server
     # before it refills the window with a WINDOW_UPDATE frame.
@@ -390,8 +393,9 @@ defmodule Mint.HTTP2 do
       When this error is returned, it means that the server hasn't processed the request at all,
       so it's safe to retry the given request on a different or new connection.
 
-    * `{:server_closed_request, error_code}` - when the server closes the request.
-      `error_code` is the reason why the request was closed.
+    * `{:server_closed_request, error_code}` - when the server closes the request before
+      the response is complete. `error_code` is the reason why the request was closed,
+      which can be `:no_error` when the server ends a response early.
 
     * `{:server_closed_connection, reason, debug_data}` - when the server closes the connection
       gracefully or because of an error. In HTTP/2, this corresponds to a `GOAWAY` frame.
@@ -2524,7 +2528,8 @@ defmodule Mint.HTTP2 do
       hbf: hbf
     ) = frame
 
-    assert_valid_promised_stream_id(conn, promised_stream_id)
+    assert_valid_push_promise_stream_ids(conn, stream_id, promised_stream_id)
+    conn = put_in(conn.last_promised_stream_id, promised_stream_id)
 
     # RFC 9113 6.6: the stream may already be closed because the client reset it
     # before the server processed the RST_STREAM, so a missing stream is not an
@@ -2580,6 +2585,11 @@ defmodule Mint.HTTP2 do
         conn = reset_promised_stream(conn, promised_stream_id, :cancel)
         {conn, responses}
 
+      debug_data = promised_headers_error(headers) ->
+        log(conn, :debug, "Resetting promised stream #{promised_stream_id}: #{debug_data}")
+        conn = reset_promised_stream(conn, promised_stream_id, :protocol_error)
+        {conn, responses}
+
       server_stream_count >= conn.client_settings.max_concurrent_streams ->
         conn = reset_promised_stream(conn, promised_stream_id, :refused_stream)
         {conn, responses}
@@ -2621,21 +2631,107 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp assert_valid_promised_stream_id(conn, promised_stream_id) do
+  # RFC 9113 8.4: PUSH_PROMISE frames are only allowed on client-initiated streams.
+  # RFC 9113 5.1.1: server-initiated streams have even identifiers, 0 is reserved for
+  # the connection, and the identifier of a new stream must be greater than all the
+  # streams the server has already opened or reserved.
+  defp assert_valid_push_promise_stream_ids(conn, stream_id, promised_stream_id) do
     cond do
-      not is_integer(promised_stream_id) or Integer.is_odd(promised_stream_id) ->
+      Integer.is_even(stream_id) ->
+        debug_data = "PUSH_PROMISE frame on server-initiated stream #{stream_id}"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
+      promised_stream_id == 0 or Integer.is_odd(promised_stream_id) ->
         debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
         send_connection_error!(conn, :protocol_error, debug_data)
 
-      Map.has_key?(conn.streams, promised_stream_id) ->
+      promised_stream_id <= conn.last_promised_stream_id ->
         debug_data =
-          "stream with ID #{inspect(promised_stream_id)} already exists and can't be " <>
-            "reserved by the server"
+          "promised stream ID #{promised_stream_id} is not greater than the last " <>
+            "promised stream ID #{conn.last_promised_stream_id}"
 
         send_connection_error!(conn, :protocol_error, debug_data)
 
       true ->
         :ok
+    end
+  end
+
+  @promised_pseudo_headers [":method", ":scheme", ":authority", ":path"]
+
+  # RFC 9113 8.4.1: a promised request must be cacheable and safe and must not have
+  # content, and RFC 9113 8.4 and 8.3.1 require the :method, :scheme, :authority and
+  # :path pseudo-headers. Field names and values follow the same rules as response
+  # headers, except that "te" is allowed with the "trailers" value (RFC 9113 8.2.2).
+  defp promised_headers_error(headers) do
+    case validate_promised_fields(headers, _pseudo = %{}, _regular? = false) do
+      {:error, debug_data} ->
+        debug_data
+
+      {:ok, pseudo} ->
+        cond do
+          not Map.has_key?(pseudo, ":method") ->
+            "missing :method pseudo-header in promised request"
+
+          pseudo[":scheme"] in [nil, ""] ->
+            "missing or empty :scheme pseudo-header in promised request"
+
+          pseudo[":authority"] in [nil, ""] ->
+            "missing or empty :authority pseudo-header in promised request"
+
+          not String.starts_with?(pseudo[":path"] || "", "/") ->
+            "missing or invalid :path pseudo-header in promised request"
+
+          pseudo[":method"] not in ["GET", "HEAD"] ->
+            "promised request method #{inspect(pseudo[":method"])} is not safe and cacheable"
+
+          true ->
+            case content_length(headers) do
+              {:ok, content_length} when content_length in [nil, 0] -> nil
+              {:ok, _content_length} -> "promised request must not have content"
+              {:error, _reason} -> "invalid content-length header in promised request"
+            end
+        end
+    end
+  end
+
+  defp validate_promised_fields([], pseudo, _regular?), do: {:ok, pseudo}
+
+  defp validate_promised_fields([{":" <> _ = name, value} | rest], pseudo, regular?) do
+    cond do
+      regular? ->
+        {:error, "pseudo-header #{inspect(name)} must appear before regular header fields"}
+
+      name not in @promised_pseudo_headers ->
+        {:error, "undefined pseudo-header #{inspect(name)} in promised request"}
+
+      Map.has_key?(pseudo, name) ->
+        {:error, "the #{name} pseudo-header appears more than once"}
+
+      not valid_field_value?(value) ->
+        {:error, "invalid value for pseudo-header #{inspect(name)}"}
+
+      true ->
+        validate_promised_fields(rest, Map.put(pseudo, name, value), regular?)
+    end
+  end
+
+  defp validate_promised_fields([{name, value} | rest], pseudo, _regular?) do
+    cond do
+      not valid_field_name?(name) ->
+        {:error, "invalid header name #{inspect(name)}"}
+
+      not valid_field_value?(value) ->
+        {:error, "invalid value for header #{inspect(name)}"}
+
+      name == "te" and String.downcase(value, :ascii) == "trailers" ->
+        validate_promised_fields(rest, pseudo, true)
+
+      connection_specific?(name) ->
+        {:error, elem(connection_specific_error(name), 1)}
+
+      true ->
+        validate_promised_fields(rest, pseudo, true)
     end
   end
 
@@ -2680,9 +2776,12 @@ defmodule Mint.HTTP2 do
 
     # We gather all the unprocessed requests and form {:error, _, _} tuples for each one.
     # At the same time, we delete all the unprocessed requests from the stream set.
+    # RFC 9113 6.8: the last stream ID only covers streams initiated by the client, so
+    # server-initiated (even) streams are never unprocessed.
     {unprocessed_request_responses, conn} =
       Enum.flat_map_reduce(conn.streams, conn, fn
-        {stream_id, _stream}, conn_acc when stream_id <= last_stream_id ->
+        {stream_id, _stream}, conn_acc
+        when Integer.is_even(stream_id) or stream_id <= last_stream_id ->
           {[], conn_acc}
 
         {_stream_id, stream}, conn_acc ->
@@ -2814,7 +2913,12 @@ defmodule Mint.HTTP2 do
 
   defp send_connection_error!(conn, error_code, debug_data) do
     frame =
-      goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+      goaway(
+        stream_id: 0,
+        last_stream_id: conn.last_promised_stream_id,
+        error_code: error_code,
+        debug_data: debug_data
+      )
 
     # Try to send the GOAWAY frame and close connection.
     # If the frame fails to send, we still want to set the close
