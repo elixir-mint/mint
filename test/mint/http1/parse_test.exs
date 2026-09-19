@@ -7,7 +7,7 @@ defmodule Mint.HTTP1.ParseTest do
   test "chunk_size/1" do
     assert chunk_size("0\r\n") == {:ok, 0, "\r\n"}
     assert chunk_size("aF;extension\r\n") == {:ok, 175, ";extension\r\n"}
-    assert chunk_size("2meta\r\n") == {:ok, 2, "meta\r\n"}
+    assert chunk_size("2;meta\r\n") == {:ok, 2, ";meta\r\n"}
     assert chunk_size("F") == :more
 
     assert chunk_size("+5\r\n") == :error
@@ -24,6 +24,73 @@ defmodule Mint.HTTP1.ParseTest do
 
     assert chunk_size(max_chunk_size) == :more
     assert chunk_size("0" <> max_chunk_size) == :error
+  end
+
+  describe "chunk_extensions/1" do
+    test "accepts extensions and leaves bytes after CRLF unconsumed" do
+      for extensions <- [
+            "",
+            ";name",
+            ";name=value",
+            ";name=\"\"",
+            ";name=\"a;\\\"b\\\\c\"",
+            ";name=\"\t ![]~\x80\xFF\"",
+            ";name=\"\\\t\\ \\!\\\x80\\\xFF\"",
+            ";!#$%&'*+-.^_`|~=!#$%&'*+-.^_`|~",
+            " \t; \tname \t= \tvalue \t; \tflag;other=\"value\""
+          ] do
+        line = extensions <> "\r\n"
+        assert chunk_extensions(line <> "body") == {:ok, "body"}
+
+        for length <- 0..(byte_size(line) - 1) do
+          assert chunk_extensions(binary_part(line, 0, length)) == :more
+        end
+      end
+    end
+
+    test "rejects malformed extensions" do
+      for extensions <- [
+            "ZZZZZ",
+            " anything at all",
+            "\tfoo",
+            " 9",
+            "}~!",
+            " ",
+            ";",
+            "; ",
+            ";=value",
+            ";name=",
+            ";name= ",
+            ";name ",
+            ";name=value ",
+            ";name=\"value\" ",
+            ";name;;other",
+            ";name,other",
+            ";name=value extra",
+            ";name=\"unterminated",
+            ";name=\"value\"extra",
+            ";name=\"value\"=extra",
+            ";name=\"bad\x00value\"",
+            ";name=\"bad\x7Fvalue\"",
+            ";name=\"bad\\\nvalue\"",
+            ";name=\"bad\\\rvalue\"",
+            ";name=\"bad\\\x00value\"",
+            ";name=\"bad\\\x7Fvalue\"",
+            ";name=\x80",
+            ";\x80=value",
+            "\nignored",
+            "\rignored"
+          ] do
+        assert chunk_extensions(extensions <> "\r\n") == :error,
+               "accepted malformed extensions: #{inspect(extensions)}"
+      end
+    end
+
+    test "rejects invalid bytes without waiting for CRLF" do
+      for extensions <- ["Z", " f", ";=", ";name=\"\n", ";name=\"\\\n", "\rX"] do
+        assert chunk_extensions(extensions) == :error
+      end
+    end
   end
 
   test "content_length_header/1" do

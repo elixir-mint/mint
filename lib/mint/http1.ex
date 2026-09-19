@@ -897,12 +897,15 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_body({:chunked, :metadata, size}, conn, data, request_ref, responses) do
-    case Parse.ignore_until_crlf(data) do
+    case Parse.chunk_extensions(data) do
       {:ok, rest} ->
         decode_body({:chunked, size}, conn, rest, request_ref, responses)
 
       :more ->
         buffer_response_line(conn, data, responses, {:chunked, :metadata, size})
+
+      :error ->
+        {:error, conn, wrap_error(:invalid_chunk_size), responses}
     end
   end
 

@@ -373,6 +373,69 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  for tail <- [
+        "ZZZZZ",
+        " anything at all",
+        "\tfoo",
+        " 9",
+        "}~!",
+        " ",
+        ";",
+        ";=value",
+        ";name=",
+        ";name=value extra",
+        ";name=\"unterminated",
+        ";name=\"value\"extra",
+        ";name=\"bad\x00value\"",
+        ";name=\"bad\\\nvalue\"",
+        "\nignored"
+      ],
+      size <- ["5", "0"],
+      delivery <- [:whole, :bytewise] do
+    test "rejects chunk line #{inspect(size <> tail)} with #{delivery} delivery", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      body =
+        case unquote(size) do
+          "5" -> "5" <> unquote(tail) <> "\r\nHELLO\r\n0\r\n\r\n"
+          "0" -> "5\r\nHELLO\r\n0" <> unquote(tail) <> "\r\n\r\n"
+        end
+
+      response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <> body
+
+      result =
+        case unquote(delivery) do
+          :whole -> HTTP1.stream(conn, {:tcp, conn.socket, response})
+          :bytewise -> stream_message_bytewise(response, conn, [])
+        end
+
+      assert {:error, conn, %HTTPError{reason: :invalid_chunk_size}, _responses} = result
+      assert_closed_and_released(conn)
+    end
+  end
+
+  for delivery <- [:whole, :bytewise] do
+    test "chunk extensions with #{delivery} delivery", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+          "5 \t; name \t= \t\"a;\\\"b\\\\c\";flag;empty=\"\";token=value\r\nHELLO\r\n" <>
+          "0;last=\"\x80\xFF\"\r\nmy-trailer: value\r\n\r\n"
+
+      result =
+        case unquote(delivery) do
+          :whole -> HTTP1.stream(conn, {:tcp, conn.socket, response})
+          :bytewise -> stream_message_bytewise(response, conn, [])
+        end
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, _} | responses]} = result
+      {data, trailers_and_done} = Enum.split_while(responses, &match?({:data, ^ref, _}, &1))
+      assert IO.iodata_to_binary(Enum.map(data, fn {:data, ^ref, bytes} -> bytes end)) == "HELLO"
+      assert trailers_and_done == [{:headers, ref, [{"my-trailer", "value"}]}, {:done, ref}]
+    end
+  end
+
   test "rejects a chunk size longer than 16 digits when streamed bytewise", %{conn: conn} do
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -485,7 +548,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\nmy-trailer: value\r\n\r\nXXX"
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\nXXX"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -616,7 +679,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\n" <>
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\n" <>
         "my-trailer: value\r\ncontent-type: application/json\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
