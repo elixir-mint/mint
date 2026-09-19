@@ -2247,6 +2247,40 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "settings" do
+    @tag connect_options: [
+           receive_window_update_threshold: 8,
+           client_settings: [initial_window_size: 16]
+         ]
+    test "shrinking the initial window size keeps the remaining credit in sync",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "123456")
+               ])
+
+      assert conn.streams[stream_id].receive_window_remaining == 10
+
+      {:ok, conn} = HTTP2.put_settings(conn, initial_window_size: 8)
+      assert_recv_frames [settings(params: [initial_window_size: 8])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert conn.streams[stream_id].receive_window_size == 8
+      assert conn.streams[stream_id].receive_window_remaining == 2
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "12"}]} =
+               stream_frames(conn, [data(stream_id: stream_id, data: "12")])
+
+      assert conn.streams[stream_id].receive_window_remaining == 8
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 8)]
+    end
+
     test "put_settings/2 can be used to send settings to server", %{conn: conn} do
       {:ok, conn} =
         HTTP2.put_settings(conn, max_concurrent_streams: 123, initial_window_size: 1_000)

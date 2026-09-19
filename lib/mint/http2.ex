@@ -1911,8 +1911,9 @@ defmodule Mint.HTTP2 do
   end
 
   defp maybe_refill_conn(frames, conn) do
-    if conn.receive_window_remaining <= conn.receive_window_update_threshold do
-      increment = conn.receive_window_size - conn.receive_window_remaining
+    increment = conn.receive_window_size - conn.receive_window_remaining
+
+    if conn.receive_window_remaining <= conn.receive_window_update_threshold and increment > 0 do
       [window_update(stream_id: 0, window_size_increment: increment) | frames]
     else
       frames
@@ -1922,9 +1923,10 @@ defmodule Mint.HTTP2 do
   defp maybe_refill_stream(frames, conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
-        if stream.receive_window_remaining <= conn.receive_window_update_threshold do
-          increment = stream.receive_window_size - stream.receive_window_remaining
+        increment = stream.receive_window_size - stream.receive_window_remaining
 
+        if stream.receive_window_remaining <= conn.receive_window_update_threshold and
+             increment > 0 do
           [
             window_update(stream_id: stream_id, window_size_increment: increment) | frames
           ]
@@ -2255,9 +2257,12 @@ defmodule Mint.HTTP2 do
         for {stream_id, stream} <- streams,
             stream.state in [:open, :half_closed_local, :reserved_remote],
             into: streams do
-          receive_window_size = stream.receive_window_size + diff
-
-          {stream_id, %{stream | receive_window_size: receive_window_size}}
+          {stream_id,
+           %{
+             stream
+             | receive_window_size: stream.receive_window_size + diff,
+               receive_window_remaining: stream.receive_window_remaining + diff
+           }}
         end
       end)
 
