@@ -573,7 +573,8 @@ defmodule Mint.HTTP1 do
 
     if request && request.body == :until_closed do
       conn = put_in(conn.state, :closed)
-      {:ok, conn, [{:done, request.ref}]}
+      {conn, responses} = fail_queued_requests_if_closed(conn, [{:done, request.ref}])
+      {:ok, conn, Enum.reverse(responses)}
     else
       {:error, conn, conn.transport.wrap_error(:closed), []}
     end
