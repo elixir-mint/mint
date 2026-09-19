@@ -1545,6 +1545,47 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "pipelined requests behind a Connection: close response get an :unprocessed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, [{"connection", "close"}, {"content-length", "2"}]},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}},
+             {:error, ^ref3, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert HTTP1.open_request_count(conn) == 0
+    assert_closed_and_released(conn)
+  end
+
+  test "pipelined requests behind an HTTP/1.0 response get an :unprocessed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert_closed_and_released(conn)
+  end
+
   defp request_string(string) do
     String.replace(string, "\n", "\r\n")
   end

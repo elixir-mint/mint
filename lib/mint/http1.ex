@@ -43,6 +43,11 @@ defmodule Mint.HTTP1 do
     * `:request_body_is_streaming` - when you call `request/5` to send a new
       request but another request is already streaming.
 
+    * `:unprocessed` - when a pipelined request gets no response because the server
+      closed the connection after a previous response, either with a `connection: close`
+      header or by answering with HTTP/1.0 without `connection: keep-alive`. The request
+      can be retried on a new connection.
+
     * `{:unexpected_data, data}` - when unexpected data is received from the server.
 
     * `:invalid_status_line` - when the HTTP/1 status line is invalid.
@@ -537,6 +542,7 @@ defmodule Mint.HTTP1 do
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
+        {conn, responses} = fail_queued_requests_if_closed(conn, responses)
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, conn, reason, responses} ->
@@ -544,6 +550,22 @@ defmodule Mint.HTTP1 do
         {:error, conn, reason, Enum.reverse(responses)}
     end
   end
+
+  # A response with "Connection: close" (or an HTTP/1.0 response without
+  # "keep-alive") closes the connection, so pipelined requests queued behind it
+  # will never get a response.
+  defp fail_queued_requests_if_closed(%{state: :closed} = conn, responses) do
+    requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
+
+    responses =
+      Enum.reduce(requests, responses, fn request, responses ->
+        [{:error, request.ref, wrap_error(:unprocessed)} | responses]
+      end)
+
+    {%{conn | request: nil, requests: :queue.new()}, responses}
+  end
+
+  defp fail_queued_requests_if_closed(conn, responses), do: {conn, responses}
 
   defp handle_close(%__MODULE__{request: request} = conn) do
     conn = internal_close(conn)
@@ -1342,6 +1364,11 @@ defmodule Mint.HTTP1 do
 
   def format_error(:closed) do
     "the connection is closed"
+  end
+
+  def format_error(:unprocessed) do
+    "request was not processed because the server closed the connection after a " <>
+      "previous response, so it's safe to retry on a new connection"
   end
 
   def format_error(:request_body_is_streaming) do
