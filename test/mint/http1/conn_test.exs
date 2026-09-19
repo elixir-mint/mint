@@ -1597,6 +1597,16 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "an obs-fold at the start of a header value leaves no leading whitespace",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\nFoo:\r\n bar\r\nContent-Length: 0\r\n\r\n"
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, headers}, {:done, ^ref}] = responses
+    assert headers == [{"foo", "bar"}, {"content-length", "0"}]
+  end
+
   defp request_string(string) do
     String.replace(string, "\n", "\r\n")
   end
@@ -1662,10 +1672,10 @@ defmodule Mint.HTTP1Test do
       assert {:headers, ^ref, [{"qux", "Quux"}]} = headers2
     end
 
-    test "rejects obsolete line folding in header values", %{conn: conn} do
-      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    test "replaces obsolete line folding received together with its header", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
-      assert {:error, _conn, %HTTPError{reason: :invalid_header}, [_status]} =
+      assert {:ok, _conn, [_status, {:headers, ^ref, [{"foo", "bar baz"}]}]} =
                HTTP1.stream(
                  conn,
                  {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: bar\r\n baz\r\n\r\n"}

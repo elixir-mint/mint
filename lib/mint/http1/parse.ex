@@ -109,8 +109,14 @@ defmodule Mint.HTTP1.Parse do
     end
   end
 
-  # RFC 9112 5.1: optional whitespace after the field value is not part of it.
-  # :erlang.decode_packet/3 strips the leading whitespace but keeps the trailing one.
+  # RFC 9112 5.1: optional whitespace around the field value is not part of it.
+  # :erlang.decode_packet/3 strips the leading whitespace but keeps the trailing one,
+  # and replacing an obs-fold at the start of a value leaves a leading space.
+  def trim_leading_whitespace(<<char, rest::binary>>) when is_whitespace(char),
+    do: trim_leading_whitespace(rest)
+
+  def trim_leading_whitespace(string), do: string
+
   def trim_trailing_whitespace(<<>>), do: <<>>
 
   def trim_trailing_whitespace(string) do

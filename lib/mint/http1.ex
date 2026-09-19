@@ -1027,8 +1027,8 @@ defmodule Mint.HTTP1 do
     # feed, we append a sentinel byte and attempt to decode again.
     #
     # Headers are emitted before the next line is seen, so a folded
-    # continuation line can't be joined to its header. Folds are rejected by
-    # the value validation since they contain a line feed.
+    # continuation line that arrives later can't be joined to its header and
+    # is rejected as an invalid header line.
     result =
       with :more <- Response.decode_header(data) do
         data_size = byte_size(data)
@@ -1045,13 +1045,13 @@ defmodule Mint.HTTP1 do
       end
 
     case result do
-      {:ok, {name, value}, rest} -> validate_header(name, value, rest)
+      {:ok, {name, value}, rest} -> validate_header(name, Response.replace_obs_fold(value), rest)
       other -> other
     end
   end
 
   defp validate_header(name, value, rest) do
-    value = Parse.trim_trailing_whitespace(value)
+    value = value |> Parse.trim_leading_whitespace() |> Parse.trim_trailing_whitespace()
 
     if Response.valid_header_name?(name) and Response.valid_header_value?(value) do
       {:ok, {name, value}, rest}
