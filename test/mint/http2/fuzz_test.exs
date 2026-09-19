@@ -148,7 +148,26 @@ defmodule Mint.HTTP2.FuzzTest do
       {1, tuple({constant(:raw), binary(min_length: 1, max_length: 12)})},
       {2, tuple({constant(:client), constant(:cancel), integer(0..2)})},
       {2, tuple({constant(:client), constant(:body), integer(0..2), member_of(["x", :eof])})},
-      {1, tuple({constant(:client), constant(:ping)})}
+      {1, tuple({constant(:client), constant(:ping)})},
+      {2, tuple({constant(:client), constant(:request), member_of([nil, :stream, "body"])})},
+      {1,
+       tuple(
+         {constant(:client), constant(:put_settings),
+          member_of([
+            [initial_window_size: 10],
+            [initial_window_size: 65_535],
+            [initial_window_size: 100_000],
+            [header_table_size: 0],
+            [header_table_size: 8192],
+            [max_frame_size: 16_384],
+            [max_header_list_size: 100],
+            [enable_push: false]
+          ])}
+       )},
+      {1,
+       tuple(
+         {constant(:headers_raw), target_gen(), binary(min_length: 1, max_length: 16), boolean()}
+       )}
     ])
   end
 
@@ -157,8 +176,15 @@ defmodule Mint.HTTP2.FuzzTest do
             bodies <- list_of(member_of([nil, :stream, "body"]), length: request_count),
             actions <- list_of(action_gen(), min_length: 1, max_length: 25),
             chunk_sizes <- list_of(integer(1..64), min_length: 1, max_length: 40),
-            cancel_first? <- boolean() do
-      %{bodies: bodies, actions: actions, chunk_sizes: chunk_sizes, cancel_first?: cancel_first?}
+            cancel_first? <- boolean(),
+            mode <- member_of([:active, :active, :passive]) do
+      %{
+        bodies: bodies,
+        actions: actions,
+        chunk_sizes: chunk_sizes,
+        cancel_first?: cancel_first?,
+        mode: mode
+      }
     end
   end
 
@@ -174,23 +200,21 @@ defmodule Mint.HTTP2.FuzzTest do
          bodies: bodies,
          actions: actions,
          chunk_sizes: chunk_sizes,
-         cancel_first?: cancel_first?
+         cancel_first?: cancel_first?,
+         mode: mode
        }) do
     drain_mailbox()
     {:ok, port, task} = TestServer.listen_and_accept()
-    conn = start_connection(port, task)
+    conn = start_connection(port, task, mode)
 
-    {conn, refs} =
-      Enum.map_reduce(bodies, conn, fn body, conn ->
+    {conn, refs, sids} =
+      Enum.reduce(bodies, {conn, [], []}, fn body, {conn, refs, sids} ->
+        sid = conn.next_stream_id
         {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [], body)
-        {ref, conn}
+        {conn, refs ++ [ref], sids ++ [sid]}
       end)
-      |> then(fn {refs, conn} -> {conn, refs} end)
 
-    frames = recv_all_frames()
-    sids = for headers(stream_id: sid) <- frames, do: sid
-    ^sids = Enum.sort(sids)
-    true = length(sids) == length(refs)
+    ^sids = for headers(stream_id: sid) <- recv_all_frames(), do: sid
 
     {conn, closed_sid} =
       if cancel_first? do
@@ -201,184 +225,256 @@ defmodule Mint.HTTP2.FuzzTest do
         {conn, nil}
       end
 
-    server = Process.get(:fuzz_server)
-
-    {steps, _server, _state} =
-      interpret(actions, server, %{sids: sids, promised: [], next_promised: 2, closed: closed_sid})
-
     tracker = Enum.into(refs, %{}, &{&1, :new})
     tracker = if cancel_first?, do: Map.put(tracker, hd(refs), :done), else: tracker
 
-    run_steps(conn, steps, Stream.cycle(chunk_sizes), tracker, {actions, refs})
+    state = %{
+      sids: sids,
+      refs: refs,
+      promised: [],
+      next_promised: 2,
+      closed: closed_sid,
+      server: Process.get(:fuzz_server),
+      chunks: Stream.cycle(chunk_sizes),
+      tracker: tracker,
+      actions: actions,
+      mode: mode,
+      log: []
+    }
+
+    run(conn, actions, state)
     _ = HTTP2.close(conn)
-    _ = :ssl.close(server.socket)
+    _ = :ssl.close(state.server.socket)
     drain_mailbox()
   end
 
-  defp run_steps(_conn, [], _chunks, _tracker, _context), do: :ok
+  defp run(_conn, [], _state), do: :ok
 
-  defp run_steps(conn, [{:server, bytes} | steps], chunks, tracker, context) do
-    case feed(conn, bytes, chunks, tracker, context) do
-      {:open, conn, tracker} -> run_steps(conn, steps, chunks, tracker, context)
+  defp run(conn, [{:client, op} | rest], state) do
+    run_client(conn, op, rest, state)
+  end
+
+  defp run(conn, [{:client, op, arg} | rest], state) do
+    run_client(conn, {op, arg}, rest, state)
+  end
+
+  defp run(conn, [{:client, op, arg1, arg2} | rest], state) do
+    run_client(conn, {op, arg1, arg2}, rest, state)
+  end
+
+  defp run(conn, actions, state) do
+    {server_actions, rest} =
+      Enum.split_while(actions, fn
+        {:client, _} -> false
+        {:client, _, _} -> false
+        {:client, _, _, _} -> false
+        _other -> true
+      end)
+
+    {chunks, state} =
+      Enum.map_reduce(server_actions, state, fn action, state ->
+        {bytes, server, state} = encode_action(action, state.server, state)
+        {bytes, %{state | server: server}}
+      end)
+
+    state = %{state | log: state.log ++ server_actions}
+
+    case feed(conn, IO.iodata_to_binary(chunks), state) do
+      {:open, conn, state} -> run(conn, rest, state)
       :closed -> :ok
     end
   end
 
-  defp run_steps(conn, [{:client, op} | steps], chunks, tracker, {_actions, refs} = context) do
-    {conn, tracker} =
+  defp run_client(conn, op, rest, state) do
+    state = %{state | log: state.log ++ [{:client, op}]}
+
+    {conn, state} =
       try do
-        client_op(conn, op, refs, tracker)
+        client_op(conn, op, state)
       rescue
         e ->
           flunk(
-            "client op #{inspect(op)} raised #{Exception.format(:error, e, __STACKTRACE__)}\nactions: #{inspect(context, limit: :infinity)}"
+            "client op #{inspect(op)} raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{describe(state)}"
           )
       end
 
-    check_conn(conn, tracker, context)
+    check_conn(conn, state)
 
     if HTTP2.open?(conn, :read) do
-      run_steps(conn, steps, chunks, tracker, context)
+      run(conn, rest, state)
     end
   end
 
-  defp client_op(conn, {:cancel, i}, refs, tracker) do
-    ref = Enum.at(refs, rem(i, length(refs)))
+  defp describe(state) do
+    "actions so far: #{inspect(state.log, limit: :infinity)}\nall actions: #{inspect(state.actions, limit: :infinity)}"
+  end
+
+  defp pick_ref(state, i), do: Enum.at(state.refs, rem(i, length(state.refs)))
+
+  defp client_op(conn, {:cancel, i}, state) do
+    ref = pick_ref(state, i)
 
     case HTTP2.cancel_request(conn, ref) do
-      {:ok, conn} -> {conn, Map.put(tracker, ref, :done)}
-      {:error, conn, _reason} -> {conn, tracker}
+      {:ok, conn} -> {conn, put_in(state.tracker[ref], :done)}
+      {:error, conn, _reason} -> {conn, state}
     end
   end
 
-  defp client_op(conn, {:body, i, chunk}, refs, tracker) do
-    ref = Enum.at(refs, rem(i, length(refs)))
+  defp client_op(conn, {:body, i, chunk}, state) do
+    ref = pick_ref(state, i)
 
     case HTTP2.stream_request_body(conn, ref, chunk) do
-      {:ok, conn} -> {conn, tracker}
-      {:error, conn, _reason} -> {conn, tracker}
+      {:ok, conn} -> {conn, state}
+      {:error, conn, _reason} -> {conn, state}
     end
   end
 
-  defp client_op(conn, :ping, _refs, tracker) do
+  defp client_op(conn, :ping, state) do
     case HTTP2.ping(conn) do
-      {:ok, conn, ref} -> {conn, Map.put(tracker, ref, :ping)}
-      {:error, conn, _reason} -> {conn, tracker}
+      {:ok, conn, ref} -> {conn, put_in(state.tracker[ref], :ping)}
+      {:error, conn, _reason} -> {conn, state}
     end
   end
 
-  defp feed(conn, "", _chunks, tracker, _context), do: {:open, conn, tracker}
+  defp client_op(conn, {:request, body}, state) do
+    sid = conn.next_stream_id
 
-  defp feed(conn, bytes, chunks, tracker, actions) do
-    size = min(Enum.at(chunks, 0), byte_size(bytes))
+    case HTTP2.request(conn, "GET", "/", [], body) do
+      {:ok, conn, ref} ->
+        state = %{state | sids: state.sids ++ [sid], refs: state.refs ++ [ref]}
+        {conn, put_in(state.tracker[ref], :new)}
+
+      {:error, conn, _reason} ->
+        {conn, state}
+    end
+  end
+
+  defp client_op(conn, {:put_settings, params}, state) do
+    case HTTP2.put_settings(conn, params) do
+      {:ok, conn} -> {conn, state}
+      {:error, conn, _reason} -> {conn, state}
+    end
+  end
+
+  defp feed(conn, "", state), do: {:open, conn, state}
+
+  defp feed(conn, bytes, state) do
+    size = min(Enum.at(state.chunks, 0), byte_size(bytes))
     <<chunk::binary-size(^size), rest::binary>> = bytes
+    state = %{state | chunks: Stream.drop(state.chunks, 1)}
 
     result =
       try do
-        HTTP2.stream(conn, {:ssl, conn.socket, chunk})
+        deliver(conn, chunk, state)
       rescue
         e ->
           flunk(
-            "stream/2 raised #{Exception.format(:error, e, __STACKTRACE__)}\nactions: #{inspect(actions, limit: :infinity)}"
+            "stream/2 raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{describe(state)}"
           )
       catch
         kind, value ->
-          flunk(
-            "stream/2 threw #{inspect(kind)} #{inspect(value)}\nactions: #{inspect(actions, limit: :infinity)}"
-          )
+          flunk("stream/2 threw #{inspect(kind)} #{inspect(value)}\n#{describe(state)}")
       end
 
     case result do
       {:ok, conn, responses} ->
-        tracker = check_responses(responses, tracker, actions)
-        check_conn(conn, tracker, actions)
+        state = check_responses(responses, state)
+        check_conn(conn, state)
 
         if HTTP2.open?(conn, :read) do
-          feed(conn, rest, Stream.drop(chunks, 1), tracker, actions)
+          feed(conn, rest, state)
         else
           :closed
         end
 
       {:error, conn, reason, responses} ->
-        tracker = check_responses(responses, tracker, actions)
-        check_conn(conn, tracker, actions)
+        state = check_responses(responses, state)
+        check_conn(conn, state)
 
         if HTTP2.open?(conn, :write) do
-          flunk(
-            "connection still writable after error #{inspect(reason)}\nactions: #{inspect(actions, limit: :infinity)}"
-          )
+          flunk("connection still writable after error #{inspect(reason)}\n#{describe(state)}")
         end
 
         :closed
 
       other ->
-        flunk("unexpected return #{inspect(other)}")
+        flunk("unexpected return #{inspect(other)}\n#{describe(state)}")
     end
   end
 
-  defp check_responses(responses, tracker, actions) do
-    actions = {actions, responses}
-
-    Enum.reduce(responses, tracker, fn response, tracker ->
-      ref = elem(response, 1)
-      state = Map.get(tracker, ref, :unknown)
-      tag = elem(response, 0)
-
-      next =
-        case {tag, state} do
-          {:pong, :ping} ->
-            :done
-
-          {_, :unknown} ->
-            flunk(
-              "response #{inspect(response)} for unknown ref\nactions: #{inspect(actions, limit: :infinity)}"
-            )
-
-          {_, :done} ->
-            flunk(
-              "response #{inspect(response)} after done/error\nactions: #{inspect(actions, limit: :infinity)}"
-            )
-
-          {:error, _} ->
-            :done
-
-          {:push_promise, _} ->
-            state
-
-          {:status, :new} ->
-            if elem(response, 2) in 100..199, do: :interim, else: :headers_pending
-
-          {:headers, :interim} ->
-            :new
-
-          {:headers, :headers_pending} ->
-            :body
-
-          {:headers, :body} ->
-            :trailers
-
-          {:data, :body} ->
-            :body
-
-          {:done, s} when s in [:body, :trailers] ->
-            :done
-
-          _ ->
-            flunk(
-              "response #{inspect(response)} in state #{inspect(state)}\nactions: #{inspect(actions, limit: :infinity)}"
-            )
-        end
-
-      tracker = Map.put(tracker, ref, next)
-
-      case response do
-        {:push_promise, _ref, promised_ref, _headers} -> Map.put(tracker, promised_ref, :new)
-        _ -> tracker
-      end
-    end)
+  defp deliver(conn, chunk, %{mode: :active}) do
+    HTTP2.stream(conn, {:ssl, conn.socket, chunk})
   end
 
-  defp check_conn(conn, tracker, actions) do
+  defp deliver(conn, chunk, %{mode: :passive} = state) do
+    :ok = :ssl.send(state.server.socket, chunk)
+    HTTP2.recv(conn, byte_size(chunk), 1000)
+  end
+
+  defp check_responses(responses, state) do
+    tracker =
+      Enum.reduce(responses, state.tracker, fn response, tracker ->
+        ref = elem(response, 1)
+        ref_state = Map.get(tracker, ref, :unknown)
+        tag = elem(response, 0)
+
+        next =
+          case {tag, ref_state} do
+            {:pong, :ping} ->
+              :done
+
+            {_, :unknown} ->
+              flunk(
+                "response #{inspect(response)} for unknown ref in #{inspect(responses)}\n#{describe(state)}"
+              )
+
+            {_, :done} ->
+              flunk(
+                "response #{inspect(response)} after done/error in #{inspect(responses)}\n#{describe(state)}"
+              )
+
+            {:error, _} ->
+              :done
+
+            {:push_promise, _} ->
+              ref_state
+
+            {:status, :new} ->
+              if elem(response, 2) in 100..199, do: :interim, else: :headers_pending
+
+            {:headers, :interim} ->
+              :new
+
+            {:headers, :headers_pending} ->
+              :body
+
+            {:headers, :body} ->
+              :trailers
+
+            {:data, :body} ->
+              :body
+
+            {:done, s} when s in [:body, :trailers] ->
+              :done
+
+            _ ->
+              flunk(
+                "response #{inspect(response)} in state #{inspect(ref_state)} in #{inspect(responses)}\n#{describe(state)}"
+              )
+          end
+
+        tracker = Map.put(tracker, ref, next)
+
+        case response do
+          {:push_promise, _ref, promised_ref, _headers} -> Map.put(tracker, promised_ref, :new)
+          _ -> tracker
+        end
+      end)
+
+    %{state | tracker: tracker}
+  end
+
+  defp check_conn(conn, state) do
     streams = Map.values(conn.streams)
     open = [:open, :half_closed_local, :half_closed_remote]
 
@@ -398,56 +494,24 @@ defmodule Mint.HTTP2.FuzzTest do
 
     if expected != actual do
       flunk(
-        "counters out of sync: expected #{inspect(expected)} got #{inspect(actual)}\nactions: #{inspect(actions, limit: :infinity)}"
+        "counters out of sync: expected #{inspect(expected)} got #{inspect(actual)}\n#{describe(state)}"
       )
     end
 
-    for {ref, :done} <- tracker, Map.has_key?(conn.ref_to_stream_id, ref) do
-      flunk(
-        "stream for finished ref #{inspect(ref)} still tracked\nactions: #{inspect(actions, limit: :infinity)}"
-      )
+    for {ref, :done} <- state.tracker, Map.has_key?(conn.ref_to_stream_id, ref) do
+      flunk("stream for finished ref #{inspect(ref)} still tracked\n#{describe(state)}")
     end
 
-    for {ref, state} <- tracker,
-        state not in [:done, :ping],
+    for {ref, ref_state} <- state.tracker,
+        ref_state not in [:done, :ping],
         not Map.has_key?(conn.ref_to_stream_id, ref),
         HTTP2.open?(conn, :read),
         conn.state == :open do
-      flunk(
-        "unfinished ref #{inspect(ref)} (#{state}) has no stream\nactions: #{inspect(actions, limit: :infinity)}"
-      )
+      flunk("unfinished ref #{inspect(ref)} (#{ref_state}) has no stream\n#{describe(state)}")
     end
   end
 
-  ## Interpreter
-
-  defp interpret(actions, server, state) do
-    {steps, {server, state}} =
-      Enum.map_reduce(actions, {server, state}, fn
-        {:client, op}, acc ->
-          {{:client, op}, acc}
-
-        {:client, op, arg}, acc ->
-          {{:client, {op, arg}}, acc}
-
-        {:client, op, arg1, arg2}, acc ->
-          {{:client, {op, arg1, arg2}}, acc}
-
-        action, {server, state} ->
-          {bytes, server, state} = encode_action(action, server, state)
-          {{:server, IO.iodata_to_binary(bytes)}, {server, state}}
-      end)
-
-    steps =
-      steps
-      |> Enum.chunk_by(&elem(&1, 0))
-      |> Enum.flat_map(fn
-        [{:server, _} | _] = group -> [{:server, Enum.map_join(group, &elem(&1, 1))}]
-        group -> group
-      end)
-
-    {steps, server, state}
-  end
+  ## Server frame encoding
 
   defp resolve({:known, i}, state), do: Enum.at(state.sids, rem(i, length(state.sids)))
   defp resolve({:promised, i}, %{promised: []} = state), do: resolve({:known, i}, state)
@@ -486,6 +550,14 @@ defmodule Mint.HTTP2.FuzzTest do
       end
 
     {bytes, server, state}
+  end
+
+  defp encode_action({:headers_raw, target, hbf, end_stream?}, server, state) do
+    sid = resolve(target, state)
+    flags = if end_stream?, do: [:end_headers, :end_stream], else: [:end_headers]
+
+    {Frame.encode(headers(stream_id: sid, hbf: hbf, flags: set_flags(:headers, flags))), server,
+     state}
   end
 
   defp encode_action({:data, target, size, padding, end_stream?}, server, state) do
@@ -595,9 +667,12 @@ defmodule Mint.HTTP2.FuzzTest do
 
   ## Connection setup
 
-  defp start_connection(port, server_socket_task) do
+  defp start_connection(port, server_socket_task, mode) do
     ack_flags = Frame.set_flags(:settings, [:ack])
-    {:ok, conn} = HTTP2.connect(:https, "localhost", port, transport_opts: [verify: :verify_none])
+
+    {:ok, conn} =
+      HTTP2.connect(:https, "localhost", port, transport_opts: [verify: :verify_none], mode: mode)
+
     {:ok, server_socket} = Task.await(server_socket_task)
     :ok = TestServer.perform_http2_handshake(server_socket)
 
@@ -607,9 +682,15 @@ defmodule Mint.HTTP2.FuzzTest do
         Frame.encode(settings(flags: ack_flags, params: []))
       ])
 
-    socket = conn.socket
-    assert_receive {:ssl, ^socket, _} = message, @recv_timeout
-    {:ok, conn, []} = HTTP2.stream(conn, message)
+    {:ok, conn, []} =
+      if mode == :passive do
+        HTTP2.recv(conn, 0, @recv_timeout)
+      else
+        socket = conn.socket
+        assert_receive {:ssl, ^socket, _} = message, @recv_timeout
+        HTTP2.stream(conn, message)
+      end
+
     {:ok, data} = :ssl.recv(server_socket, 0, @recv_timeout)
     {:ok, settings(flags: ^ack_flags, params: []), ""} = Frame.decode_next(data)
     :ok = :ssl.setopts(server_socket, active: true)
