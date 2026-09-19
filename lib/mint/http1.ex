@@ -43,6 +43,12 @@ defmodule Mint.HTTP1 do
     * `:request_body_is_streaming` - when you call `request/5` to send a new
       request but another request is already streaming.
 
+    * `:request_is_not_streaming` - when you call `stream_request_body/3` for a
+      request whose body is not being streamed, for example after sending `:eof`.
+
+    * `:unknown_request_to_stream` - when you call `stream_request_body/3` with a
+      request reference that doesn't belong to this connection.
+
     * `:unprocessed` - when a pipelined request gets no response because the server
       closed the connection after a previous response, either with a `connection: close`
       header or by answering with HTTP/1.0 without `connection: keep-alive`. The request
@@ -412,6 +418,10 @@ defmodule Mint.HTTP1 do
           iodata() | :eof | {:eof, trailer_headers :: Types.headers()}
         ) ::
           {:ok, t()} | {:error, t(), Types.error()}
+  def stream_request_body(%__MODULE__{state: :closed} = conn, _request_ref, _chunk) do
+    {:error, conn, wrap_error(:closed)}
+  end
+
   def stream_request_body(
         %__MODULE__{streaming_request: %{encoding: :identity, ref: ref}} = conn,
         ref,
@@ -468,6 +478,19 @@ defmodule Mint.HTTP1 do
 
       {:error, error} ->
         {:error, conn, error}
+    end
+  end
+
+  def stream_request_body(%__MODULE__{} = conn, request_ref, _chunk)
+      when is_reference(request_ref) do
+    known? =
+      (conn.request != nil and conn.request.ref == request_ref) or
+        Enum.any?(:queue.to_list(conn.requests), &(&1.ref == request_ref))
+
+    if known? do
+      {:error, conn, wrap_error(:request_is_not_streaming)}
+    else
+      {:error, conn, wrap_error(:unknown_request_to_stream)}
     end
   end
 
@@ -1374,6 +1397,14 @@ defmodule Mint.HTTP1 do
 
   def format_error(:request_body_is_streaming) do
     "a request body is currently streaming, so no new requests can be issued"
+  end
+
+  def format_error(:request_is_not_streaming) do
+    "can't send more data on a request that is not streaming its body"
+  end
+
+  def format_error(:unknown_request_to_stream) do
+    "can't stream the request body because the request is not known to this connection"
   end
 
   def format_error({:unexpected_data, data}) do

@@ -1269,6 +1269,37 @@ defmodule Mint.HTTP1Test do
   end
 
   describe "streaming requests" do
+    test "streaming a body for a request that is not streaming returns an error",
+         %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:error, conn, %HTTPError{reason: :request_is_not_streaming}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+
+      assert {:error, conn, %HTTPError{reason: :unknown_request_to_stream}} =
+               HTTP1.stream_request_body(conn, make_ref(), "hello")
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "streaming a body after :eof returns an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+
+      assert {:error, conn, %HTTPError{reason: :request_is_not_streaming}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "streaming a body on a closed connection returns an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+      {:ok, conn} = HTTP1.close(conn)
+
+      assert {:error, _conn, %HTTPError{reason: :closed}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+    end
+
     test "response arriving before the request body is complete",
          %{conn: conn, server_socket: server_socket} do
       {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "10"}], :stream)
