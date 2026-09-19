@@ -351,7 +351,9 @@ defmodule Mint.HTTP2 do
 
     * `:too_many_concurrent_requests` - when the maximum number of concurrent requests
       allowed by the server is reached. To find out what this limit is, use `get_setting/2`
-      with the `:max_concurrent_streams` setting name.
+      with the `:max_concurrent_streams` setting name. It's also returned for a promised
+      request whose pushed response is refused because it would exceed the client's
+      `:max_concurrent_streams` setting.
 
     * `{:max_header_list_size_exceeded, size, max_size}` - when the maximum size of
       the header list is reached. `size` is the actual value of the header list size,
@@ -2099,53 +2101,42 @@ defmodule Mint.HTTP2 do
             {conn, responses}
 
           true ->
-            assert_stream_in_state(conn, stream, [:open, :half_closed_local])
-            status = String.to_integer(status)
-            headers = join_cookie_headers(headers)
-            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
-            {conn, new_responses}
+            case open_promised_stream(conn, stream) do
+              {:ok, conn} ->
+                status = String.to_integer(status)
+                headers = join_cookie_headers(headers)
+                new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+                {conn, new_responses}
+
+              {:refused, conn} ->
+                error = wrap_error(:too_many_concurrent_requests)
+                {conn, [{:error, ref, error} | responses]}
+            end
         end
 
       [{":status", status} | headers] when not received_first_headers? ->
         status = String.to_integer(status)
         headers = join_cookie_headers(headers)
 
-        case response_content_length(stream, status, headers) do
-          {:ok, content_length} ->
-            conn =
-              update_in(
-                conn.streams[stream.id],
-                &%{&1 | received_first_headers?: true, content_length: content_length}
-              )
+        with {:ok, content_length} <- response_content_length(stream, status, headers),
+             {:ok, conn} <- open_promised_stream(conn, stream) do
+          conn =
+            update_in(
+              conn.streams[stream.id],
+              &%{&1 | received_first_headers?: true, content_length: content_length}
+            )
 
-            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+          new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
-            cond do
-              # :reserved_remote means that this was a promised stream. As soon as headers come,
-              # the stream goes in the :half_closed_local state (unless it's not allowed because
-              # of the client's max concurrent streams limit, or END_STREAM is set).
-              stream.state == :reserved_remote ->
-                cond do
-                  conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
-                    conn = close_stream!(conn, stream.id, :refused_stream)
-                    {conn, responses}
-
-                  end_stream? ->
-                    end_remote_stream(conn, stream, new_responses)
-
-                  true ->
-                    conn = update_in(conn.open_server_stream_count, &(&1 + 1))
-                    conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
-                    conn = put_in(conn.streams[stream.id].state, :half_closed_local)
-                    {conn, new_responses}
-                end
-
-              end_stream? ->
-                end_remote_stream(conn, stream, new_responses)
-
-              true ->
-                {conn, new_responses}
-            end
+          if end_stream? do
+            end_remote_stream(conn, stream, new_responses)
+          else
+            {conn, new_responses}
+          end
+        else
+          {:refused, conn} ->
+            error = wrap_error(:too_many_concurrent_requests)
+            {conn, [{:error, ref, error} | responses]}
 
           {:error, reason} ->
             conn = close_stream!(conn, stream.id, :protocol_error)
@@ -2177,6 +2168,21 @@ defmodule Mint.HTTP2 do
         {conn, responses}
     end
   end
+
+  # RFC 9113 5.1: HEADERS frames move a stream reserved by a PUSH_PROMISE to the
+  # half-closed (local) state, where it counts against the client's concurrency
+  # limit. Streams that don't fit within the limit are refused.
+  defp open_promised_stream(conn, %{state: :reserved_remote} = stream) do
+    if conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams do
+      {:refused, close_stream!(conn, stream.id, :refused_stream)}
+    else
+      conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+      conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
+      {:ok, put_in(conn.streams[stream.id].state, :half_closed_local)}
+    end
+  end
+
+  defp open_promised_stream(conn, _stream), do: {:ok, conn}
 
   defp decode_hbf(conn, hbf) do
     case HPAX.decode(hbf, conn.decode_table) do
@@ -3032,9 +3038,10 @@ defmodule Mint.HTTP2 do
   end
 
   def format_error(:too_many_concurrent_requests) do
-    "the number of max concurrent HTTP/2 requests supported by the server has been reached. " <>
-      "Use Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name " <>
-      "to find out the maximum number of concurrent requests supported by the server."
+    "the maximum number of concurrent HTTP/2 streams has been reached. For requests, use " <>
+      "Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name to find " <>
+      "out the limit supported by the server. For pushed responses, the limit is the " <>
+      ":max_concurrent_streams client setting."
   end
 
   def format_error({:max_header_list_size_exceeded, size, max_size}) do

@@ -2063,6 +2063,68 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "server pushes" do
+    test "interim responses on a promised stream", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, promised_ref, _}]} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, 2, [{":status", "103"}, {"link", "</style.css>; rel=preload"}],
+                  [:end_headers]},
+                 {:headers, 2, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:status, ^promised_ref, 103},
+               {:headers, ^promised_ref, [{"link", "</style.css>; rel=preload"}]},
+               {:status, ^promised_ref, 200},
+               {:headers, ^promised_ref, []},
+               {:done, ^promised_ref}
+             ] = responses
+
+      refute_receive {:ssl, _socket, _data}, 100
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "a pushed response ending with its HEADERS frame sends no RST_STREAM", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers(promised_headers()),
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 ),
+                 {:headers, 2, [{":status", "304"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:push_promise, ^ref, promised_ref, _},
+               {:status, promised_ref, 304},
+               {:headers, promised_ref, []},
+               {:done, promised_ref}
+             ] = responses
+
+      refute_receive {:ssl, _socket, _data}, 100
+      assert HTTP2.open_request_count(conn) == 1
+    end
+
     for {variant, fields} <- [
           missing_scheme: [{":method", "GET"}, {":authority", "localhost"}, {":path", "/"}],
           empty_scheme: [
@@ -2555,6 +2617,40 @@ defmodule Mint.HTTP2Test do
 
       refute Map.has_key?(conn.streams, 6)
       assert HTTP2.open?(conn)
+    end
+
+    for {variant, status} <- [final: "200", interim: "103"] do
+      test "a promised stream refused at #{variant} HEADERS time returns an error",
+           %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, promised_ref, _}]} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers()),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        {:ok, conn} = HTTP2.put_settings(conn, max_concurrent_streams: 0)
+        assert_recv_frames [settings()]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   settings(flags: set_flags(:settings, [:ack]), params: []),
+                   {:headers, 2, [{":status", unquote(status)}], [:end_headers]}
+                 ])
+
+        assert [{:error, ^promised_ref, error}] = responses
+        assert_http2_error error, :too_many_concurrent_requests
+        assert_recv_frames [rst_stream(stream_id: 2, error_code: :refused_stream)]
+        refute Map.has_key?(conn.streams, 2)
+        assert HTTP2.open?(conn)
+      end
     end
 
     @tag connect_options: [client_settings: [max_concurrent_streams: 5]]
