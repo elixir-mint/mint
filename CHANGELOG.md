@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.10.1
+
+**Security fixes**:
+
+  * Validate chunk extensions in HTTP/1 chunked responses in `Mint.HTTP1`. Previously, any bytes between the chunk size and the CRLF were accepted, letting a malicious server frame a chunked response differently from a strict intermediary on a shared connection. This is a fix for **CVE-2026-82672** (GitHub advisory [GHSA-rj5m-69wp-cxq9](https://github.com/elixir-mint/mint/security/advisories/GHSA-rj5m-69wp-cxq9)).
+
+Bug fixes:
+
+  * Close TCP sockets on errors in HTTP/1.
+  * Keep HTTP/1.0 `CONNECT` tunnel sockets open.
+
 ## v1.10.0
 
 This is a minor version bump with *no breaking changes*. Please do upgrade from 1.9.x versions as it contains fixes for two recently-published CVEs.
