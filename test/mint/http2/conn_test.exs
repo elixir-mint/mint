@@ -1129,7 +1129,7 @@ defmodule Mint.HTTP2Test do
           {":status", "200"},
           {"accept", "text/plain"},
           {"cookie", "a=b"},
-          {"Cookie", "c=d; e=f"},
+          {"cookie", "c=d; e=f"},
           {"content-type", "application/json"},
           {"cookie", "g=h"},
           {"x-header", "value"}
@@ -1191,6 +1191,156 @@ defmodule Mint.HTTP2Test do
                {"user-agent", _}
              ] = server_decode_headers(hbf)
 
+      assert HTTP2.open?(conn)
+    end
+  end
+
+  describe "response header validation" do
+    for status <- ["abc", "", "+200", "2000", "20", "200 ", " 200", "1ab"] do
+      test "an invalid :status of #{inspect(status)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}], [:end_headers]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_status_header, unquote(status)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for name <- ["Foo", "fo o", "", "foo:bar", "f\x7Fo", "f\xC3\xA4"] do
+      test "an invalid header name #{inspect(name)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {unquote(name), "bar"}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_header_name, unquote(name)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for value <- ["b\0ar", "b\rar", "b\nar", " bar", "bar ", "bar\t"] do
+      test "an invalid header value #{inspect(value)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {"foo", unquote(value)}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_header_value, "foo", unquote(value)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "header values may be empty or contain obs-text and inner whitespace", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [
+        {":status", "200"},
+        {"empty", ""},
+        {"foo", "b\xC3\xA4r \tbaz"},
+        {"a-b_c.d!", "v"}
+      ]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, tl(headers)},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    for {label, headers, debug_data} <- [
+          {"a pseudo-header after a regular header", [{"foo", "bar"}, {":status", "200"}],
+           "must appear before regular header fields"},
+          {"an undefined pseudo-header", [{":status", "200"}, {":path", "/"}],
+           "undefined pseudo-header \":path\""},
+          {"a duplicate :status pseudo-header", [{":status", "200"}, {":status", "404"}],
+           "appears more than once"}
+        ] do
+      test "#{label} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, unquote(headers), [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ unquote(debug_data)
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "a pseudo-header in trailers is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, [{":status", "500"}, {"x-trailer", "v"}],
+                  [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "not allowed in trailers"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "an invalid header name in trailers is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, [{"X-Trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:invalid_header_name, "X-Trailer"}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
       assert HTTP2.open?(conn)
     end
   end
@@ -1313,8 +1463,7 @@ defmodule Mint.HTTP2Test do
 
       assert_http2_error error, {:protocol_error, debug_data}
 
-      assert debug_data =~
-               "informational response (1xx) must appear before final response, got a 101 status"
+      assert debug_data =~ "pseudo-header \":status\" is not allowed in trailers"
 
       assert HTTP2.open?(conn)
     end

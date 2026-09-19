@@ -366,6 +366,18 @@ defmodule Mint.HTTP2 do
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
 
+    * `:missing_status_header` - when a response has no `:status` pseudo-header.
+
+    * `{:invalid_status_header, value}` - when the `:status` pseudo-header of a response
+      is not a three-digit status code. `value` is the received value.
+
+    * `{:invalid_header_name, name}` - when a response header name is invalid, for
+      example because it contains uppercase characters.
+
+    * `{:invalid_header_value, name, value}` - when a response header value is invalid,
+      for example because it contains control characters. `name` is the name of the
+      header and `value` is the invalid value.
+
     * `:unprocessed` - when a request was closed because it was not processed by the server.
       When this error is returned, it means that the server hasn't processed the request at all,
       so it's safe to retry the given request on a different or new connection.
@@ -1988,22 +2000,25 @@ defmodule Mint.HTTP2 do
   defp handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?) do
     %{ref: ref, received_first_headers?: received_first_headers?} = stream
 
+    case validate_response_headers(headers, _trailers? = received_first_headers?) do
+      :ok ->
+        handle_valid_headers_for_stream(conn, responses, stream, headers, end_stream?)
+
+      {:error, reason} ->
+        conn = close_stream!(conn, stream.id, :protocol_error)
+        {conn, [{:error, ref, wrap_error(reason)} | responses]}
+    end
+  end
+
+  defp handle_valid_headers_for_stream(conn, responses, stream, headers, end_stream?) do
+    %{ref: ref, received_first_headers?: received_first_headers?} = stream
+
     case headers do
       # Interim response (1xx), which is made of only one HEADERS plus zero or more CONTINUATIONs.
       # There can be zero or more interim responses before a "proper" response.
       # https://httpwg.org/specs/rfc9113.html#HttpFraming
       [{":status", <<?1, _, _>> = status} | headers] ->
         cond do
-          received_first_headers? ->
-            conn = close_stream!(conn, stream.id, :protocol_error)
-
-            debug_data =
-              "informational response (1xx) must appear before final response, got a #{status} status"
-
-            error = wrap_error({:protocol_error, debug_data})
-            responses = [{:error, stream.ref, error} | responses]
-            {conn, responses}
-
           end_stream? ->
             conn = close_stream!(conn, stream.id, :protocol_error)
             debug_data = "informational response (1xx) must not have the END_STREAM flag set"
@@ -2093,9 +2108,80 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # RFC 9113 8.2.1 and 8.3: pseudo-header fields come before regular fields, only
+  # :status is defined for responses and it appears exactly once, trailers carry
+  # no pseudo-header fields, and field names and values are limited to the
+  # characters allowed by the RFC.
+  defp validate_response_headers(headers, trailers?) do
+    validate_response_headers(headers, trailers?, _status? = false, _regular? = false)
+  end
+
+  defp validate_response_headers([], _trailers?, _status?, _regular?), do: :ok
+
+  defp validate_response_headers([{":" <> _ = name, value} | rest], trailers?, status?, regular?) do
+    cond do
+      trailers? ->
+        {:error, {:protocol_error, "pseudo-header #{inspect(name)} is not allowed in trailers"}}
+
+      regular? ->
+        {:error,
+         {:protocol_error,
+          "pseudo-header #{inspect(name)} must appear before regular header fields"}}
+
+      name != ":status" ->
+        {:error, {:protocol_error, "undefined pseudo-header #{inspect(name)} in response"}}
+
+      status? ->
+        {:error, {:protocol_error, "the :status pseudo-header appears more than once"}}
+
+      not valid_status?(value) ->
+        {:error, {:invalid_status_header, value}}
+
+      true ->
+        validate_response_headers(rest, trailers?, true, regular?)
+    end
+  end
+
+  defp validate_response_headers([{name, value} | rest], trailers?, status?, _regular?) do
+    cond do
+      not valid_field_name?(name) -> {:error, {:invalid_header_name, name}}
+      not valid_field_value?(value) -> {:error, {:invalid_header_value, name, value}}
+      true -> validate_response_headers(rest, trailers?, status?, true)
+    end
+  end
+
+  # RFC 9110 15: status-code = 3DIGIT
+  defp valid_status?(<<a, b, c>>) when a in ?0..?9 and b in ?0..?9 and c in ?0..?9, do: true
+  defp valid_status?(_other), do: false
+
+  # RFC 9113 8.2.1: a field name must not contain characters in 0x00-0x20, 0x41-0x5A
+  # (uppercase letters) or 0x7F-0xFF, and only a pseudo-header field can contain a colon.
+  defp valid_field_name?(<<>>), do: false
+  defp valid_field_name?(name), do: field_name_chars?(name)
+
+  defp field_name_chars?(<<char, _rest::binary>>)
+       when char in 0x00..0x20 or char in ?A..?Z or char in 0x7F..0xFF or char == ?:,
+       do: false
+
+  defp field_name_chars?(<<_char, rest::binary>>), do: field_name_chars?(rest)
+  defp field_name_chars?(<<>>), do: true
+
+  # RFC 9113 8.2.1: a field value must not contain NUL, LF or CR and must not start or
+  # end with SP or HTAB.
+  defp valid_field_value?(<<char, _rest::binary>>) when char in [?\s, ?\t], do: false
+
+  defp valid_field_value?(value) do
+    byte_size(value) == 0 or
+      (:binary.last(value) not in [?\s, ?\t] and field_value_chars?(value))
+  end
+
+  defp field_value_chars?(<<char, _rest::binary>>) when char in [0, ?\n, ?\r], do: false
+  defp field_value_chars?(<<_char, rest::binary>>), do: field_value_chars?(rest)
+  defp field_value_chars?(<<>>), do: true
+
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
-    case Enum.split_with(headers, fn {name, _value} -> Headers.lower_raw(name) == "cookie" end) do
+    case Enum.split_with(headers, fn {name, _value} -> name == "cookie" end) do
       {[], _headers} ->
         headers
 
@@ -2700,6 +2786,18 @@ defmodule Mint.HTTP2 do
 
   def format_error(:missing_status_header) do
     "the :status pseudo-header (which is required in HTTP/2) is missing from the response"
+  end
+
+  def format_error({:invalid_status_header, value}) do
+    "invalid :status pseudo-header in the response: #{inspect(value)}"
+  end
+
+  def format_error({:invalid_header_name, name}) do
+    "invalid header name in the response: #{inspect(name)}"
+  end
+
+  def format_error({:invalid_header_value, name, value}) do
+    "invalid value for header #{inspect(name)} in the response: #{inspect(value)}"
   end
 
   def format_error({:server_closed_request, error_code}) do
