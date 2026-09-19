@@ -2,7 +2,7 @@ defmodule Mint.HTTP1.FuzzTest do
   use ExUnit.Case, async: false
   use ExUnitProperties
 
-  alias Mint.{HTTP1, HTTP1.TestServer}
+  alias Mint.HTTP1
 
   @moduletag :capture_log
   @moduletag timeout: :infinity
@@ -100,37 +100,64 @@ defmodule Mint.HTTP1.FuzzTest do
     end
   end
 
+  defp method_gen do
+    frequency([
+      {6, constant({"GET", nil})},
+      {2, constant({"POST", "x"})},
+      {2, constant({"POST", :stream})},
+      {1, constant({"HEAD", nil})}
+    ])
+  end
+
+  defp client_op_gen do
+    frequency([
+      {3, tuple({integer(0..40), constant(:body), integer(0..3), member_of(["x", :eof])})},
+      {1, tuple({integer(0..40), constant(:request), method_gen()})}
+    ])
+  end
+
   defp scenario_gen do
-    gen all methods <-
-              list_of(member_of(["GET", "GET", "HEAD", "POST"]), min_length: 1, max_length: 3),
-            responses <- list_of(response_gen(), length: length(methods)),
+    gen all methods <- list_of(method_gen(), min_length: 1, max_length: 3),
+            ops <- list_of(client_op_gen(), max_length: 3),
+            responses <- list_of(response_gen(), length: length(methods) + length(ops)),
             mutation <-
               frequency([
-                {6, nil},
+                {10, constant(nil)},
                 {1, tuple({constant(:insert), integer(0..400), byte()})},
                 {1, tuple({constant(:delete), integer(0..400)})}
               ]),
             chunk_sizes <- list_of(integer(1..64), min_length: 1, max_length: 30),
             close? <- boolean(),
+            mode <- member_of([:active, :active, :passive]),
+            stream_headers? <- boolean(),
             extra <-
               frequency([
-                {4, constant("")},
+                {8, constant("")},
                 {1, constant("\r\n")},
                 {1, constant("HTTP/1.1 200 OK\r\n\r\n")},
                 {1, constant("junk")}
               ]) do
+      all_methods =
+        methods ++
+          for {_index, :request, method} <- ops, do: method
+
       responses =
-        Enum.zip_with(methods, responses, fn
-          "HEAD", response -> %{response | body: :none}
-          _method, response -> response
+        responses
+        |> Enum.take(length(all_methods))
+        |> Enum.zip_with(all_methods, fn
+          response, {"HEAD", _body} -> %{response | body: :none}
+          response, _method -> response
         end)
 
       %{
         methods: methods,
+        ops: ops,
         responses: responses,
         mutation: mutation,
         chunk_sizes: chunk_sizes,
         close?: close?,
+        mode: mode,
+        stream_headers?: stream_headers?,
         extra: extra
       }
     end
@@ -138,48 +165,69 @@ defmodule Mint.HTTP1.FuzzTest do
 
   ## Property
 
-  property "stream/2 never raises and keeps requests consistent on random server responses" do
+  property "stream/2 and recv/3 never raise and keep requests consistent on random responses" do
     check all scenario <- scenario_gen(), max_runs: @runs do
       run_scenario(scenario)
     end
   end
 
-  defp run_scenario(
-         %{methods: methods, responses: responses, chunk_sizes: chunk_sizes} = scenario
-       ) do
+  defp run_scenario(%{methods: methods, responses: responses} = scenario) do
     drain_mailbox()
-    {:ok, port, server_ref} = TestServer.start()
-    {:ok, conn} = HTTP1.connect(:http, "localhost", port)
-    assert_receive {^server_ref, server_socket}
+    {:ok, listen_socket} = :gen_tcp.listen(0, mode: :binary, packet: :raw, active: false)
+    {:ok, port} = :inet.port(listen_socket)
+    parent = self()
 
-    {refs, conn} =
-      Enum.map_reduce(methods, conn, fn method, conn ->
-        body = if method == "POST", do: "x", else: nil
-        {:ok, conn, ref} = HTTP1.request(conn, method, "/", [], body)
-        {ref, conn}
+    accept =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        :ok = :gen_tcp.controlling_process(socket, parent)
+        {:ok, socket}
+      end)
+
+    {:ok, conn} =
+      HTTP1.connect(:http, "localhost", port,
+        mode: scenario.mode,
+        stream_headers: scenario.stream_headers?
+      )
+
+    {:ok, server_socket} = Task.await(accept)
+    :ok = :gen_tcp.close(listen_socket)
+
+    {conn, refs} =
+      Enum.reduce(methods, {conn, []}, fn {method, body}, {conn, refs} ->
+        case HTTP1.request(conn, method, "/", [], body) do
+          {:ok, conn, ref} -> {conn, refs ++ [ref]}
+          {:error, conn, _reason} -> {conn, refs}
+        end
       end)
 
     bytes = responses |> Enum.map(&render_response/1) |> IO.iodata_to_binary()
     bytes = mutate(bytes <> scenario.extra, scenario.mutation)
 
-    tracker = Enum.into(refs, %{}, &{&1, :new})
-    context = {scenario, bytes}
+    state = %{
+      scenario: scenario,
+      bytes: bytes,
+      refs: refs,
+      tracker: Enum.into(refs, %{}, &{&1, :new}),
+      chunks: Stream.cycle(scenario.chunk_sizes),
+      index: 0,
+      server_socket: server_socket,
+      log: []
+    }
 
-    outcome = feed(conn, bytes, Stream.cycle(chunk_sizes), tracker, context)
-
-    case outcome do
-      {:open, conn, tracker} when scenario.close? ->
+    case feed(conn, bytes, state) do
+      {:open, conn, state} when scenario.close? ->
         result =
           try do
-            HTTP1.stream(conn, {:tcp_closed, conn.socket})
+            close_from_server(conn, state)
           rescue
             e ->
               flunk(
-                "stream/2 raised on close #{Exception.format(:error, e, __STACKTRACE__)}\n#{inspect(context, limit: :infinity)}"
+                "close raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{describe(state)}"
               )
           end
 
-        handle_result(result, tracker, context)
+        handle_result(result, state)
 
       _ ->
         :ok
@@ -190,120 +238,208 @@ defmodule Mint.HTTP1.FuzzTest do
     drain_mailbox()
   end
 
-  defp feed(conn, "", _chunks, tracker, _context), do: {:open, conn, tracker}
+  defp describe(state) do
+    "scenario: #{inspect(state.scenario, limit: :infinity)}\nbytes: #{inspect(state.bytes, limit: :infinity)}\nlog: #{inspect(state.log, limit: :infinity)}"
+  end
 
-  defp feed(conn, bytes, chunks, tracker, context) do
-    size = min(Enum.at(chunks, 0), byte_size(bytes))
-    <<chunk::binary-size(^size), rest::binary>> = bytes
+  defp close_from_server(conn, %{scenario: %{mode: :active}}) do
+    HTTP1.stream(conn, {:tcp_closed, conn.socket})
+  end
 
-    result =
-      try do
-        HTTP1.stream(conn, {:tcp, conn.socket, chunk})
-      rescue
-        e ->
-          flunk(
-            "stream/2 raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{inspect(context, limit: :infinity)}"
-          )
-      catch
-        kind, value ->
-          flunk(
-            "stream/2 threw #{inspect(kind)} #{inspect(value)}\n#{inspect(context, limit: :infinity)}"
-          )
-      end
+  defp close_from_server(conn, %{scenario: %{mode: :passive}} = state) do
+    :ok = :gen_tcp.close(state.server_socket)
+    HTTP1.recv(conn, 0, 1000)
+  end
 
-    case handle_result(result, tracker, context) do
-      {:open, conn, tracker} -> feed(conn, rest, Stream.drop(chunks, 1), tracker, context)
-      other -> other
+  defp feed(conn, "", state), do: {:open, conn, state}
+
+  defp feed(conn, bytes, state) do
+    case run_client_ops(conn, state) do
+      {:open, conn, state} ->
+        size = min(Enum.at(state.chunks, 0), byte_size(bytes))
+        <<chunk::binary-size(^size), rest::binary>> = bytes
+        state = %{state | chunks: Stream.drop(state.chunks, 1), index: state.index + 1}
+        state = %{state | log: state.log ++ [{:chunk, chunk}]}
+
+        result =
+          try do
+            deliver(conn, chunk, state)
+          rescue
+            e ->
+              flunk(
+                "stream/recv raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{describe(state)}"
+              )
+          catch
+            kind, value ->
+              flunk("stream/recv threw #{inspect(kind)} #{inspect(value)}\n#{describe(state)}")
+          end
+
+        case handle_result(result, state) do
+          {:open, conn, state} -> feed(conn, rest, state)
+          other -> other
+        end
+
+      other ->
+        other
     end
   end
 
-  defp handle_result({:ok, conn, responses}, tracker, context) do
-    tracker = check_responses(responses, tracker, context)
-
-    if HTTP1.open?(conn) do
-      {:open, conn, tracker}
-    else
-      if HTTP1.open_request_count(conn) != 0 do
-        flunk(
-          "closed connection with #{HTTP1.open_request_count(conn)} open requests, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
-        )
-      end
-
-      for {ref, state} <- tracker, state != :done do
-        flunk(
-          "closed connection but ref #{inspect(ref)} is #{inspect(state)}, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
-        )
-      end
-
-      {:closed, conn, tracker}
-    end
+  defp deliver(conn, chunk, %{scenario: %{mode: :active}}) do
+    HTTP1.stream(conn, {:tcp, conn.socket, chunk})
   end
 
-  defp handle_result({:error, conn, _reason, responses}, tracker, context) do
-    tracker = check_responses(responses, tracker, context)
-
-    if HTTP1.open?(conn) do
-      flunk(
-        "connection still open after error, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
-      )
-    end
-
-    {:closed, conn, tracker}
+  defp deliver(conn, chunk, %{scenario: %{mode: :passive}} = state) do
+    :ok = :gen_tcp.send(state.server_socket, chunk)
+    HTTP1.recv(conn, byte_size(chunk), 1000)
   end
 
-  defp handle_result(other, _tracker, context) do
-    flunk("unexpected return #{inspect(other)}\n#{inspect(context, limit: :infinity)}")
-  end
+  defp run_client_ops(conn, state) do
+    ops =
+      for {index, op, arg1, arg2} <- state.scenario.ops,
+          index == state.index,
+          do: {op, arg1, arg2}
 
-  defp check_responses(responses, tracker, context) do
-    Enum.reduce(responses, tracker, fn response, tracker ->
-      ref = elem(response, 1)
-      state = Map.get(tracker, ref, :unknown)
-      tag = elem(response, 0)
+    Enum.reduce_while(ops, {:open, conn, state}, fn op, {:open, conn, state} ->
+      state = %{state | log: state.log ++ [{:client, op}]}
 
-      next =
-        case {tag, state} do
-          {_, :unknown} ->
+      {conn, state} =
+        try do
+          client_op(conn, op, state)
+        rescue
+          e ->
             flunk(
-              "response #{inspect(response)} for unknown ref, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
-            )
-
-          {_, :done} ->
-            flunk(
-              "response #{inspect(response)} after done/error, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
-            )
-
-          {:error, _} ->
-            :done
-
-          {:status, :new} ->
-            if elem(response, 2) in 100..199 and elem(response, 2) != 101,
-              do: :interim,
-              else: :headers_pending
-
-          {:headers, :interim} ->
-            :new
-
-          {:headers, :headers_pending} ->
-            :body
-
-          {:headers, :body} ->
-            :trailers
-
-          {:data, :body} ->
-            :body
-
-          {:done, s} when s in [:body, :trailers] ->
-            :done
-
-          _ ->
-            flunk(
-              "response #{inspect(response)} in state #{inspect(state)}, responses #{inspect(responses)}\n#{inspect(context, limit: :infinity)}"
+              "client op #{inspect(op)} raised #{Exception.format(:error, e, __STACKTRACE__)}\n#{describe(state)}"
             )
         end
 
-      Map.put(tracker, ref, next)
+      if HTTP1.open?(conn, :read) do
+        {:cont, {:open, conn, state}}
+      else
+        {:halt, {:closed, conn, state}}
+      end
     end)
+  end
+
+  defp client_op(conn, {:body, i, chunk}, state) do
+    ref = Enum.at(state.refs, rem(i, length(state.refs)))
+
+    case HTTP1.stream_request_body(conn, ref, chunk) do
+      {:ok, conn} -> {conn, state}
+      {:error, conn, _reason} -> {conn, state}
+    end
+  end
+
+  defp client_op(conn, {:request, {method, body}}, state) do
+    case HTTP1.request(conn, method, "/", [], body) do
+      {:ok, conn, ref} ->
+        {conn, %{state | refs: state.refs ++ [ref], tracker: Map.put(state.tracker, ref, :new)}}
+
+      {:error, conn, _reason} ->
+        {conn, state}
+    end
+  end
+
+  defp handle_result({:ok, conn, responses}, state) do
+    state = check_responses(responses, state)
+
+    if HTTP1.open?(conn) do
+      {:open, conn, state}
+    else
+      if HTTP1.open_request_count(conn) != 0 do
+        flunk(
+          "closed connection with #{HTTP1.open_request_count(conn)} open requests, responses #{inspect(responses)}\n#{describe(state)}"
+        )
+      end
+
+      for {ref, ref_state} <- state.tracker, ref_state != :done do
+        flunk(
+          "closed connection but ref #{inspect(ref)} is #{inspect(ref_state)}, responses #{inspect(responses)}\n#{describe(state)}"
+        )
+      end
+
+      {:closed, conn, state}
+    end
+  end
+
+  defp handle_result({:error, conn, _reason, responses}, state) do
+    state = check_responses(responses, state)
+
+    if HTTP1.open?(conn) do
+      flunk(
+        "connection still open after error, responses #{inspect(responses)}\n#{describe(state)}"
+      )
+    end
+
+    {:closed, conn, state}
+  end
+
+  defp handle_result(other, state) do
+    flunk("unexpected return #{inspect(other)}\n#{describe(state)}")
+  end
+
+  defp check_responses(responses, state) do
+    stream_headers? = state.scenario.stream_headers?
+
+    tracker =
+      Enum.reduce(responses, state.tracker, fn response, tracker ->
+        ref = elem(response, 1)
+        ref_state = Map.get(tracker, ref, :unknown)
+        tag = elem(response, 0)
+
+        next =
+          case {tag, ref_state} do
+            {_, :unknown} ->
+              flunk(
+                "response #{inspect(response)} for unknown ref, responses #{inspect(responses)}\n#{describe(state)}"
+              )
+
+            {_, :done} ->
+              flunk(
+                "response #{inspect(response)} after done/error, responses #{inspect(responses)}\n#{describe(state)}"
+              )
+
+            {:error, _} ->
+              :done
+
+            {:status, s} when s == :new or (s == :interim and stream_headers?) ->
+              if elem(response, 2) in 100..199 and elem(response, 2) != 101,
+                do: :interim,
+                else: :headers_pending
+
+            {:headers, :interim} ->
+              if stream_headers?, do: :interim, else: :new
+
+            {:headers, :headers_pending} ->
+              if stream_headers?, do: :headers_pending, else: :body
+
+            {:data, :headers_pending} when stream_headers? ->
+              :body
+
+            {:done, :headers_pending} when stream_headers? ->
+              :done
+
+            {:headers, :body} ->
+              :trailers
+
+            {:headers, :trailers} when stream_headers? ->
+              :trailers
+
+            {:data, :body} ->
+              :body
+
+            {:done, s} when s in [:body, :trailers] ->
+              :done
+
+            _ ->
+              flunk(
+                "response #{inspect(response)} in state #{inspect(ref_state)}, responses #{inspect(responses)}\n#{describe(state)}"
+              )
+          end
+
+        Map.put(tracker, ref, next)
+      end)
+
+    %{state | tracker: tracker}
   end
 
   ## Rendering
