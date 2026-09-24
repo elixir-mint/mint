@@ -1014,52 +1014,10 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp decode_header(data, false = _stream_headers) do
-    case Response.decode_header(data) do
-      {:ok, {name, value}, rest} -> validate_header(name, Response.replace_obs_fold(value), rest)
-      other -> other
-    end
-  end
-
-  defp decode_header(data, true = _stream_headers) do
-    # By default, :erlang.decode_packet/3 asks for more data when a packet
-    # containing a full header ends with a line feed (likely to handle line
-    # folding). If we get a :more response on a packet that ends with a line
-    # feed, we append a sentinel byte and attempt to decode again.
-    #
-    # Headers are emitted before the next line is seen, so a folded
-    # continuation line that arrives later can't be joined to its header and
-    # is rejected as an invalid header line.
-    result =
-      with :more <- Response.decode_header(data) do
-        data_size = byte_size(data)
-
-        case data do
-          <<_::binary-size(^data_size - 1), ?\n>> ->
-            with {:ok, {name, value}, <<0>>} <- Response.decode_header(<<data::binary, 0>>) do
-              {:ok, {name, value}, ""}
-            end
-
-          _ ->
-            :more
-        end
-      end
-
-    case result do
-      {:ok, {name, value}, rest} -> validate_header(name, Response.replace_obs_fold(value), rest)
-      other -> other
-    end
-  end
-
-  defp validate_header(name, value, rest) do
-    value = value |> Parse.trim_leading_whitespace() |> Parse.trim_trailing_whitespace()
-
-    if Response.valid_header_name?(name) and Response.valid_header_value?(value) do
-      {:ok, {name, value}, rest}
-    else
-      :error
-    end
-  end
+  # With :stream_headers a header is emitted as soon as its line ends, before the
+  # next line is seen, so a folded continuation line that arrives later can't be
+  # joined to it and is rejected as an invalid header line.
+  defp decode_header(data, stream_headers?), do: Response.decode_header(data, stream_headers?)
 
   defp next_request(%{request: nil} = conn, data, responses) do
     # TODO: Figure out if we should keep buffering even though there are no
