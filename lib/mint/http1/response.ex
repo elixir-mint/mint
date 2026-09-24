@@ -6,50 +6,53 @@ defmodule Mint.HTTP1.Response do
   alias Mint.Core.Headers
 
   # RFC 9112 4: status-line = HTTP-version SP status-code SP [ reason-phrase ]
-  # RFC 9112 2.2 allows a bare LF as the line terminator.
-  def decode_status_line(binary) do
-    case :binary.split(binary, "\n") do
-      [line, rest] ->
-        line = strip_trailing_cr(line)
-
-        with {:ok, version, status, reason} <- parse_status_line(line),
-             true <- valid_reason_phrase?(reason) do
-          {:ok, {version, status, reason}, rest}
-        else
-          _other -> :error
-        end
-
-      [_incomplete] ->
-        :more
-    end
-  end
-
-  defp strip_trailing_cr(line) do
-    size = byte_size(line) - 1
-
-    case line do
-      <<line::binary-size(^size), ?\r>> -> line
-      line -> line
-    end
-  end
-
   # RFC 9112 2.3: HTTP-version = "HTTP/" DIGIT "." DIGIT, and only HTTP/1.x
   # responses are accepted. RFC 9112 4: status-code = 3DIGIT.
-  defp parse_status_line(<<"HTTP/1.", minor, ?\s, a, b, c, rest::binary>>)
-       when minor in ?0..?9 and a in ?1..?9 and b in ?0..?9 and c in ?0..?9 do
-    reason =
-      case rest do
-        <<>> -> {:ok, ""}
-        <<?\s, reason::binary>> -> {:ok, reason}
-        _other -> :error
-      end
+  # The reason phrase is validated while looking for the end of the line, and
+  # RFC 9112 2.2 allows a bare LF as the line terminator.
+  def decode_status_line(<<"HTTP/1.", minor, ?\s, a, b, c, rest::binary>>)
+      when minor in ?0..?9 and a in ?1..?9 and b in ?0..?9 and c in ?0..?9 do
+    version = {1, minor - ?0}
+    status = (a - ?0) * 100 + (b - ?0) * 10 + (c - ?0)
 
-    with {:ok, reason} <- reason do
-      {:ok, {1, minor - ?0}, (a - ?0) * 100 + (b - ?0) * 10 + (c - ?0), reason}
+    case rest do
+      <<?\s, reason::binary>> -> decode_reason_phrase(reason, reason, 0, version, status)
+      _other -> decode_empty_reason_phrase(rest, version, status)
     end
   end
 
-  defp parse_status_line(_line), do: :error
+  def decode_status_line(binary) do
+    if byte_size(binary) < byte_size("HTTP/1.1 200") and not String.contains?(binary, "\n") do
+      :more
+    else
+      :error
+    end
+  end
+
+  # RFC 9112 4: reason-phrase = 1*( HTAB / SP / VCHAR / obs-text )
+  defp decode_reason_phrase(<<"\r\n", rest::binary>>, reason, size, version, status),
+    do: {:ok, {version, status, binary_part(reason, 0, size)}, rest}
+
+  defp decode_reason_phrase(<<"\n", rest::binary>>, reason, size, version, status),
+    do: {:ok, {version, status, binary_part(reason, 0, size)}, rest}
+
+  defp decode_reason_phrase(<<char, rest::binary>>, reason, size, version, status)
+       when char == ?\t or char in 32..126 or char in 128..255,
+       do: decode_reason_phrase(rest, reason, size + 1, version, status)
+
+  defp decode_reason_phrase(data, _reason, _size, _version, _status) when data in ["", "\r"],
+    do: :more
+
+  defp decode_reason_phrase(_data, _reason, _size, _version, _status), do: :error
+
+  defp decode_empty_reason_phrase(<<"\r\n", rest::binary>>, version, status),
+    do: {:ok, {version, status, ""}, rest}
+
+  defp decode_empty_reason_phrase(<<"\n", rest::binary>>, version, status),
+    do: {:ok, {version, status, ""}, rest}
+
+  defp decode_empty_reason_phrase(data, _version, _status) when data in ["", "\r"], do: :more
+  defp decode_empty_reason_phrase(_data, _version, _status), do: :error
 
   def decode_header(binary) do
     case :erlang.decode_packet(:httph_bin, binary, []) do
@@ -69,14 +72,6 @@ defmodule Mint.HTTP1.Response do
         :error
     end
   end
-
-  # RFC 9112 4: reason-phrase = 1*( HTAB / SP / VCHAR / obs-text )
-  defp valid_reason_phrase?(<<char, rest::binary>>)
-       when char == ?\t or char in 32..126 or char in 128..255,
-       do: valid_reason_phrase?(rest)
-
-  defp valid_reason_phrase?(<<>>), do: true
-  defp valid_reason_phrase?(_other), do: false
 
   def obs_fold?(value), do: :binary.match(value, "\n") != :nomatch
 
