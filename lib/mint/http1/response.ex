@@ -9,7 +9,10 @@ defmodule Mint.HTTP1.Response do
     case :erlang.decode_packet(:http_bin, binary, []) do
       {:ok, {:http_response, {1, minor} = version, status, reason}, rest}
       when minor in 0..9 and status in 100..999 ->
-        if valid_reason_phrase?(reason) do
+        line_size = byte_size(binary) - byte_size(rest)
+
+        if valid_version_and_status?(binary_part(binary, 0, line_size)) and
+             valid_reason_phrase?(reason) do
           {:ok, {version, status, reason}, rest}
         else
           :error
@@ -44,6 +47,16 @@ defmodule Mint.HTTP1.Response do
         :error
     end
   end
+
+  # :erlang.decode_packet/3 returns the version and status code as integers, so
+  # leading zeros such as "HTTP/01.1" or "0200" have to be checked on the raw line.
+  # RFC 9112 2.3 and 4: HTTP-version = "HTTP/" DIGIT "." DIGIT, status-code = 3DIGIT.
+  defp valid_version_and_status?(<<"HTTP/1.", minor, ?\s, a, b, c, next, _rest::binary>>)
+       when minor in ?0..?9 and a in ?0..?9 and b in ?0..?9 and c in ?0..?9 and
+              next in [?\s, ?\r, ?\n],
+       do: true
+
+  defp valid_version_and_status?(_line), do: false
 
   # RFC 9112 4: reason-phrase = 1*( HTAB / SP / VCHAR / obs-text )
   defp valid_reason_phrase?(<<char, rest::binary>>)

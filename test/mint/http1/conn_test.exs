@@ -66,7 +66,10 @@ defmodule Mint.HTTP1Test do
       "HTTP/1.10 200 OK\r\n",
       "HTTP/1.1 200 O\0K\r\n",
       "HTTP/1.1 200 OK\r\r\n",
-      "HTTP/1.1 200OK\r\n"
+      "HTTP/1.1 200OK\r\n",
+      "HTTP/1.1 0200 OK\r\n",
+      "HTTP/01.1 200 OK\r\n",
+      "HTTP/1.01 200 OK\r\n"
     ]
 
     for line <- lines do
