@@ -2,6 +2,7 @@ defmodule Mint.UnsafeProxy do
   @moduledoc false
 
   alias Mint.{Types, UnsafeProxy}
+  alias Mint.Core.Util
 
   @behaviour Mint.Core.Conn
 
@@ -222,6 +223,8 @@ defmodule Mint.UnsafeProxy do
   # Mirrors the default-port handling in Mint.HTTP1: omit the port when it is the
   # default for the scheme.
   defp host_header_value(%UnsafeProxy{scheme: scheme, hostname: hostname, port: port}) do
+    hostname = Util.uri_host(hostname)
+
     if URI.default_port(Atom.to_string(scheme)) == port do
       hostname
     else
