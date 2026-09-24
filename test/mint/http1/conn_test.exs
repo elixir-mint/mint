@@ -1643,7 +1643,7 @@ defmodule Mint.HTTP1Test do
     assert_closed_and_released(conn)
   end
 
-  test "pipelined requests behind an HTTP/1.0 response get an :unprocessed error",
+  test "pipelined requests behind an HTTP/1.0 response get a :closed error",
        %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -1656,13 +1656,13 @@ defmodule Mint.HTTP1Test do
              {:headers, ^ref1, _},
              {:data, ^ref1, "hi"},
              {:done, ^ref1},
-             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+             {:error, ^ref2, %TransportError{reason: :closed}}
            ] = responses
 
     assert_closed_and_released(conn)
   end
 
-  test "pipelined requests behind a close-delimited response get an :unprocessed error",
+  test "pipelined requests behind a close-delimited response get a :closed error",
        %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
     {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -1677,8 +1677,8 @@ defmodule Mint.HTTP1Test do
 
     assert [
              {:done, ^ref1},
-             {:error, ^ref2, %HTTPError{reason: :unprocessed}},
-             {:error, ^ref3, %HTTPError{reason: :unprocessed}}
+             {:error, ^ref2, %TransportError{reason: :closed}},
+             {:error, ^ref3, %TransportError{reason: :closed}}
            ] = responses
 
     assert HTTP1.open_request_count(conn) == 0

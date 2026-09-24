@@ -50,9 +50,11 @@ defmodule Mint.HTTP1 do
       request reference that doesn't belong to this connection.
 
     * `:unprocessed` - when a pipelined request gets no response because the server
-      closed the connection after a previous response, either with a `connection: close`
-      header or by answering with HTTP/1.0 without `connection: keep-alive`. The request
-      can be retried on a new connection.
+      answered a previous request with a `connection: close` header. The server didn't
+      process the request, so it can be retried on a new connection. Requests pipelined
+      behind a response that closes the connection in other ways get a
+      `Mint.TransportError` with reason `:closed` instead, since the server might have
+      processed them.
 
     * `{:unexpected_data, data}` - when unexpected data is received from the server.
 
@@ -565,7 +567,6 @@ defmodule Mint.HTTP1 do
 
     case decode(request.state, conn, data, []) do
       {:ok, conn, responses} ->
-        {conn, responses} = fail_queued_requests_if_closed(conn, responses)
         {:ok, conn, Enum.reverse(responses)}
 
       {:error, conn, reason, responses} ->
@@ -574,33 +575,16 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  # A response with "Connection: close" (or an HTTP/1.0 response without
-  # "keep-alive") closes the connection, so pipelined requests queued behind it
-  # will never get a response.
-  defp fail_queued_requests_if_closed(%{state: :closed} = conn, responses) do
-    requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
-
-    responses =
-      Enum.reduce(requests, responses, fn request, responses ->
-        [{:error, request.ref, wrap_error(:unprocessed)} | responses]
-      end)
-
-    {%{conn | request: nil, requests: :queue.new()}, responses}
+  defp handle_close(%__MODULE__{request: %{body: :until_closed} = request} = conn) do
+    conn = pop_request(conn)
+    responses = [{:done, request.ref}]
+    {conn, responses} = close_after_response(conn, responses, conn.transport.wrap_error(:closed))
+    {:ok, conn, Enum.reverse(responses)}
   end
 
-  defp fail_queued_requests_if_closed(conn, responses), do: {conn, responses}
-
-  defp handle_close(%__MODULE__{request: request} = conn) do
-    conn = internal_close(conn)
-    conn = request_done(conn)
-
-    if request && request.body == :until_closed do
-      conn = put_in(conn.state, :closed)
-      {conn, responses} = fail_queued_requests_if_closed(conn, [{:done, request.ref}])
-      {:ok, conn, Enum.reverse(responses)}
-    else
-      {:error, conn, conn.transport.wrap_error(:closed), []}
-    end
+  defp handle_close(conn) do
+    conn = conn |> internal_close() |> pop_request()
+    {:error, conn, conn.transport.wrap_error(:closed), []}
   end
 
   defp handle_transport_error(conn, error) do
@@ -856,18 +840,16 @@ defmodule Mint.HTTP1 do
          :none,
          %{request: %{method: "CONNECT", status: status}} = conn,
          data,
-         request_ref,
+         _request_ref,
          responses
        )
        when status in 200..299 do
-    conn = request_done(conn)
-    responses = [{:done, request_ref} | responses]
+    {conn, responses} = request_done(conn, responses)
     {:ok, %{conn | buffer: data}, responses}
   end
 
-  defp decode_body(:none, conn, data, request_ref, responses) do
-    conn = request_done(conn)
-    responses = [{:done, request_ref} | responses]
+  defp decode_body(:none, conn, data, _request_ref, responses) do
+    {conn, responses} = request_done(conn, responses)
     next_request(conn, data, responses)
   end
 
@@ -893,10 +875,9 @@ defmodule Mint.HTTP1 do
     decode(:status, conn, data, responses)
   end
 
-  defp decode_body(:single, conn, data, request_ref, responses) do
+  defp decode_body(:single, conn, data, _request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
-    conn = request_done(conn)
-    responses = [{:done, request_ref} | responses]
+    {conn, responses} = request_done(conn, responses)
     {:ok, conn, responses}
   end
 
@@ -905,7 +886,7 @@ defmodule Mint.HTTP1 do
     {:ok, conn, responses}
   end
 
-  defp decode_body({:content_length, length}, conn, data, request_ref, responses) do
+  defp decode_body({:content_length, length}, conn, data, _request_ref, responses) do
     cond do
       length > byte_size(data) ->
         conn = put_in(conn.request.body, {:content_length, length - byte_size(data)})
@@ -915,8 +896,7 @@ defmodule Mint.HTTP1 do
       length <= byte_size(data) ->
         {body, rest} = :erlang.split_binary(data, length)
         {conn, responses} = add_body(conn, body, responses)
-        conn = request_done(conn)
-        responses = [{:done, request_ref} | responses]
+        {conn, responses} = request_done(conn, responses)
         next_request(conn, rest, responses)
     end
   end
@@ -1015,12 +995,8 @@ defmodule Mint.HTTP1 do
           {:ok, _request} ->
             headers = Headers.remove_unallowed_trailer(headers)
 
-            responses = [
-              {:done, conn.request.ref}
-              | add_trailer_headers(headers, conn.request.ref, responses)
-            ]
-
-            conn = request_done(conn)
+            responses = add_trailer_headers(headers, conn.request.ref, responses)
+            {conn, responses} = request_done(conn, responses)
             next_request(conn, rest, responses)
 
           {:error, reason} ->
@@ -1196,21 +1172,44 @@ defmodule Mint.HTTP1 do
   # lifetime of the underlying socket. In particular, HTTP/1.0 responses are
   # otherwise treated as non-persistent and would close the newly-established
   # tunnel before the caller can use it.
-  defp request_done(%{request: %{method: "CONNECT", status: status}} = conn)
+  defp request_done(%{request: %{method: "CONNECT", status: status} = request} = conn, responses)
        when status in 200..299 do
-    pop_request(conn)
+    {pop_request(conn), [{:done, request.ref} | responses]}
   end
 
-  defp request_done(%{request: request} = conn) do
+  defp request_done(%{request: request} = conn, responses) do
     conn = pop_request(conn)
+    responses = [{:done, request.ref} | responses]
 
     cond do
-      !request -> conn
-      "close" in request.connection -> internal_close(conn)
-      request.version >= {1, 1} -> conn
-      "keep-alive" in request.connection -> conn
-      true -> internal_close(conn)
+      # The server doesn't process any requests after one it answers with
+      # "Connection: close" (RFC 9112 section 9.6), so the queued requests can
+      # be retried.
+      "close" in request.connection ->
+        close_after_response(conn, responses, wrap_error(:unprocessed))
+
+      request.version >= {1, 1} ->
+        {conn, responses}
+
+      "keep-alive" in request.connection ->
+        {conn, responses}
+
+      true ->
+        close_after_response(conn, responses, conn.transport.wrap_error(:closed))
     end
+  end
+
+  # Requests pipelined behind a response that closes the connection never get a
+  # response of their own.
+  defp close_after_response(conn, responses, error) do
+    requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
+
+    responses =
+      Enum.reduce(requests, responses, fn request, responses ->
+        [{:error, request.ref, error} | responses]
+      end)
+
+    {internal_close(%{conn | request: nil, requests: :queue.new()}), responses}
   end
 
   defp pop_request(conn) do
@@ -1397,8 +1396,8 @@ defmodule Mint.HTTP1 do
   end
 
   def format_error(:unprocessed) do
-    "request was not processed because the server closed the connection after a " <>
-      "previous response, so it's safe to retry on a new connection"
+    "request was not processed because the server answered a previous request with " <>
+      "\"connection: close\", so it's safe to retry on a new connection"
   end
 
   def format_error(:request_body_is_streaming) do
