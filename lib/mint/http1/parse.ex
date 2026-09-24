@@ -1,6 +1,8 @@
 defmodule Mint.HTTP1.Parse do
   @moduledoc false
 
+  alias Mint.ParsingTools
+
   # Bound the parse work and keep the chunk size within an unsigned 64-bit value.
   @max_chunk_size_digits 16
 
@@ -102,16 +104,12 @@ defmodule Mint.HTTP1.Parse do
   def content_length_header(string) do
     trimmed = String.trim_trailing(string)
 
-    if only_digits?(trimmed) do
+    if ParsingTools.only_digits?(trimmed) do
       {:ok, String.to_integer(trimmed)}
     else
       {:error, {:invalid_content_length_header, string}}
     end
   end
-
-  defp only_digits?(<<char>>) when is_digit(char), do: true
-  defp only_digits?(<<char, rest::binary>>) when is_digit(char), do: only_digits?(rest)
-  defp only_digits?(_other), do: false
 
   def connection_header(string) do
     split_into_downcase_tokens(string)

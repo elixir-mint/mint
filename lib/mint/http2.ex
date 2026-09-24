@@ -127,7 +127,7 @@ defmodule Mint.HTTP2 do
 
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
 
-  alias Mint.{HTTPError, TransportError}
+  alias Mint.{HTTPError, ParsingTools, TransportError}
   alias Mint.Types
   alias Mint.Core.{Headers, Util}
   alias Mint.HTTP2.Frame
@@ -2234,16 +2234,17 @@ defmodule Mint.HTTP2 do
 
       [value | rest] ->
         cond do
-          Enum.any?(rest, &(&1 != value)) -> {:error, :disagreeing_content_length_headers}
-          not digits?(value) -> {:error, {:invalid_content_length_header, value}}
-          true -> {:ok, String.to_integer(value)}
+          Enum.any?(rest, &(&1 != value)) ->
+            {:error, :disagreeing_content_length_headers}
+
+          not ParsingTools.only_digits?(value) ->
+            {:error, {:invalid_content_length_header, value}}
+
+          true ->
+            {:ok, String.to_integer(value)}
         end
     end
   end
-
-  defp digits?(<<char>>) when char in ?0..?9, do: true
-  defp digits?(<<char, rest::binary>>) when char in ?0..?9, do: digits?(rest)
-  defp digits?(_other), do: false
 
   defp end_remote_stream(conn, stream, responses) do
     stream = conn.streams[stream.id]
