@@ -127,7 +127,7 @@ defmodule Mint.HTTP2 do
 
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
 
-  alias Mint.{HTTPError, TransportError}
+  alias Mint.{HTTPError, ParsingTools, TransportError}
   alias Mint.Types
   alias Mint.Core.{Headers, Util}
   alias Mint.HTTP2.Frame
@@ -380,6 +380,12 @@ defmodule Mint.HTTP2 do
       for example because it contains control characters. `name` is the name of the
       header and `value` is the invalid value.
 
+    * `{:invalid_content_length_header, value}` - when the `content-length` header of a
+      response is not a non-negative integer. `value` is the received value.
+
+    * `:disagreeing_content_length_headers` - when a response contains `content-length`
+      headers with different values.
+
     * `:unprocessed` - when a request was closed because it was not processed by the server.
       When this error is returned, it means that the server hasn't processed the request at all,
       so it's safe to retry the given request on a different or new connection.
@@ -603,7 +609,7 @@ defmodule Mint.HTTP2 do
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
 
-    {conn, stream_id, ref} = open_stream(conn)
+    {conn, stream_id, ref} = open_stream(conn, method)
     {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
     conn = send!(conn, payload)
     {:ok, conn, ref}
@@ -1358,7 +1364,7 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp open_stream(conn) do
+  defp open_stream(conn, method) do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_client_stream_count >= max_concurrent_streams do
@@ -1381,7 +1387,10 @@ defmodule Mint.HTTP2 do
       # Current remaining receive window for this stream, tracked
       # independently from the peak so that refills can be batched.
       receive_window_remaining: conn.client_settings.initial_window_size,
-      received_first_headers?: false
+      received_first_headers?: false,
+      method: method,
+      content_length: nil,
+      body_size: 0
     }
 
     conn = put_in(conn.streams[stream.id], stream)
@@ -1876,13 +1885,29 @@ defmodule Mint.HTTP2 do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
         assert_stream_in_state(conn, stream, [:open, :half_closed_local])
-        responses = [{:data, stream.ref, data} | responses]
+        body_size = stream.body_size + byte_size(data)
 
-        if flag_set?(flags, :data, :end_stream) do
-          conn = close_stream!(conn, stream.id, :remote_end_stream)
-          {conn, [{:done, stream.ref} | responses]}
+        if stream.content_length && body_size > stream.content_length do
+          conn = close_stream!(conn, stream.id, :protocol_error)
+
+          debug_data =
+            if stream.content_length == 0 do
+              "received DATA for a response that must not have content"
+            else
+              "the response body exceeds the content-length header value of " <>
+                "#{stream.content_length}"
+            end
+
+          {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
         else
-          {conn, responses}
+          conn = put_in(conn.streams[stream.id].body_size, body_size)
+          responses = [{:data, stream.ref, data} | responses]
+
+          if flag_set?(flags, :data, :end_stream) do
+            end_remote_stream(conn, stream, responses)
+          else
+            {conn, responses}
+          end
         end
 
       :error ->
@@ -2039,46 +2064,56 @@ defmodule Mint.HTTP2 do
         end
 
       [{":status", status} | headers] when not received_first_headers? ->
-        conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
         headers = join_cookie_headers(headers)
-        new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
-        cond do
-          # :reserved_remote means that this was a promised stream. As soon as headers come,
-          # the stream goes in the :half_closed_local state (unless it's not allowed because
-          # of the client's max concurrent streams limit, or END_STREAM is set).
-          stream.state == :reserved_remote ->
+        case response_content_length(stream, status, headers) do
+          {:ok, content_length} ->
+            conn =
+              update_in(
+                conn.streams[stream.id],
+                &%{&1 | received_first_headers?: true, content_length: content_length}
+              )
+
+            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+
             cond do
-              conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
-                conn = close_stream!(conn, stream.id, :refused_stream)
-                {conn, responses}
+              # :reserved_remote means that this was a promised stream. As soon as headers come,
+              # the stream goes in the :half_closed_local state (unless it's not allowed because
+              # of the client's max concurrent streams limit, or END_STREAM is set).
+              stream.state == :reserved_remote ->
+                cond do
+                  conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
+                    conn = close_stream!(conn, stream.id, :refused_stream)
+                    {conn, responses}
+
+                  end_stream? ->
+                    end_remote_stream(conn, stream, new_responses)
+
+                  true ->
+                    conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+                    conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
+                    conn = put_in(conn.streams[stream.id].state, :half_closed_local)
+                    {conn, new_responses}
+                end
 
               end_stream? ->
-                conn = close_stream!(conn, stream.id, :remote_end_stream)
-                {conn, [{:done, ref} | new_responses]}
+                end_remote_stream(conn, stream, new_responses)
 
               true ->
-                conn = update_in(conn.open_server_stream_count, &(&1 + 1))
-                conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
-                conn = put_in(conn.streams[stream.id].state, :half_closed_local)
                 {conn, new_responses}
             end
 
-          end_stream? ->
-            conn = close_stream!(conn, stream.id, :remote_end_stream)
-            {conn, [{:done, ref} | new_responses]}
-
-          true ->
-            {conn, new_responses}
+          {:error, reason} ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            {conn, [{:error, ref, wrap_error(reason)} | responses]}
         end
 
       # Trailer headers. We don't care about the :status header here.
       headers when received_first_headers? ->
         if end_stream? do
-          conn = close_stream!(conn, stream.id, :remote_end_stream)
           headers = headers |> Headers.remove_unallowed_trailer() |> join_cookie_headers()
-          {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
+          end_remote_stream(conn, stream, [{:headers, ref, headers} | responses])
         else
           # Trailer headers must set the END_STREAM flag because they're
           # the last thing allowed on the stream (other than RST_STREAM and
@@ -2182,6 +2217,55 @@ defmodule Mint.HTTP2 do
   defp field_value_chars?(<<char, _rest::binary>>) when char in [0, ?\n, ?\r], do: false
   defp field_value_chars?(<<_char, rest::binary>>), do: field_value_chars?(rest)
   defp field_value_chars?(<<>>), do: true
+
+  # RFC 9113 8.1.1: a response with content is malformed if the sum of the DATA
+  # frame payload lengths doesn't equal the content-length header value. Responses
+  # to HEAD and 204 and 304 responses must not have content, whatever their
+  # content-length header says, and 2xx responses to CONNECT carry tunnel data.
+  defp response_content_length(%{method: method}, status, headers) do
+    cond do
+      method == "HEAD" -> {:ok, 0}
+      status in [204, 304] -> {:ok, 0}
+      method == "CONNECT" and status in 200..299 -> {:ok, nil}
+      true -> content_length(headers)
+    end
+  end
+
+  defp content_length(headers) do
+    case for {"content-length", value} <- headers, do: value do
+      [] ->
+        {:ok, nil}
+
+      [value | rest] ->
+        cond do
+          Enum.any?(rest, &(&1 != value)) ->
+            {:error, :disagreeing_content_length_headers}
+
+          not ParsingTools.only_digits?(value) ->
+            {:error, {:invalid_content_length_header, value}}
+
+          true ->
+            {:ok, String.to_integer(value)}
+        end
+    end
+  end
+
+  defp end_remote_stream(conn, stream, responses) do
+    stream = conn.streams[stream.id]
+
+    if stream.content_length in [nil, stream.body_size] do
+      conn = close_stream!(conn, stream.id, :remote_end_stream)
+      {conn, [{:done, stream.ref} | responses]}
+    else
+      conn = close_stream!(conn, stream.id, :protocol_error)
+
+      debug_data =
+        "the response body is #{stream.body_size} bytes but the content-length header " <>
+          "value is #{stream.content_length}"
+
+      {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
+    end
+  end
 
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
@@ -2430,13 +2514,23 @@ defmodule Mint.HTTP2 do
         send_window_size: conn.server_settings.initial_window_size,
         receive_window_size: conn.client_settings.initial_window_size,
         receive_window_remaining: conn.client_settings.initial_window_size,
-        received_first_headers?: false
+        received_first_headers?: false,
+        method: promised_method(headers),
+        content_length: nil,
+        body_size: 0
       }
 
       conn = put_in(conn.streams[promised_stream.id], promised_stream)
       conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
       new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
       {conn, [new_response | responses]}
+    end
+  end
+
+  defp promised_method(headers) do
+    case List.keyfind(headers, ":method", 0) do
+      {":method", method} -> method
+      nil -> nil
     end
   end
 
@@ -2818,6 +2912,14 @@ defmodule Mint.HTTP2 do
 
   def format_error({:invalid_header_value, name, value}) do
     "invalid value for header #{inspect(name)} in the response: #{inspect(value)}"
+  end
+
+  def format_error({:invalid_content_length_header, value}) do
+    "invalid content-length header in the response: #{inspect(value)}"
+  end
+
+  def format_error(:disagreeing_content_length_headers) do
+    "the response contains content-length headers with different values"
   end
 
   def format_error({:server_closed_request, error_code}) do

@@ -1366,6 +1366,249 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "response content-length" do
+    for {method, status} <- [{"HEAD", "200"}, {"GET", "204"}, {"GET", "304"}] do
+      test "DATA on a #{method} #{status} response is a stream error", %{conn: conn} do
+        assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, unquote(method), "/", [], nil)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}, {"content-length", "5"}],
+                    [:end_headers]},
+                   data(stream_id: stream_id, data: "x", flags: set_flags(:data, [:end_stream]))
+                 ])
+
+        assert [{:status, ^ref, _}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ "must not have content"
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "a body matching the content-length header completes the request", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hel", flags: set_flags(:data, [])),
+                 data(stream_id: stream_id, data: "lo", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, [{"content-length", "5"}]},
+               {:data, ref, "hel"},
+               {:data, ref, "lo"},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "a body shorter than the content-length header is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "10"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:error, ^ref, error}
+             ] =
+               responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 2 bytes but the content-length header value is 10"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "a body longer than the content-length header is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "1"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, []))
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "exceeds the content-length header value of 1"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "END_STREAM on the headers with a non-zero content-length is a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                  [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 0 bytes but the content-length header value is 5"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "trailers ending a body shorter than the content-length header are a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "3"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [])),
+                 {:headers, stream_id, [{"x-trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:headers, ^ref, [{"x-trailer", "v"}]},
+               {:error, ^ref, error}
+             ] = responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 2 bytes but the content-length header value is 3"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "trailers ending a body matching the content-length header complete the request",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "2"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [])),
+                 {:headers, stream_id, [{"x-trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:headers, ^ref, _},
+               {:done, ^ref}
+             ] =
+               responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    for {method, status} <- [{"HEAD", "200"}, {"GET", "204"}, {"GET", "304"}, {"CONNECT", "200"}] do
+      test "a #{status} response to #{method} ignores the content-length header", %{conn: conn} do
+        assert {:ok, conn, ref} = HTTP2.request(conn, unquote(method), "/", [], nil)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}, {"content-length", "5"}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:status, ^ref, _}, {:headers, ^ref, _}, {:done, ^ref}] = responses
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "identical content-length headers are accepted", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [{":status", "200"}, {"content-length", "2"}, {"content-length", "2"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, headers, [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "hi"}, {:done, ^ref}] =
+               responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "different content-length headers are a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [{":status", "200"}, {"content-length", "1"}, {"content-length", "2"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, :disagreeing_content_length_headers
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    for value <- ["abc", "-1", "", "1a", "+1"] do
+      test "a content-length header of #{inspect(value)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {"content-length", unquote(value)}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_content_length_header, unquote(value)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+  end
+
   describe "interim responses (1xx)" do
     test "multiple before a single HEADERS", %{conn: conn} do
       info_status1 = Enum.random(100..199)
