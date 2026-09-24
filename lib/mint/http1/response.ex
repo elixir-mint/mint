@@ -88,16 +88,17 @@ defmodule Mint.HTTP1.Response do
   def valid_header_value?(_other), do: false
 
   # RFC 9112 5.2: a user agent must replace each received obs-fold with one or
-  # more SP octets before interpreting the field value.
+  # more SP octets before interpreting the field value. obs-fold = OWS CRLF RWS,
+  # so the whitespace on both sides of the line break is replaced too.
   def replace_obs_fold(value) do
     if obs_fold?(value), do: replace_obs_fold(value, <<>>), else: value
   end
 
   defp replace_obs_fold(<<"\r\n", rest::binary>>, acc),
-    do: replace_obs_fold(skip_whitespace(rest), <<acc::binary, ?\s>>)
+    do: replace_obs_fold(skip_whitespace(rest), <<trim_trailing_whitespace(acc)::binary, ?\s>>)
 
   defp replace_obs_fold(<<"\n", rest::binary>>, acc),
-    do: replace_obs_fold(skip_whitespace(rest), <<acc::binary, ?\s>>)
+    do: replace_obs_fold(skip_whitespace(rest), <<trim_trailing_whitespace(acc)::binary, ?\s>>)
 
   defp replace_obs_fold(<<char, rest::binary>>, acc),
     do: replace_obs_fold(rest, <<acc::binary, char>>)

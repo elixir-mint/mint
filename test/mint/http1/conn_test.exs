@@ -1600,6 +1600,38 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "whitespace before an obs-fold is replaced with the fold", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} =
+               HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, _responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: one\t \r"})
+
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "\n two\r\nContent-Length: 0\r\n\r\n"})
+
+      assert {"foo", "one two"} in for(
+               {:headers, ^ref, headers} <- responses,
+               h <- headers,
+               do: h
+             )
+    end
+  end
+
+  test "whitespace before an obs-fold in a trailer is replaced with the fold", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "0\r\nfoo: one\t\r\n two\r\n\r\n"
+
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert {:headers, ref, [{"foo", "one two"}]} in responses
+  end
+
   test "an obs-fold at the start of a header value leaves no leading whitespace",
        %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
