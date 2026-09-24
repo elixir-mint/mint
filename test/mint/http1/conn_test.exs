@@ -352,6 +352,27 @@ defmodule Mint.HTTP1Test do
            ] = responses
   end
 
+  test "connection stays open after a response completes with another request in flight",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn,
+            [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:data, ^ref1, _}, {:done, ^ref1}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+
+    assert {:ok, conn,
+            [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:data, ^ref2, _}, {:done, ^ref2}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
+
   test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
