@@ -2350,6 +2350,11 @@ defmodule Mint.HTTP2 do
       {:header_table_size, header_table_size}, conn ->
         update_in(conn.encode_table, &HPAX.resize(&1, header_table_size))
 
+      # RFC 9113 6.5.2: a server must not set SETTINGS_ENABLE_PUSH to 1.
+      {:enable_push, true}, conn ->
+        debug_data = "SETTINGS_ENABLE_PUSH set to 1 by the server"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
       {:enable_push, enable_push?}, conn ->
         put_in(conn.server_settings.enable_push, enable_push?)
 

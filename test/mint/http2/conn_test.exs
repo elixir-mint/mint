@@ -3065,9 +3065,31 @@ defmodule Mint.HTTP2Test do
     test "server can send the :enable_push setting", %{conn: conn} do
       {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: false])])
       assert HTTP2.get_server_setting(conn, :enable_push) == false
+    end
 
-      {:ok, %HTTP2{} = conn, []} = stream_frames(conn, [settings(params: [enable_push: true])])
-      assert HTTP2.get_server_setting(conn, :enable_push) == true
+    test "if server sets :enable_push to 1, we send a connection error", %{conn: conn} do
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [settings(params: [enable_push: true])])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "SETTINGS_ENABLE_PUSH set to 1 by the server"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+      refute HTTP2.open?(conn)
+    end
+
+    test "if server sends a SETTINGS ACK with a payload, we send a connection error",
+         %{conn: conn} do
+      data =
+        IO.iodata_to_binary(encode_raw(_settings = 0x04, _ack = 0x01, 0, <<0x03::16, 1::32>>))
+
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
+
+      assert_http2_error error, {:frame_size_error, debug_data}
+      assert debug_data =~ "error with size of frame: :settings"
+
+      assert_recv_frames [goaway(error_code: :frame_size_error)]
+      refute HTTP2.open?(conn)
     end
 
     test "if server sends an invalid :initial_window_size, we send a connection error",
