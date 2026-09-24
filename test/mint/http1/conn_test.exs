@@ -1598,6 +1598,51 @@ defmodule Mint.HTTP1Test do
     assert_closed_and_released(conn)
   end
 
+  test "bytes after a bodiless response that closes the connection are not parsed",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, [{"connection", "close"}]},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert conn.buffer == ""
+    assert_closed_and_released(conn)
+  end
+
+  test "bytes after a response body that closes the connection are not parsed",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi" <>
+        "HTTP/1.1 200 OK\r\n"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert conn.buffer == ""
+    assert_closed_and_released(conn)
+  end
+
   test "pipelined requests behind an HTTP/1.0 response get an :unprocessed error",
        %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)

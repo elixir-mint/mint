@@ -1082,6 +1082,12 @@ defmodule Mint.HTTP1 do
     end
   end
 
+  # A response that closes the connection is the last one the server sends on
+  # it, so anything after it can't be a response to a queued request.
+  defp next_request(%{state: :closed} = conn, _data, responses) do
+    {:ok, %{conn | buffer: ""}, responses}
+  end
+
   defp next_request(%{request: nil} = conn, "", responses) do
     {:ok, %{conn | buffer: ""}, responses}
   end
