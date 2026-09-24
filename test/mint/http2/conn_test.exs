@@ -1561,7 +1561,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
 
       assert [{:error, ^ref, error}] = responses
-      assert_http2_error error, :more_than_one_content_length_header
+      assert_http2_error error, :disagreeing_content_length_headers
 
       assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
       assert HTTP2.open?(conn)

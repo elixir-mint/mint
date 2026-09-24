@@ -381,7 +381,7 @@ defmodule Mint.HTTP2 do
     * `{:invalid_content_length_header, value}` - when the `content-length` header of a
       response is not a non-negative integer. `value` is the received value.
 
-    * `:more_than_one_content_length_header` - when a response contains `content-length`
+    * `:disagreeing_content_length_headers` - when a response contains `content-length`
       headers with different values.
 
     * `:unprocessed` - when a request was closed because it was not processed by the server.
@@ -2234,7 +2234,7 @@ defmodule Mint.HTTP2 do
 
       [value | rest] ->
         cond do
-          Enum.any?(rest, &(&1 != value)) -> {:error, :more_than_one_content_length_header}
+          Enum.any?(rest, &(&1 != value)) -> {:error, :disagreeing_content_length_headers}
           not digits?(value) -> {:error, {:invalid_content_length_header, value}}
           true -> {:ok, String.to_integer(value)}
         end
@@ -2897,7 +2897,7 @@ defmodule Mint.HTTP2 do
     "invalid content-length header in the response: #{inspect(value)}"
   end
 
-  def format_error(:more_than_one_content_length_header) do
+  def format_error(:disagreeing_content_length_headers) do
     "the response contains content-length headers with different values"
   end
 
