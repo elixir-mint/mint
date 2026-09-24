@@ -2430,6 +2430,146 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "settings" do
+    test "the header table size setting is applied when the server acknowledges it",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 8192)
+      assert_recv_frames [settings(params: [header_table_size: 8192])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert HTTP2.get_client_setting(conn, :header_table_size) == 8192
+
+      # The server can now signal a dynamic table size of 8192 at the start of a block.
+      server = Process.get(@server_pdict_key)
+      Process.put(@server_pdict_key, update_in(server.encode_table, &HPAX.resize(&1, 8192)))
+
+      assert {:ok, %HTTP2{}, [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+    end
+
+    test "a raised header table size leaves the table size to the server", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # The server picks a 64 byte table and stores ":status: 404" in it, which takes 42 bytes.
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x3F, 0x21, 0x48, 3, "404">>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 404}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 8192)
+      assert_recv_frames [settings(params: [header_table_size: 8192])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      # The server didn't ask for more room, so storing ":status: 500" evicts ":status: 404".
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x48, 3, "500">>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 500}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0xBF>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert_http2_error error, {:compression_error, debug_data}
+      assert debug_data =~ "unable to decode headers: {:index_not_found, 63}"
+
+      assert_recv_frames [goaway(error_code: :compression_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "a lowered header table size has to be signalled by the server", %{conn: conn} do
+      conn = fill_server_header_table(conn)
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 0)
+      assert_recv_frames [settings(params: [header_table_size: 0])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x88>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert_http2_error error, {:compression_error, debug_data}
+      assert debug_data =~ "unable to decode headers: :missing_size_update"
+
+      assert_recv_frames [goaway(error_code: :compression_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "a response that signals the lowered header table size is accepted", %{conn: conn} do
+      conn = fill_server_header_table(conn)
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 0)
+      assert_recv_frames [settings(params: [header_table_size: 0])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x20, 0x88>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert HTTP2.open?(conn)
+    end
+
     @tag connect_options: [
            receive_window_update_threshold: 8,
            client_settings: [initial_window_size: 16]
@@ -3208,6 +3348,26 @@ defmodule Mint.HTTP2Test do
       assert log =~
                "Received frame: PING[stream_id: 0, flags: 0, opaque_data: <<1, 2, 3, 4, 5, 6, 7, 8>>]"
     end
+  end
+
+  defp fill_server_header_table(conn) do
+    {conn, ref} = open_request(conn)
+
+    assert_recv_frames [headers(stream_id: stream_id)]
+
+    # ":status: 404" stored with incremental indexing, 42 bytes in the server's table.
+    assert {:ok, %HTTP2{} = conn, responses} =
+             stream_frames(conn, [
+               headers(
+                 stream_id: stream_id,
+                 hbf: <<0x48, 3, "404">>,
+                 flags: set_flags(:headers, [:end_headers, :end_stream])
+               )
+             ])
+
+    assert [{:status, ^ref, 404}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+    conn
   end
 
   defp start_server_async(_context) do

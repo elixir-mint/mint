@@ -163,6 +163,7 @@ defmodule Mint.HTTP2 do
   @default_max_header_list_size 256 * 1024
 
   @valid_client_settings [
+    :header_table_size,
     :max_concurrent_streams,
     :initial_window_size,
     :max_frame_size,
@@ -240,6 +241,7 @@ defmodule Mint.HTTP2 do
 
     # Settings that the client communicates to the server.
     client_settings: %{
+      header_table_size: 4096,
       max_concurrent_streams: 100,
       initial_window_size: @default_stream_window_size,
       max_header_list_size: @default_max_header_list_size,
@@ -2296,12 +2298,17 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  valid_client_settings_without_iws = @valid_client_settings -- [:initial_window_size]
+  valid_client_settings_without_iws =
+    @valid_client_settings -- [:initial_window_size, :header_table_size]
 
   defp apply_client_settings(conn, client_settings) do
     Enum.reduce(client_settings, conn, fn
       {:initial_window_size, initial_window_size}, conn ->
         update_client_initial_window_size(conn, initial_window_size)
+
+      {:header_table_size, header_table_size}, conn ->
+        conn = update_in(conn.decode_table, &HPAX.protocol_resize(&1, header_table_size))
+        put_in(conn.client_settings.header_table_size, header_table_size)
 
       {setting, value}, conn when setting in unquote(valid_client_settings_without_iws) ->
         update_in(conn.client_settings, &%{&1 | setting => value})
