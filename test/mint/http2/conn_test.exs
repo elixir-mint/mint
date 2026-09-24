@@ -2165,6 +2165,56 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "misbehaving server" do
+    test "an extension frame in the middle of a header block is a connection error",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      data =
+        IO.iodata_to_binary([
+          Frame.encode(headers(stream_id: stream_id, hbf: hbf, flags: 0x00)),
+          encode_raw(_extension_type = 0x20, 0x00, stream_id, "extension"),
+          Frame.encode(
+            continuation(
+              stream_id: stream_id,
+              hbf: "",
+              flags: set_flags(:continuation, [:end_headers])
+            )
+          )
+        ])
+
+      assert {:error, %HTTP2{} = conn, error, []} = HTTP2.stream(conn, {:ssl, conn.socket, data})
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "got an extension frame instead of a CONTINUATION frame"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "PRIORITY frames on idle streams are ignored", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      priority_frames =
+        for idle_stream_id <- [stream_id + 2, 2] do
+          priority(
+            stream_id: idle_stream_id,
+            exclusive?: false,
+            stream_dependency: 0,
+            weight: 16
+          )
+        end
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_frames(conn, priority_frames)
+      assert HTTP2.open?(conn)
+    end
+
     test "sends DATA before the response HEADERS", %{conn: conn} do
       {conn, ref} = open_request(conn)
 

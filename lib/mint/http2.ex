@@ -1766,6 +1766,14 @@ defmodule Mint.HTTP2 do
   defp validate_frame(conn, unknown()) do
     # Unknown frames MUST be ignored:
     # https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    # RFC 9113 5.5: unless they appear in the middle of a header block.
+    if conn.headers_being_processed do
+      debug_data =
+        "headers are streaming but got an extension frame instead of a CONTINUATION frame"
+
+      send_connection_error!(conn, :protocol_error, debug_data)
+    end
+
     conn
   end
 
@@ -1795,8 +1803,8 @@ defmodule Mint.HTTP2 do
           conn
       end
 
-    assert_frame_on_right_level(conn, elem(frame, 0), stream_id)
-    assert_stream_id_is_allowed(conn, stream_id)
+    assert_frame_on_right_level(conn, type, stream_id)
+    assert_stream_id_is_allowed(conn, type, stream_id)
     assert_frame_doesnt_interrupt_header_streaming(conn, frame)
     conn
   end
@@ -1842,7 +1850,12 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
-  defp assert_stream_id_is_allowed(conn, stream_id) do
+  # RFC 9113 5.1: PRIORITY is the only frame the server can send on an idle stream.
+  # Client streams are opened in order, so odd stream IDs from next_stream_id on are
+  # idle.
+  defp assert_stream_id_is_allowed(_conn, :priority, _stream_id), do: :ok
+
+  defp assert_stream_id_is_allowed(conn, _frame, stream_id) do
     if Integer.is_odd(stream_id) and stream_id >= conn.next_stream_id do
       debug_data = "frame with stream ID #{inspect(stream_id)} has not been opened yet"
       send_connection_error!(conn, :protocol_error, debug_data)
