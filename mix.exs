@@ -77,7 +77,7 @@ defmodule Mint.MixProject do
   defp deps do
     [
       {:castore, "~> 0.1.0 or ~> 1.0", optional: true},
-      {:hpax, github: "elixir-mint/hpax"},
+      {:hpax, "~> 1.1"},
 
       # Dev/test dependencies
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
