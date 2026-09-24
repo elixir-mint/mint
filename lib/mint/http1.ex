@@ -1040,7 +1040,7 @@ defmodule Mint.HTTP1 do
   end
 
   defp next_request(conn, data, responses) do
-    decode(:status, %{conn | state: :status}, data, responses)
+    decode(:status, conn, data, responses)
   end
 
   defp add_trailer_headers([], _request_ref, responses), do: responses
