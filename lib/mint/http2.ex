@@ -2540,16 +2540,24 @@ defmodule Mint.HTTP2 do
          window_update(stream_id: stream_id, window_size_increment: wsi),
          responses
        ) do
-    stream = fetch_stream!(conn, stream_id)
-    new_window_size = conn.streams[stream_id].send_window_size + wsi
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        new_window_size = stream.send_window_size + wsi
 
-    if new_window_size > @max_window_size do
-      conn = close_stream!(conn, stream_id, :flow_control_error)
-      error = wrap_error({:flow_control_error, "window size too big"})
-      {conn, [{:error, stream.ref, error} | responses]}
-    else
-      conn = put_in(conn.streams[stream_id].send_window_size, new_window_size)
-      {conn, responses}
+        if new_window_size > @max_window_size do
+          conn = close_stream!(conn, stream_id, :flow_control_error)
+          error = wrap_error({:flow_control_error, "window size too big"})
+          {conn, [{:error, stream.ref, error} | responses]}
+        else
+          conn = put_in(conn.streams[stream_id].send_window_size, new_window_size)
+          {conn, responses}
+        end
+
+      # RFC 9113 5.1: a WINDOW_UPDATE can arrive on a stream shortly after it was
+      # closed, for example after the client reset it, and must be ignored.
+      :error ->
+        log(conn, :debug, "Received WINDOW_UPDATE frame on closed stream ID #{stream_id}")
+        {conn, responses}
     end
   end
 
