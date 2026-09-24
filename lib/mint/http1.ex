@@ -159,9 +159,10 @@ defmodule Mint.HTTP1 do
     * `:stream_headers` - (`t:boolean/0`) if set to `true`, response headers and trailer headers
       will be emitted as they are parsed, rather than buffered until the complete header section
       is received. When enabled, you may receive multiple `{:headers, ref, headers}` responses
-      for a single request, and header values that use obsolete line folding are rejected
-      with an `:invalid_header` error instead of being unfolded. Defaults to `false`.
-      *Available since v1.10.0*.
+      for a single request. A folded continuation line (obsolete line folding) is unfolded
+      when it arrives in the same message as its header, and rejected with an
+      `:invalid_header` error when it arrives after its header was emitted. Defaults to
+      `false`. *Available since v1.10.0*.
 
   """
   @spec connect(Types.scheme(), Types.address(), :inet.port_number(), keyword()) ::
