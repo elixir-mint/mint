@@ -796,6 +796,17 @@ defmodule Mint.HTTP1Test do
              """)
   end
 
+  test "the zone ID of an IPv6 literal hostname is left out of the host header",
+       %{port: port, server_ref: server_ref} do
+    for hostname <- ["fe80::1%eth0", "fe80::1%25eth0"] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, hostname: hostname)
+      assert_receive {^server_ref, server_socket}
+      {:ok, _conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert receive_request_string(server_socket) =~ "\r\nhost: [fe80::1]:#{port}\r\n"
+    end
+  end
+
   test "open_request_count/1", %{conn: conn} do
     assert HTTP1.open_request_count(conn) == 0
 
