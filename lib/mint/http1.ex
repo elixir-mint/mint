@@ -1051,6 +1051,8 @@ defmodule Mint.HTTP1 do
   defp check_header_section_size(%{max_header_list_size: max_size}, size),
     do: {:error, {:max_header_list_size_exceeded, size, max_size}}
 
+  # The body buffer is iodata built as an improper list, which dialyzer warns about.
+  @dialyzer {:nowarn_function, add_body: 3}
   defp add_body(conn, data, responses) do
     conn = update_in(conn.request.data_buffer, &[&1 | data])
     collapse_body_buffer(conn, responses)
