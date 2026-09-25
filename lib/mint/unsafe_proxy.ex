@@ -25,6 +25,10 @@ defmodule Mint.UnsafeProxy do
     {scheme, address, port, opts} = host
     hostname = Mint.Core.Util.hostname(opts, address)
 
+    # The proxy connection is the one returned to the caller, so it defaults to
+    # the caller's :mode.
+    proxy_opts = Keyword.merge(Keyword.take(opts, [:mode]), proxy_opts)
+
     with {:ok, state} <- Mint.HTTP1.connect(proxy_scheme, proxy_address, proxy_port, proxy_opts) do
       conn = %UnsafeProxy{
         scheme: scheme,
