@@ -1088,6 +1088,20 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    @tag connect_options: [hostname: "::1"]
+    test ":authority pseudo-header brackets IPv6 literal hostnames", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      assert {":authority", authority} =
+               hbf
+               |> server_decode_headers()
+               |> List.keyfind(":authority", 0)
+
+      assert authority == "[::1]:#{conn.port}"
+    end
+
     @tag :with_overridden_default_port
     test ":authority pseudo-header does not include port if it is the scheme's default",
          %{conn: conn} do

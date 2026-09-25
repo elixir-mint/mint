@@ -1288,6 +1288,8 @@ defmodule Mint.HTTP1 do
 
   # If the port is the default for the scheme, don't add it to the host header
   defp default_host_header(%__MODULE__{scheme_as_string: scheme, host: host, port: port}) do
+    host = Util.uri_host(host)
+
     if URI.default_port(scheme) == port do
       host
     else
