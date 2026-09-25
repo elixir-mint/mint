@@ -1143,6 +1143,7 @@ defmodule Mint.HTTP do
   # Made public since the struct is opaque.
   @doc false
   @impl true
+  @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
   def put_proxy_headers(conn, headers), do: conn_apply(conn, :put_proxy_headers, [conn, headers])
 
   @doc """
