@@ -141,9 +141,9 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "012345678"})
 
     assert {:ok, conn, [{:data, ^ref, "9"}, {:done, ^ref}]} =
-             HTTP1.stream(conn, {:tcp, conn.socket, "9XXX"})
+             HTTP1.stream(conn, {:tcp, conn.socket, "9"})
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
     assert HTTP1.open?(conn)
   end
 
@@ -151,9 +151,9 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, ref} = HTTP1.request(conn, "HEAD", "/", [], nil)
 
     assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
-             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\n"})
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   test "no body in 2xx response to CONNECT request", %{conn: conn} do
@@ -214,6 +214,31 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
+    assert_closed_and_released(conn)
+  end
+
+  test "data after the last in-flight response is an error", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
+    extra = "HTTP/1.1 404 Not Found\r\ncontent-length: 1\r\n\r\nY"
+
+    assert {:error, conn, %HTTPError{reason: {:unexpected_data, ^extra}}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response <> extra})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}, {:done, ^ref}] =
+             responses
+
+    assert_closed_and_released(conn)
+  end
+
+  test "data after the last in-flight bodiless response is an error", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response <> "X"})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}] = responses
     assert_closed_and_released(conn)
   end
 
@@ -373,12 +398,40 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "pipelined response after a bodiless response in the same message", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    responses =
+      "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n" <>
+        "HTTP/1.1 204 No Content\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, responses})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:done, ^ref1},
+             {:status, ^ref2, 204},
+             {:headers, ^ref2, []},
+             {:done, ^ref2},
+             {:status, ^ref3, 200},
+             {:headers, ^ref3, _},
+             {:data, ^ref3, "XXXXX"},
+             {:done, ^ref3}
+           ] = responses
+
+    assert conn.buffer == ""
+  end
+
   test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
+        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -389,7 +442,7 @@ defmodule Mint.HTTP1Test do
     assert data2 == {:data, ref, "23"}
     assert done == {:done, ref}
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   for chunk_size <- ["+5", "+0", "-0"] do
@@ -580,7 +633,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\nXXX"
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -592,7 +645,7 @@ defmodule Mint.HTTP1Test do
     assert trailers == {:headers, ref, [{"my-trailer", "value"}]}
     assert done == {:done, ref}
 
-    assert conn.buffer == "XXX"
+    assert conn.buffer == ""
   end
 
   test "limits the size of a chunked trailer section", %{port: port} do
@@ -1216,6 +1269,79 @@ defmodule Mint.HTTP1Test do
   end
 
   describe "streaming requests" do
+    test "streaming a body for a request that is not streaming returns an error",
+         %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:error, conn, %HTTPError{reason: :request_is_not_streaming}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+
+      assert {:error, conn, %HTTPError{reason: :unknown_request_to_stream}} =
+               HTTP1.stream_request_body(conn, make_ref(), "hello")
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "streaming a body after :eof returns an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+
+      assert {:error, conn, %HTTPError{reason: :request_is_not_streaming}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+
+      assert HTTP1.open?(conn)
+    end
+
+    test "streaming a body on a closed connection returns an error", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [], :stream)
+      {:ok, conn} = HTTP1.close(conn)
+
+      assert {:error, _conn, %HTTPError{reason: :closed}} =
+               HTTP1.stream_request_body(conn, ref, "hello")
+    end
+
+    test "response arriving before the request body is complete",
+         %{conn: conn, server_socket: server_socket} do
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", [{"content-length", "10"}], :stream)
+      _ = receive_request_string(server_socket)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
+
+      response = "HTTP/1.1 413 Payload Too Large\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:ok, conn, [{:status, ^ref, 413}, {:headers, ^ref, _}, {:done, ^ref}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert HTTP1.open?(conn)
+      assert HTTP1.open_request_count(conn) == 0
+
+      assert {:error, conn, %HTTPError{reason: :request_body_is_streaming}} =
+               HTTP1.request(conn, "GET", "/", [], nil)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+      assert {:ok, _conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    end
+
+    test "100 Continue before the request body is streamed",
+         %{conn: conn, server_socket: server_socket} do
+      headers = [{"expect", "100-continue"}, {"content-length", "5"}]
+      {:ok, conn, ref} = HTTP1.request(conn, "POST", "/", headers, :stream)
+      _ = receive_request_string(server_socket)
+
+      assert {:ok, conn, [{:status, ^ref, 100}, {:headers, ^ref, []}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 100 Continue\r\n\r\n"})
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, :eof)
+
+      response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+    end
+
     test "transfer-encoding is set to chunked if not set already, and content is chunked",
          %{conn: conn, server_socket: server_socket, port: port} do
       {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
@@ -1448,6 +1574,115 @@ defmodule Mint.HTTP1Test do
 
       assert_closed_and_released(conn)
     end
+  end
+
+  test "pipelined requests behind a Connection: close response get an :unprocessed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, [{"connection", "close"}, {"content-length", "2"}]},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}},
+             {:error, ^ref3, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert HTTP1.open_request_count(conn) == 0
+    assert_closed_and_released(conn)
+  end
+
+  test "bytes after a bodiless response that closes the connection are not parsed",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "HEAD", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, [{"connection", "close"}]},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert conn.buffer == ""
+    assert_closed_and_released(conn)
+  end
+
+  test "bytes after a response body that closes the connection are not parsed",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi" <>
+        "HTTP/1.1 200 OK\r\n"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+           ] = responses
+
+    assert conn.buffer == ""
+    assert_closed_and_released(conn)
+  end
+
+  test "pipelined requests behind an HTTP/1.0 response get a :closed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert_closed_and_released(conn)
+  end
+
+  test "pipelined requests behind a close-delimited response get a :closed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\n\r\nhi"
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, []}, {:data, ^ref1, "hi"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
+
+    assert [
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}},
+             {:error, ^ref3, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert HTTP1.open_request_count(conn) == 0
+    assert_closed_and_released(conn)
   end
 
   defp request_string(string) do
