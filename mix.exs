@@ -24,10 +24,9 @@ defmodule Mint.MixProject do
 
       # Dialyxir
       dialyzer: [
-        plt_add_apps: [:castore],
+        plt_add_apps: [:castore, :ex_unit],
         plt_local_path: "plts",
-        plt_core_path: "plts",
-        ignore_warnings: ".dialyzer_ignore"
+        plt_core_path: "plts"
       ],
 
       # Code coverage
