@@ -50,6 +50,38 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
+  test "status line with an empty reason phrase", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, _conn, [{:status, ^ref, 204}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 204\r\n"})
+  end
+
+  test "invalid status lines", %{port: port} do
+    lines = [
+      "HTTP/1.1 2000 OK\r\n",
+      "HTTP/1.1 99 OK\r\n",
+      "HTTP/2.0 200 OK\r\n",
+      "HTTP/0.9 200 OK\r\n",
+      "HTTP/1.10 200 OK\r\n",
+      "HTTP/1.1 200 O\0K\r\n",
+      "HTTP/1.1 200 OK\r\r\n",
+      "HTTP/1.1 200OK\r\n",
+      "HTTP/1.1 0200 OK\r\n",
+      "HTTP/01.1 200 OK\r\n",
+      "HTTP/1.01 200 OK\r\n"
+    ]
+
+    for line <- lines do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port)
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_status_line}, []} =
+               HTTP1.stream(conn, {:tcp, conn.socket, line}),
+             "expected #{inspect(line)} to be rejected"
+    end
+  end
+
   test "limits an incomplete response status line", %{port: port} do
     assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
     {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
@@ -103,6 +135,124 @@ defmodule Mint.HTTP1Test do
 
     assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 10, 9}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+  end
+
+  test "header values with control characters are rejected", %{port: port} do
+    for value <- ["b\rar", "b\0ar", "b\x7Far", "b\x01ar"], stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+      response = "HTTP/1.1 200 OK\r\nfoo: " <> value <> "\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:error, conn, %HTTPError{reason: :invalid_header}, [{:status, ^ref, 200}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert_closed_and_released(conn)
+    end
+  end
+
+  test "empty header names are rejected", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+      response = "HTTP/1.1 200 OK\r\n: bar\r\ncontent-length: 0\r\n\r\n"
+
+      assert {:error, conn, %HTTPError{reason: :invalid_header}, [{:status, ^ref, 200}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert_closed_and_released(conn)
+    end
+  end
+
+  test "empty trailer names are rejected", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\n: bar\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_trailer_header}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}] = responses
+    assert_closed_and_released(conn)
+  end
+
+  test "trailer values with control characters are rejected", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\nfoo: b\0ar\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_trailer_header}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "X"}] = responses
+    assert_closed_and_released(conn)
+  end
+
+  test "trailing whitespace in header values is trimmed", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\nfoo: bar \t \r\nbaz: \t\r\ntransfer-encoding: chunked \r\n\r\n" <>
+          "1\r\nX\r\n0\r\nmy-trailer: value\t\r\n\r\n"
+
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, headers},
+               {:data, ^ref, "X"},
+               {:headers, ^ref, trailers},
+               {:done, ^ref}
+             ] = responses
+
+      assert headers == [{"foo", "bar"}, {"baz", ""}, {"transfer-encoding", "chunked"}]
+      assert trailers == [{"my-trailer", "value"}]
+    end
+  end
+
+  test "trailing whitespace in content-length is trimmed", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 1 \t\r\n\r\nX"
+
+    assert {:ok, _conn, [_status, {:headers, ^ref, headers}, {:data, ^ref, "X"}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert headers == [{"content-length", "1"}]
+  end
+
+  test "header values with obs-text are accepted", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\nfoo: b\xC3\xA4r\r\ncontent-length: 0\r\n\r\n"
+
+    assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, headers}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert headers == [{"foo", "bär"}, {"content-length", "0"}]
+  end
+
+  test "obsolete line folding in header values is replaced with a space", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nFoo: bar\r\n baz\r\nBar: one\r\n\t  two\n three\r\n" <>
+        "transfer-encoding: chunked\r\n\r\n0\r\nMy-Trailer: a\r\n b\r\n\r\n"
+
+    assert {:ok, _conn, [status, headers, trailers, done]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert status == {:status, ref, 200}
+
+    assert headers ==
+             {:headers, ref,
+              [{"foo", "bar baz"}, {"bar", "one two three"}, {"transfer-encoding", "chunked"}]}
+
+    assert trailers == {:headers, ref, [{"my-trailer", "a b"}]}
+    assert done == {:done, ref}
   end
 
   test "status and headers", %{conn: conn} do
@@ -1450,6 +1600,48 @@ defmodule Mint.HTTP1Test do
     end
   end
 
+  test "whitespace before an obs-fold is replaced with the fold", %{port: port} do
+    for stream_headers <- [false, true] do
+      assert {:ok, conn} =
+               HTTP1.connect(:http, "localhost", port, stream_headers: stream_headers)
+
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, _responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: one\t \r"})
+
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "\n two\r\nContent-Length: 0\r\n\r\n"})
+
+      assert {"foo", "one two"} in for(
+               {:headers, ^ref, headers} <- responses,
+               h <- headers,
+               do: h
+             )
+    end
+  end
+
+  test "whitespace before an obs-fold in a trailer is replaced with the fold", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "0\r\nfoo: one\t\r\n two\r\n\r\n"
+
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    assert {:headers, ref, [{"foo", "one two"}]} in responses
+  end
+
+  test "an obs-fold at the start of a header value leaves no leading whitespace",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\nFoo:\r\n bar\r\nContent-Length: 0\r\n\r\n"
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, headers}, {:done, ^ref}] = responses
+    assert headers == [{"foo", "bar"}, {"content-length", "0"}]
+  end
+
   defp request_string(string) do
     String.replace(string, "\n", "\r\n")
   end
@@ -1513,6 +1705,26 @@ defmodule Mint.HTTP1Test do
                HTTP1.stream(conn, {:tcp, conn.socket, ": Quux\r\n\r\n"})
 
       assert {:headers, ^ref, [{"qux", "Quux"}]} = headers2
+    end
+
+    test "replaces obsolete line folding received together with its header", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, _conn, [_status, {:headers, ^ref, [{"foo", "bar baz"}]}]} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: bar\r\n baz\r\n\r\n"}
+               )
+    end
+
+    test "rejects a folded continuation line arriving after its header", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status, {:headers, ^ref, [{"foo", "bar"}]}]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\nFoo: bar\r\n"})
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_header}, []} =
+               HTTP1.stream(conn, {:tcp, conn.socket, " baz\r\n\r\n"})
     end
 
     test "emits multiple headers from one packet together", %{conn: conn} do
