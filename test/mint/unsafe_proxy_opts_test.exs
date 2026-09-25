@@ -78,6 +78,23 @@ defmodule Mint.UnsafeProxyOptsTest do
     assert head =~ "proxy-authorization: Basic dGVzdDpwYXNzd29yZA==\r\n"
   end
 
+  test "the :mode option is used for the proxy connection" do
+    {proxy_port, proxy_ref} = start_tcp_proxy()
+
+    assert {:ok, conn} =
+             HTTP.connect(:http, "example.com", 80,
+               proxy: {:http, "localhost", proxy_port, []},
+               mode: :passive
+             )
+
+    assert {:ok, conn, request} = HTTP.request(conn, "GET", "/", [], nil)
+    assert_receive {^proxy_ref, :request, _head}, 2000
+
+    assert {:ok, _conn, responses} = HTTP.recv(conn, 0, 2000)
+    assert [{:status, ^request, 200}, {:headers, ^request, _headers} | rest] = responses
+    assert merge_body(rest, request) == "ok"
+  end
+
   # Starts a one-shot TLS server that accepts a single connection, reports the
   # raw request head to the test process, and replies with a canned response.
   defp start_tls_proxy(ssl_opts) do
