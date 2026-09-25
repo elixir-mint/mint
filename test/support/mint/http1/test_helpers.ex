@@ -52,15 +52,15 @@ defmodule Mint.HTTP1.TestHelpers do
 
     receive do
       {tag, ^socket, _data} = message when tag in [:tcp, :ssl] ->
-        assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
+        assert {:ok, conn, responses} = Mint.HTTP.stream(conn, message)
         maybe_done(conn, acc ++ responses)
 
       {tag, ^socket} = message when tag in [:tcp_closed, :ssl_closed] ->
-        assert {:ok, conn, responses} = conn.__struct__.stream(conn, message)
+        assert {:ok, conn, responses} = Mint.HTTP.stream(conn, message)
         maybe_done(conn, acc ++ responses)
 
       {tag, ^socket, _reason} = message when tag in [:tcp_error, :ssl_error] ->
-        assert {:error, _conn, _reason, _responses} = conn.__struct__.stream(conn, message)
+        assert {:error, _conn, _reason, _responses} = Mint.HTTP.stream(conn, message)
     after
       10000 ->
         flunk("receive_stream timeout")
