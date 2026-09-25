@@ -1766,6 +1766,14 @@ defmodule Mint.HTTP2 do
   defp validate_frame(conn, unknown()) do
     # Unknown frames MUST be ignored:
     # https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    # RFC 9113 5.5: unless they appear in the middle of a header block.
+    if conn.headers_being_processed do
+      debug_data =
+        "headers are streaming but got an extension frame instead of a CONTINUATION frame"
+
+      send_connection_error!(conn, :protocol_error, debug_data)
+    end
+
     conn
   end
 
@@ -1795,8 +1803,8 @@ defmodule Mint.HTTP2 do
           conn
       end
 
-    assert_frame_on_right_level(conn, elem(frame, 0), stream_id)
-    assert_stream_id_is_allowed(conn, stream_id)
+    assert_frame_on_right_level(conn, type, stream_id)
+    assert_stream_id_is_allowed(conn, type, stream_id)
     assert_frame_doesnt_interrupt_header_streaming(conn, frame)
     conn
   end
@@ -1842,7 +1850,12 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
-  defp assert_stream_id_is_allowed(conn, stream_id) do
+  # RFC 9113 5.1: PRIORITY is the only frame the server can send on an idle stream.
+  # Client streams are opened in order, so odd stream IDs from next_stream_id on are
+  # idle.
+  defp assert_stream_id_is_allowed(_conn, :priority, _stream_id), do: :ok
+
+  defp assert_stream_id_is_allowed(conn, _frame, stream_id) do
     if Integer.is_odd(stream_id) and stream_id >= conn.next_stream_id do
       debug_data = "frame with stream ID #{inspect(stream_id)} has not been opened yet"
       send_connection_error!(conn, :protocol_error, debug_data)
@@ -1873,7 +1886,9 @@ defmodule Mint.HTTP2 do
 
     # Regardless of whether we have the stream or not, we need to abide by flow
     # control rules so we still refill the client window for the stream_id we got.
-    window_size_increment = byte_size(data) + byte_size(padding || "")
+    # RFC 9113 6.1: the whole payload is flow controlled, including the Pad Length
+    # byte and the padding.
+    window_size_increment = byte_size(data) + padding_size(padding)
 
     conn =
       if window_size_increment > 0 do
@@ -1887,27 +1902,36 @@ defmodule Mint.HTTP2 do
         assert_stream_in_state(conn, stream, [:open, :half_closed_local])
         body_size = stream.body_size + byte_size(data)
 
-        if stream.content_length && body_size > stream.content_length do
-          conn = close_stream!(conn, stream.id, :protocol_error)
+        cond do
+          # RFC 9113 8.1: a response starts with a HEADERS frame, so DATA before
+          # the final response headers is a malformed response.
+          not stream.received_first_headers? ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            debug_data = "DATA frame received before the response HEADERS frame"
+            {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
 
-          debug_data =
-            if stream.content_length == 0 do
-              "received DATA for a response that must not have content"
+          stream.content_length && body_size > stream.content_length ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+
+            debug_data =
+              if stream.content_length == 0 do
+                "received DATA for a response that must not have content"
+              else
+                "the response body exceeds the content-length header value of " <>
+                  "#{stream.content_length}"
+              end
+
+            {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
+
+          true ->
+            conn = put_in(conn.streams[stream.id].body_size, body_size)
+            responses = [{:data, stream.ref, data} | responses]
+
+            if flag_set?(flags, :data, :end_stream) do
+              end_remote_stream(conn, stream, responses)
             else
-              "the response body exceeds the content-length header value of " <>
-                "#{stream.content_length}"
+              {conn, responses}
             end
-
-          {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
-        else
-          conn = put_in(conn.streams[stream.id].body_size, body_size)
-          responses = [{:data, stream.ref, data} | responses]
-
-          if flag_set?(flags, :data, :end_stream) do
-            end_remote_stream(conn, stream, responses)
-          else
-            {conn, responses}
-          end
         end
 
       :error ->
@@ -1915,6 +1939,9 @@ defmodule Mint.HTTP2 do
         {conn, responses}
     end
   end
+
+  defp padding_size(nil), do: 0
+  defp padding_size(padding), do: byte_size(padding) + 1
 
   # Accounts for `data_size` bytes arriving on the connection and on
   # `stream_id`. Sends a WINDOW_UPDATE for either window only once its
@@ -2335,6 +2362,11 @@ defmodule Mint.HTTP2 do
     Enum.reduce(server_settings, conn, fn
       {:header_table_size, header_table_size}, conn ->
         update_in(conn.encode_table, &HPAX.resize(&1, header_table_size))
+
+      # RFC 9113 6.5.2: a server must not set SETTINGS_ENABLE_PUSH to 1.
+      {:enable_push, true}, conn ->
+        debug_data = "SETTINGS_ENABLE_PUSH set to 1 by the server"
+        send_connection_error!(conn, :protocol_error, debug_data)
 
       {:enable_push, enable_push?}, conn ->
         put_in(conn.server_settings.enable_push, enable_push?)

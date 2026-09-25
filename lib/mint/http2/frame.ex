@@ -200,6 +200,12 @@ defmodule Mint.HTTP2.Frame do
   end
 
   # http://httpwg.org/specs/rfc7540.html#rfc.section.6.5
+  # RFC 9113 6.5: a SETTINGS frame with the ACK flag set must have an empty payload.
+  defp decode_settings(flags, _stream_id, payload)
+       when is_flag_set(flags, unquote(@flags[:settings][:ack])) and byte_size(payload) > 0 do
+    throw({:mint, {:frame_size_error, :settings}})
+  end
+
   defp decode_settings(_flags, _stream_id, payload) when rem(byte_size(payload), 6) != 0 do
     throw({:mint, {:frame_size_error, :settings}})
   end
@@ -275,6 +281,12 @@ defmodule Mint.HTTP2.Frame do
     continuation(stream_id: stream_id, flags: flags, hbf: payload)
   end
 
+  # RFC 9113 6.1: a frame with the PADDED flag set always carries a Pad Length field.
+  defp decode_padding(frame, flags, <<>>)
+       when is_flag_set(flags, unquote(@flags[:data][:padded])) do
+    throw({:mint, {:frame_size_error, frame}})
+  end
+
   defp decode_padding(frame, flags, <<pad_length, rest::binary>> = payload)
        when is_flag_set(flags, unquote(@flags[:data][:padded])) do
     if pad_length >= byte_size(payload) do
@@ -308,14 +320,33 @@ defmodule Mint.HTTP2.Frame do
     # ignore that setting.
     acc =
       case identifier do
-        0x01 -> [{:header_table_size, value} | acc]
-        0x02 -> [{:enable_push, value == 1} | acc]
-        0x03 -> [{:max_concurrent_streams, value} | acc]
-        0x04 -> [{:initial_window_size, value} | acc]
-        0x05 -> [{:max_frame_size, value} | acc]
-        0x06 -> [{:max_header_list_size, value} | acc]
-        0x08 -> [{:enable_connect_protocol, value == 1} | acc]
-        _other -> acc
+        0x01 ->
+          [{:header_table_size, value} | acc]
+
+        # RFC 9113 6.5.2: SETTINGS_ENABLE_PUSH is only allowed to be 0 or 1.
+        0x02 when value in [0, 1] ->
+          [{:enable_push, value == 1} | acc]
+
+        0x02 ->
+          throw({:mint, {:protocol_error, "SETTINGS_ENABLE_PUSH value #{value} is not 0 or 1"}})
+
+        0x03 ->
+          [{:max_concurrent_streams, value} | acc]
+
+        0x04 ->
+          [{:initial_window_size, value} | acc]
+
+        0x05 ->
+          [{:max_frame_size, value} | acc]
+
+        0x06 ->
+          [{:max_header_list_size, value} | acc]
+
+        0x08 ->
+          [{:enable_connect_protocol, value == 1} | acc]
+
+        _other ->
+          acc
       end
 
     decode_settings_params(rest, acc)
