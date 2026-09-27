@@ -80,7 +80,10 @@ defmodule Mint.HTTP1.ResponseTest do
       assert decode_header("A: b\r\n c\r\nX") == {:ok, {"a", "b c"}, "X"}
       assert decode_header("A: b \t\r\n\t c\nX") == {:ok, {"a", "b c"}, "X"}
       assert decode_header("A:\r\n b\r\nX") == {:ok, {"a", "b"}, "X"}
-      assert decode_header("A: b\r\n \r\n c\r\nX") == {:ok, {"a", "b c"}, "X"}
+      assert decode_header("A: b\r\n \r\n c\r\nX") == {:ok, {"a", "b  c"}, "X"}
+
+      assert decode_header("Content-Disposition: attachment; filename=\"a\r\n \r\n b.txt\"\r\nX") ==
+               {:ok, {"content-disposition", "attachment; filename=\"a  b.txt\""}, "X"}
     end
 
     test "needs the next byte to know whether a line is folded" do
@@ -176,8 +179,8 @@ defmodule Mint.HTTP1.ResponseTest do
           segments
           |> Enum.map(&String.trim(&1, " "))
           |> Enum.map(&trim_ows/1)
-          |> Enum.reject(&(&1 == ""))
           |> Enum.join(" ")
+          |> trim_ows()
 
         assert decode_header(name <> ":" <> leading <> raw <> "X") ==
                  {:ok, {String.downcase(name), expected}, "X"}

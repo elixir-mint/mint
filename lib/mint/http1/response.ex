@@ -158,9 +158,8 @@ defmodule Mint.HTTP1.Response do
   defp join_segments(segments) do
     segments
     |> Enum.reverse()
-    |> Enum.map(&trim_whitespace/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
+    |> Enum.map_join(" ", &trim_whitespace/1)
+    |> trim_whitespace()
   end
 
   defp trim_whitespace(value),
