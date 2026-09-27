@@ -2080,6 +2080,13 @@ defmodule Mint.HTTP2 do
       # https://httpwg.org/specs/rfc9113.html#HttpFraming
       [{":status", <<?1, _, _>> = status} | headers] ->
         cond do
+          # RFC 9113 8.6: HTTP/2 does not support the 101 status code.
+          status == "101" ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            debug_data = "the 101 (Switching Protocols) status code is not supported in HTTP/2"
+            error = wrap_error({:protocol_error, debug_data})
+            {conn, [{:error, stream.ref, error} | responses]}
+
           end_stream? ->
             conn = close_stream!(conn, stream.id, :protocol_error)
             debug_data = "informational response (1xx) must not have the END_STREAM flag set"
@@ -2217,13 +2224,31 @@ defmodule Mint.HTTP2 do
     cond do
       not valid_field_name?(name) -> {:error, {:invalid_header_name, name}}
       not valid_field_value?(value) -> {:error, {:invalid_header_value, name, value}}
+      connection_specific?(name) -> {:error, connection_specific_error(name)}
       true -> validate_response_headers(rest, trailers?, status?, true)
     end
   end
 
-  # RFC 9110 15: status-code = 3DIGIT
-  defp valid_status?(<<a, b, c>>) when a in ?0..?9 and b in ?0..?9 and c in ?0..?9, do: true
+  # RFC 9110 15: status-code = 3DIGIT, with values in the range 100-999.
+  defp valid_status?(<<a, b, c>>) when a in ?1..?9 and b in ?0..?9 and c in ?0..?9, do: true
   defp valid_status?(_other), do: false
+
+  # RFC 9113 8.2.2: a message with connection-specific header fields is malformed.
+  # "te" is only allowed in requests, with the "trailers" value.
+  @connection_specific_headers [
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "te",
+    "transfer-encoding",
+    "upgrade"
+  ]
+
+  defp connection_specific?(name), do: name in @connection_specific_headers
+
+  defp connection_specific_error(name) do
+    {:protocol_error, "connection-specific header #{inspect(name)} is not allowed in HTTP/2"}
+  end
 
   # RFC 9113 8.2.1: a field name must not contain characters in 0x00-0x20, 0x41-0x5A
   # (uppercase letters) or 0x7F-0xFF, and only a pseudo-header field can contain a colon.
