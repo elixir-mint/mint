@@ -16,14 +16,13 @@ defmodule Mint.TunnelProxy do
   defp establish_proxy(proxy, host) do
     {proxy_scheme, proxy_address, proxy_port, proxy_opts} = proxy
     {_scheme, address, port, opts} = host
-    hostname = Mint.Core.Util.hostname(opts, address)
 
-    path = "#{hostname}:#{port}"
+    authority = connect_authority(address, port, opts)
 
     with {:ok, conn} <- HTTP1.connect(proxy_scheme, proxy_address, proxy_port, proxy_opts),
          timeout_deadline = timeout_deadline(proxy_opts),
-         headers = Keyword.get(opts, :proxy_headers, []),
-         {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", path, headers, nil),
+         headers = connect_headers(opts, authority),
+         {:ok, conn, ref} <- HTTP1.request(conn, "CONNECT", authority, headers, nil),
          {:ok, proxy_headers} <- receive_response(conn, ref, timeout_deadline) do
       {:ok, HTTP1.put_proxy_headers(conn, proxy_headers)}
     else
@@ -39,20 +38,25 @@ defmodule Mint.TunnelProxy do
   defp upgrade_connection(
          conn,
          {proxy_scheme, _proxy_address, _proxy_port, _proxy_opts} = _proxy,
-         {scheme, hostname, port, opts} = _host
+         {scheme, address, port, opts} = _host
        ) do
+    hostname = Mint.Core.Util.hostname(opts, address)
     proxy_headers = HTTP1.get_proxy_headers(conn)
     socket = HTTP1.get_socket(conn)
 
     # Note that we may leak messages if the server sent data after the CONNECT response
     case Negotiate.upgrade(proxy_scheme, socket, scheme, hostname, port, opts) do
-      {:ok, conn} -> {:ok, HTTP.put_proxy_headers(conn, proxy_headers)}
-      {:error, reason} -> {:error, wrap_in_proxy_error(reason)}
+      {:ok, conn} ->
+        {:ok, HTTP.put_proxy_headers(conn, proxy_headers)}
+
+      {:error, reason} ->
+        _ = Mint.Core.Util.scheme_to_transport(proxy_scheme).close(socket)
+        {:error, wrap_in_proxy_error(reason)}
     end
   end
 
   defp receive_response(conn, ref, timeout_deadline) do
-    timeout = timeout_deadline - System.monotonic_time(:millisecond)
+    timeout = max(timeout_deadline - System.monotonic_time(:millisecond), 0)
     socket = HTTP1.get_socket(conn)
 
     receive do
@@ -92,7 +96,7 @@ defmodule Mint.TunnelProxy do
       {:status, ^ref, status} ->
         {:error, wrap_error({:proxy, {:unexpected_status, status}})}
 
-      {:headers, ^ref, headers} when responses == [] ->
+      {:headers, ^ref, headers} when responses == [] or responses == [{:done, ref}] ->
         {:done, headers}
 
       {:headers, ^ref, _headers} ->
@@ -105,6 +109,40 @@ defmodule Mint.TunnelProxy do
 
   defp handle_responses(_ref, _timeout_deadline, []) do
     :more
+  end
+
+  # The CONNECT request targets the connection address (the host the proxy
+  # should dial), not the :hostname identity. IPv6 addresses must be enclosed
+  # in square brackets in the authority-form request target (RFC 3986,
+  # section 3.2.2).
+  defp connect_authority(address, port, opts) do
+    address = format_address(address, opts)
+
+    if String.contains?(address, ":") do
+      "[#{address}]:#{port}"
+    else
+      "#{address}:#{port}"
+    end
+  end
+
+  defp format_address(address, _opts) when is_binary(address), do: address
+
+  defp format_address(address, _opts) when tuple_size(address) in [4, 8],
+    do: address |> :inet.ntoa() |> List.to_string()
+
+  defp format_address(address, opts), do: Mint.Core.Util.hostname(opts, address)
+
+  # The Host header of a CONNECT request must be identical to the
+  # authority-form request target (RFC 9112, section 3.2.3). Mint.HTTP1 would
+  # otherwise default it to the proxy's own host and port.
+  defp connect_headers(opts, authority) do
+    headers = Keyword.get(opts, :proxy_headers, [])
+
+    if Enum.any?(headers, fn {name, _value} -> Mint.Core.Headers.lower_raw(name) == "host" end) do
+      headers
+    else
+      [{"Host", authority} | headers]
+    end
   end
 
   defp timeout_deadline(opts) do

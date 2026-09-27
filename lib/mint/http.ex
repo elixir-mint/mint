@@ -152,7 +152,7 @@ defmodule Mint.HTTP do
 
   This guard is useful in `receive` loops or in callbacks that handle generic messages (such as a
   `c:GenServer.handle_info/2` callback) so that you don't have to hand the `message` to
-  `Mint.HTTP.stream/2` and check for the `:unknown_message` return value.
+  `Mint.HTTP.stream/2` and check for the `:unknown` return value.
 
   This macro can be used in guards.
 
@@ -226,8 +226,10 @@ defmodule Mint.HTTP do
       section](#module-logging) in the module documentation. Defaults to `false`.
       *Available since v1.5.0*.
 
-  The following options are HTTP/1-specific and will force the connection
-  to be an HTTP/1 connection.
+    * `:max_header_list_size` - (positive integer or `:infinity`) the maximum size, in
+      **bytes**, of an HTTP/1 response line, header section, or chunked trailer section.
+      Defaults to 256 KiB. This option is only used for HTTP/1 connections.
+      *Available since 1.9.2*.
 
     * `:proxy` - a `{scheme, address, port, opts}` tuple that identifies a proxy to
       connect to. See the "Proxying" section below for more information.
@@ -237,6 +239,20 @@ defmodule Mint.HTTP do
     * `:client_settings` - (keyword) a list of client HTTP/2 settings to send to the
       server. See `Mint.HTTP2.put_settings/2` for more information. This is only used
       in HTTP/2 connections.
+
+    * `:connection_window_size` - (integer) the initial size of the connection-level
+      HTTP/2 receive window, in bytes. Sent to the server as a `WINDOW_UPDATE` frame
+      on stream 0 as part of the connection preface. Defaults to 16 MB. Can be
+      raised later with `Mint.HTTP2.set_window_size/3`. *Available since v1.8.0*.
+
+    * `:receive_window_update_threshold` - (integer) the minimum number of bytes of receive
+      window that must remain on a connection or stream before a `WINDOW_UPDATE`
+      frame is sent to refill it. Lower values send more frequent, smaller updates;
+      higher values batch updates into fewer, larger ones. Defaults to 160_000
+      (approximately 10× the default max frame size). The same threshold applies
+      to both the connection and per-stream windows; when a window's peak size is
+      at or below the threshold, the client refills after every DATA frame on
+      that window. *Available since v1.8.0*.
 
   There may be further protocol specific options that only take effect when the corresponding
   connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
@@ -260,15 +276,62 @@ defmodule Mint.HTTP do
   You can set up proxying through the `:proxy` option, which is a tuple
   `{scheme, address, port, opts}` that identifies the proxy to connect to.
   Once a proxied connection is returned, the proxy is transparent to you and you
-  can use the connection like a normal HTTP/1 connection.
+  can use the connection like a normal connection.
 
-  If the `scheme` is `:http`, we will connect to the host in the most compatible
-  way, supporting older proxy servers. Data will be sent in clear text.
+  If the connection scheme is `:http`, requests are forwarded through the proxy
+  in the most compatible way, supporting older proxy servers. Data will be sent
+  in clear text.
 
-  If the connection scheme is `:https`, we will connect to the host with a tunnel
-  through the proxy. Using `:https` for both the proxy and the connection scheme
-  is not supported, it is recommended to use `:https` for the end host connection
-  instead of the proxy.
+  If the connection scheme is `:https`, a tunnel through the proxy is established
+  with the `CONNECT` method. If the proxy `scheme` is `:http`, the `CONNECT`
+  request is sent in clear text; if it is `:https`, the connection to the proxy
+  uses TLS and the TLS session to the host is nested inside it. *HTTPS proxies
+  for HTTPS connections are available since v1.10.0*.
+
+  The `opts` in the `:proxy` tuple are the options of the connection to the proxy
+  itself and support the same options as `connect/4`. Tunnel proxies additionally
+  support:
+
+    * `:tunnel_timeout` - the maximum time (in milliseconds) to wait for the proxy
+      to reply to the `CONNECT` request. If the tunnel is not established within
+      this time, `connect/4` returns a `Mint.HTTPError` with reason
+      `{:proxy, :tunnel_timeout}`. Defaults to `30_000` (30 seconds).
+
+  ### Proxying over HTTP/2
+
+  The `:proxy` option always speaks HTTP/1 to the proxy. The connection tunneled
+  *through* the proxy can still be HTTP/2 (negotiated via ALPN), but the `CONNECT`
+  exchange with the proxy itself is HTTP/1. Mint doesn't drive an HTTP/2 connection
+  to the proxy from `connect/4` on purpose: the benefit of HTTP/2 `CONNECT` is
+  multiplexing many tunnels over a single proxy connection, which means sharing that
+  connection across Mint connections. That is the job of a connection pool built on
+  top of Mint, not of a single connection.
+
+  To tunnel through a proxy over HTTP/2, connect to the proxy with `Mint.HTTP2` and
+  open one `CONNECT` stream per tunnel (see the "CONNECT requests" section in
+  `Mint.HTTP2.request/5`):
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, proxy_host, proxy_port)
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+  Once the proxy replies with a `{:status, ref, 200}` response, the stream is a byte
+  tunnel: send bytes to the target with `Mint.HTTP2.stream_request_body/3` and receive
+  bytes from the target as `{:data, ref, data}` responses.
+
+  To run TLS (or a whole Mint connection) *inside* such a tunnel, you need a relay:
+  `:ssl` can't run over an arbitrary byte stream, so a process has to own the proxy
+  connection and relay bytes between the `CONNECT` stream and a local TCP socket. The
+  inner connection then dials the relay while keeping the identity of the real host
+  through the `:hostname` option:
+
+      Mint.HTTP.connect(:https, relay_address, relay_port, hostname: "example.com")
+
+  so that SNI and certificate verification target the real host. Note that the default
+  request `Host` header (HTTP/1) and `:authority` pseudo-header (HTTP/2) contain the
+  port of the connection, which is the relay's port: either make the relay listen on
+  the target's port, or (on HTTP/1) pass an explicit `host` header with each request.
+  This is the natural shape for pooling libraries, which can multiplex many tunnels
+  over one proxy connection.
 
   ## Transport options
 
@@ -397,6 +460,11 @@ defmodule Mint.HTTP do
       proxy = {:http, "myproxy.example.com", 80, []}
       {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
 
+  Using an HTTPS proxy:
+
+      proxy = {:https, "myproxy.example.com", 443, []}
+      {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, proxy: proxy)
+
   Forcing the connection to be an HTTP/2 connection:
 
       {:ok, conn} = Mint.HTTP.connect(:https, "httpbin.org", 443, protocols: [:http2])
@@ -414,10 +482,9 @@ defmodule Mint.HTTP do
       {:ok, {proxy_scheme, proxy_address, proxy_port, proxy_opts}} ->
         case Util.scheme_to_transport(scheme) do
           Transport.TCP ->
-            proxy = {proxy_scheme, proxy_address, proxy_port}
-            host = {scheme, address, port}
-            opts = Keyword.merge(opts, proxy_opts)
-            UnsafeProxy.connect(proxy, host, opts)
+            proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}
+            host = {scheme, address, port, opts}
+            UnsafeProxy.connect(proxy, host)
 
           Transport.SSL ->
             proxy = {proxy_scheme, proxy_address, proxy_port, proxy_opts}
@@ -581,6 +648,12 @@ defmodule Mint.HTTP do
   `content-length` header yourself. If you're using HTTP/1, Mint will do chunked
   transfer-encoding when a content-length is not provided (see `Mint.HTTP1.request/5`).
 
+  ## CONNECT requests
+
+  For requests with the `CONNECT` method, `path` is the target of the tunnel in
+  *authority form* (`"host:port"`), not a path. See `Mint.HTTP2.request/5` for HTTP/2
+  tunnel semantics and for the extended CONNECT protocol, where `path` doesn't apply.
+
   ## Examples
 
       Mint.HTTP.request(conn, "GET", "/", _headers = [], _body = nil)
@@ -622,6 +695,10 @@ defmodule Mint.HTTP do
       [*Trailer headers*](#module-trailer-headers) section below.
 
   This function always returns an updated connection to be stored over the old connection.
+
+  When streaming a body of arbitrary size, use `request_body_window/2` to learn
+  how many bytes you can send right now without violating HTTP/2 flow control,
+  then split your body accordingly before passing each chunk to this function.
 
   For information about transfer encoding and content length in HTTP/1, see
   `Mint.HTTP1.stream_request_body/3`.
@@ -768,8 +845,11 @@ defmodule Mint.HTTP do
     * `{:headers, request_ref, headers}` - returned when the server replied
       with a list of headers. Headers are in the form `{header_name, header_value}`
       with `header_name` and `header_value` being strings. A single `:headers` response
-      will come after the `:status` response. A single `:headers` response may come
-      after all the `:data` responses if **trailer headers** are present.
+      will come after the `:status` response and a single `:headers` response may come
+      after all the `:data` responses if **trailer headers** are present unless
+      `:stream_headers` is enabled (only available for HTTP/1.1 connections), in which
+      case any number of `:headers` responses (including none) may come after the
+      `:status` response and/or after all the `:data` responses.
 
     * `{:data, request_ref, binary}` - returned when the server replied with
       a chunk of response body (as a binary). The request shouldn't be considered done
@@ -874,7 +954,7 @@ defmodule Mint.HTTP do
   > #### Hanging Waiting for Bytes {: .warning}
   >
   > If `byte_count` is greater than `0` and the socket doesn't receive
-  > *at least* `byte_count` bytes withing the `timeout`, then the function
+  > *at least* `byte_count` bytes within the `timeout`, then the function
   > will block for the duration of `timeout` and then return a timeout error.
   > This behavior is the same as the `recv` function in [`:gen_tcp`](`:gen_tcp`)
   > and [`:ssl`](`:ssl`).
@@ -1063,7 +1143,77 @@ defmodule Mint.HTTP do
   # Made public since the struct is opaque.
   @doc false
   @impl true
+  @spec put_proxy_headers(t(), Mint.Types.headers()) :: t()
   def put_proxy_headers(conn, headers), do: conn_apply(conn, :put_proxy_headers, [conn, headers])
+
+  @doc """
+  Returns the request body flow-control window for the streaming request
+  identified by `request_ref`.
+
+  The semantics differ by protocol:
+
+    * In HTTP/2, returns `min(connection_window, stream_window)` — the maximum
+      number of body bytes that can be sent right now without violating flow
+      control. Exceeding this value in a single `DATA` frame would close the
+      connection with a `FLOW_CONTROL_ERROR`. See `Mint.HTTP2.get_window_size/2`
+      for the underlying primitives.
+
+    * In HTTP/1, returns `:infinity`. HTTP/1 has no application-level
+      flow-control mechanism: any amount of body data is protocol-valid.
+
+  The value returned reflects only the protocol-level flow-control
+  constraint. It does not account for the operating-system socket send
+  buffer: under either protocol, `stream_request_body/3` can still block
+  when that buffer fills up. To bound this behavior, configure
+  `send_timeout` on the socket via `:transport_opts` when establishing the
+  connection (see `Mint.HTTP.connect/4`).
+
+  Raises `ArgumentError` if `request_ref` is not associated with an active
+  streaming request.
+
+  ## Examples
+
+  Streaming a binary body in chunks that respect the protocol window:
+
+      defp stream_body(conn, ref, "") do
+        Mint.HTTP.stream_request_body(conn, ref, :eof)
+      end
+
+      defp stream_body(conn, ref, body) do
+        conn
+        |> Mint.HTTP.request_body_window(ref)
+        |> send_body_chunk(conn, ref, body)
+      end
+
+      defp send_body_chunk(0, conn, ref, body) do
+        with {:ok, conn} <- wait(conn, ref) do
+          stream_body(conn, ref, body)
+        end
+      end
+
+      defp send_body_chunk(window, conn, ref, body) do
+        chunk_size = min(window, byte_size(body))
+        <<chunk::binary-size(chunk_size), rest::binary>> = body
+
+        with {:ok, conn} <- Mint.HTTP.stream_request_body(conn, ref, chunk) do
+          stream_body(conn, ref, rest)
+        end
+      end
+
+      defp wait(conn, ref) do
+        # Wait for the server to refill the request body window with a
+        # WINDOW_UPDATE frame. The concrete implementation depends on the
+        # socket mode and other context.
+      end
+
+  Note that `min(:infinity, n) == n` thanks to Erlang term ordering, so the
+  same loop works on HTTP/1 (each iteration sends the entire remaining body in
+  a single chunk) and on HTTP/2 (each iteration sends at most the current
+  flow-control window).
+  """
+  @doc since: "1.8.0"
+  @impl true
+  def request_body_window(conn, ref), do: conn_apply(conn, :request_body_window, [conn, ref])
 
   ## Helpers
 

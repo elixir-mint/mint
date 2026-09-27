@@ -127,7 +127,7 @@ defmodule Mint.HTTP2 do
 
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
 
-  alias Mint.{HTTPError, TransportError}
+  alias Mint.{HTTPError, ParsingTools, TransportError}
   alias Mint.Types
   alias Mint.Core.{Headers, Util}
   alias Mint.HTTP2.Frame
@@ -143,12 +143,27 @@ defmodule Mint.HTTP2 do
   @transport_opts [alpn_advertised_protocols: ["h2"]]
 
   @default_window_size 65_535
+  @default_connection_window_size 16 * 1024 * 1024
+  @default_stream_window_size 4 * 1024 * 1024
   @max_window_size 2_147_483_647
+
+  # Defer refilling the receive window until it has dropped to this many
+  # bytes — roughly 10× the default 16 KB max frame size, so the server
+  # has a safety margin before the window would starve it. See
+  # `refill_client_windows/3`.
+  @default_receive_window_update_threshold 160_000
 
   @default_max_frame_size 16_384
   @valid_max_frame_size_range @default_max_frame_size..16_777_215
 
+  # Default cap on the size of an inbound header block. Advertised to the
+  # server as SETTINGS_MAX_HEADER_LIST_SIZE and enforced while accumulating
+  # HEADERS/CONTINUATION fragments, so that a server cannot exhaust client
+  # memory by streaming an unbounded chain of CONTINUATION frames.
+  @default_max_header_list_size 256 * 1024
+
   @valid_client_settings [
+    :header_table_size,
     :max_concurrent_streams,
     :initial_window_size,
     :max_frame_size,
@@ -176,7 +191,26 @@ defmodule Mint.HTTP2 do
 
     # Fields of the connection.
     buffer: "",
-    window_size: @default_window_size,
+    # `send_window_size` is the client *send* window for the connection
+    # — how much request-body data we're allowed to send to the server
+    # before it refills the window with a WINDOW_UPDATE frame.
+    send_window_size: @default_window_size,
+    # `receive_window_size` is the client *receive* window for the
+    # connection — the peak size we've advertised to the server via
+    # `WINDOW_UPDATE` frames on stream 0. Initialized to the configured
+    # connection window during `initiate/5`, which also sends the
+    # matching WINDOW_UPDATE to bring the server's view from the spec
+    # default of 65_535 up to the advertised peak.
+    receive_window_size: @default_window_size,
+    # `receive_window_remaining` is the server's current view of our receive
+    # window — decremented by DATA frame sizes as they arrive, bumped
+    # back up to `receive_window_size` whenever we send a
+    # WINDOW_UPDATE. When it drops to `receive_window_update_threshold`, we
+    # refill it back to the peak in one frame.
+    receive_window_remaining: @default_window_size,
+    # Minimum remaining receive window before we send a WINDOW_UPDATE.
+    # Configurable via the `:receive_window_update_threshold` connect option.
+    receive_window_update_threshold: @default_receive_window_update_threshold,
     encode_table: HPAX.new(4096),
     decode_table: HPAX.new(4096),
 
@@ -191,6 +225,7 @@ defmodule Mint.HTTP2 do
     streams: %{},
     open_client_stream_count: 0,
     open_server_stream_count: 0,
+    reserved_server_stream_count: 0,
     ref_to_stream_id: %{},
 
     # Settings that the server communicates to the client.
@@ -206,9 +241,10 @@ defmodule Mint.HTTP2 do
 
     # Settings that the client communicates to the server.
     client_settings: %{
+      header_table_size: 4096,
       max_concurrent_streams: 100,
-      initial_window_size: @default_window_size,
-      max_header_list_size: :infinity,
+      initial_window_size: @default_stream_window_size,
+      max_header_list_size: @default_max_header_list_size,
       max_frame_size: @default_max_frame_size,
       enable_push: true
     },
@@ -270,7 +306,12 @@ defmodule Mint.HTTP2 do
     * `:max_frame_size` - corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the
       maximum size of an HTTP/2 frame for the peer that sends this setting.
 
-    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`.
+    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`. For the
+      client, this also bounds the size of an inbound header block (a HEADERS frame plus
+      its trailing CONTINUATION frames): the connection is closed with a connection error
+      if a server streams a header block larger than this value, which prevents a server
+      from exhausting client memory with an unbounded chain of CONTINUATION frames.
+      Defaults to `256 KB` for the client.
 
     * `:enable_connect_protocol` - corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
       Sets whether the client may invoke the extended connect protocol which is used to
@@ -326,6 +367,24 @@ defmodule Mint.HTTP2 do
 
     * `:request_is_not_streaming` - when you try to send data (with `stream_request_body/3`)
       on a request that is not open for streaming.
+
+    * `:missing_status_header` - when a response has no `:status` pseudo-header.
+
+    * `{:invalid_status_header, value}` - when the `:status` pseudo-header of a response
+      is not a three-digit status code. `value` is the received value.
+
+    * `{:invalid_header_name, name}` - when a response header name is invalid, for
+      example because it contains uppercase characters.
+
+    * `{:invalid_header_value, name, value}` - when a response header value is invalid,
+      for example because it contains control characters. `name` is the name of the
+      header and `value` is the invalid value.
+
+    * `{:invalid_content_length_header, value}` - when the `content-length` header of a
+      response is not a non-negative integer. `value` is the received value.
+
+    * `:disagreeing_content_length_headers` - when a response contains `content-length`
+      headers with different values.
 
     * `:unprocessed` - when a request was closed because it was not processed by the server.
       When this error is returned, it means that the server hasn't processed the request at all,
@@ -480,6 +539,40 @@ defmodule Mint.HTTP2 do
   body by initially passing `:stream` as the body and sending the body in chunks using
   `stream_request_body/3` and using `get_window_size/2` to get the window size of the
   request and connection.
+
+  ## CONNECT requests
+
+  You can open a tunnel to a target host through the server with the `CONNECT`
+  method ([RFC 9113, section 8.5](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.5)).
+  For `CONNECT` requests (other than extended CONNECT, see below), `path` is not a
+  path: it's the host and port of the tunnel target, such as `"example.com:443"`
+  (IPv6 addresses must be enclosed in square brackets). Mint sends it as the
+  `:authority` pseudo-header and omits the `:scheme` and `:path` pseudo-headers.
+  *Available since v1.10.0*.
+
+  Pass `:stream` as the body. Once the server replies with a 2xx status, the stream
+  becomes a tunnel: iodata you pass to `stream_request_body/3` is delivered to the
+  tunnel target, and bytes coming from the target are returned by `stream/2` as
+  `{:data, request_ref, data}` responses. The tunnel counts towards the limit of
+  concurrent requests for as long as it's open.
+
+  Mint doesn't support the TCP-style half-close that RFC 9113 describes for tunnels:
+  when the server ends its side of the stream, Mint considers the whole tunnel closed,
+  returns `{:done, request_ref}`, and doesn't let you send more data for that request.
+  If instead you end your side first (by passing `:eof` to `stream_request_body/3`),
+  you keep receiving data until the server ends the stream.
+
+  ### Extended CONNECT
+
+  Mint also supports the extended CONNECT protocol
+  ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441.html)), which is used to bootstrap
+  protocols such as WebSocket over HTTP/2. If you pass a `:protocol` pseudo-header in
+  `headers`, the request is treated as an extended CONNECT request: you're expected to
+  also pass the `:scheme` and `:path` pseudo-headers explicitly (the `path` argument is
+  not used), and Mint sets `:authority` to the connection's authority, as in a normal
+  request. Note that servers only allow extended CONNECT after advertising the
+  `:enable_connect_protocol` setting (see `get_server_setting/2`); Mint doesn't
+  enforce this, so it's up to you to check the setting first.
   """
   @impl true
   @spec request(
@@ -516,7 +609,7 @@ defmodule Mint.HTTP2 do
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
 
-    {conn, stream_id, ref} = open_stream(conn)
+    {conn, stream_id, ref} = open_stream(conn, method)
     {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
     conn = send!(conn, payload)
     {:ok, conn, ref}
@@ -729,11 +822,21 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
-  Returns the window size of the connection or of a single request.
+  Returns the client **send** window size for the connection or a request.
 
-  This function is HTTP/2 specific. It returns the window size of
-  either the connection if `connection_or_request` is `:connection` or of a single
-  request if `connection_or_request` is `{:request, request_ref}`.
+  > #### Send vs receive windows {: .warning}
+  >
+  > This function returns the *send* window — how much body data this client
+  > is still permitted to send to the server before being throttled. It is
+  > decremented by `request/5` and `stream_request_body/3` and refilled by
+  > the server, which `stream/2` handles transparently.
+  >
+  > It does **not** return the client *receive* window (how much the server
+  > is permitted to send us). To influence that, use `set_window_size/3`.
+
+  This function is HTTP/2 specific. It returns the send window of either the
+  connection if `connection_or_request` is `:connection` or of a single request
+  if `connection_or_request` is `{:request, request_ref}`.
 
   Use this function to check the window size of the connection before sending a
   full request. Also use this function to check the window size of both the
@@ -744,21 +847,23 @@ defmodule Mint.HTTP2 do
 
   ## HTTP/2 Flow Control
 
-  In HTTP/2, flow control is implemented through a
-  window size. When the client sends data to the server, the window size is decreased
-  and the server needs to "refill" it on the client side. You don't need to take care of
-  the refilling of the client window as it happens behind the scenes in `stream/2`.
+  In HTTP/2, flow control is implemented through a window size. When the client
+  sends data to the server, the window size is decreased and the server needs
+  to "refill" it on the client side, which `stream/2` handles transparently.
+  Symmetrically, the server's outbound flow toward the client is bounded by a
+  receive window the client advertises and refills — see `set_window_size/3`.
 
-  A window size is kept for the entire connection and all requests affect this window
-  size. A window size is also kept per request.
+  A window size is kept for the entire connection and all requests affect this
+  window size. A window size is also kept per request.
 
-  The only thing that affects the window size is the body of a request, regardless of
-  if it's a full request sent with `request/5` or body chunks sent through
-  `stream_request_body/3`. That means that if we make a request with a body that is
-  five bytes long, like `"hello"`, the window size of the connection and the window size
-  of that particular request will decrease by five bytes.
+  The only thing that affects the send window size is the body of a request,
+  regardless of whether it's a full request sent with `request/5` or body chunks
+  sent through `stream_request_body/3`. That means that if we make a request with
+  a body that is five bytes long, like `"hello"`, the send window size of the
+  connection and the send window size of that particular request will decrease
+  by five bytes.
 
-  If we use all the window size before the server refills it, functions like
+  If we use all the send window size before the server refills it, functions like
   `request/5` will return an error.
 
   ## Examples
@@ -783,18 +888,134 @@ defmodule Mint.HTTP2 do
   def get_window_size(conn, connection_or_request)
 
   def get_window_size(%__MODULE__{} = conn, :connection) do
-    conn.window_size
+    conn.send_window_size
   end
 
   def get_window_size(%__MODULE__{} = conn, {:request, request_ref}) do
     case Map.fetch(conn.ref_to_stream_id, request_ref) do
       {:ok, stream_id} ->
-        conn.streams[stream_id].window_size
+        conn.streams[stream_id].send_window_size
 
       :error ->
         raise ArgumentError,
               "request with request reference #{inspect(request_ref)} was not found"
     end
+  end
+
+  @doc """
+  Advertises a larger client **receive** window to the server.
+
+  > #### Receive vs send windows {: .warning}
+  >
+  > This function sets the *receive* window — the peak amount of body data
+  > the server is permitted to send us before being throttled. It does
+  > **not** set the *send* window (how much body data we're permitted to
+  > send to the server) — the server controls that. See `get_window_size/2`
+  > for the send window.
+
+  Without calling this, `stream/2` refills the receive window in small
+  increments as response body data is consumed. Each refill costs a
+  round-trip before the server can send more, so bulk throughput is capped
+  at roughly `window / RTT`; on higher-latency links the default 64 KB
+  window makes that cap well below the link bandwidth. Raising the window
+  removes those pauses and is the main HTTP/2 tuning knob for bulk or
+  highly parallel downloads.
+
+  Mint exposes the per-stream initial window as the `:initial_window_size`
+  client setting passed to `connect/4`, but there is no connection-level
+  equivalent — use this function for the connection window, and for any
+  per-stream adjustment after a request has started.
+
+  `connection_or_request` is `:connection` for the whole connection or
+  `{:request, request_ref}` for a single request. `new_size` must be in
+  `1..2_147_483_647`. Windows can only grow: `new_size` smaller than the
+  current receive window returns
+  `{:error, conn, %Mint.HTTPError{reason: :window_size_too_small}}`, and
+  `new_size` equal to the current window is a no-op.
+
+  For more information on flow control and window sizes in HTTP/2, see the
+  section below.
+
+  ## HTTP/2 Flow Control
+
+  See `get_window_size/2` for a description of the client *send* window.
+  The client *receive* window is the symmetric bound on the server's
+  outbound flow: it starts at 64 KB for the connection and for each new
+  request, is decremented by response body bytes, and is refilled by
+  `stream/2` as the body is consumed. A window size is kept for the entire
+  connection and all responses affect this window size; a window size is
+  also kept per request.
+
+  This function raises the *advertised* receive window — the peak the
+  server is allowed to fill before pausing. It does not pre-allocate any
+  buffers; it only permits the server to send further ahead of the
+  client's reads.
+
+  ## Examples
+
+  Bump the connection-level receive window right after connect so the server
+  can stream multi-MB bodies without flow-control pauses:
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, host, 443)
+      {:ok, conn} = Mint.HTTP2.set_window_size(conn, :connection, 8_000_000)
+
+  Give one specific request a bigger window than the per-stream default:
+
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "GET", "/huge", [], nil)
+      {:ok, conn} = Mint.HTTP2.set_window_size(conn, {:request, ref}, 16_000_000)
+
+  """
+  @doc since: "1.8.0"
+  @spec set_window_size(t(), :connection | {:request, Types.request_ref()}, pos_integer()) ::
+          {:ok, t()} | {:error, t(), Types.error()}
+  def set_window_size(conn, connection_or_request, new_size)
+
+  def set_window_size(%__MODULE__{} = _conn, _target, new_size)
+      when not (is_integer(new_size) and new_size >= 1 and new_size <= @max_window_size) do
+    raise ArgumentError,
+          "new window size must be an integer in 1..#{@max_window_size}, got: #{inspect(new_size)}"
+  end
+
+  def set_window_size(%__MODULE__{} = conn, :connection, new_size) do
+    do_set_window_size(conn, 0, conn.receive_window_size, new_size, fn conn, size ->
+      conn = put_in(conn.receive_window_size, size)
+      put_in(conn.receive_window_remaining, size)
+    end)
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
+  end
+
+  def set_window_size(%__MODULE__{} = conn, {:request, request_ref}, new_size) do
+    case Map.fetch(conn.ref_to_stream_id, request_ref) do
+      {:ok, stream_id} ->
+        current = conn.streams[stream_id].receive_window_size
+
+        do_set_window_size(conn, stream_id, current, new_size, fn conn, size ->
+          conn = put_in(conn.streams[stream_id].receive_window_size, size)
+          put_in(conn.streams[stream_id].receive_window_remaining, size)
+        end)
+
+      :error ->
+        {:error, conn, wrap_error({:unknown_request_to_stream, request_ref})}
+    end
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
+  end
+
+  defp do_set_window_size(conn, _stream_id, current, new_size, _update)
+       when new_size == current do
+    {:ok, conn}
+  end
+
+  defp do_set_window_size(conn, _stream_id, current, new_size, _update) when new_size < current do
+    {:error, conn, wrap_error({:window_size_too_small, current, new_size})}
+  end
+
+  defp do_set_window_size(conn, stream_id, current, new_size, update) do
+    increment = new_size - current
+    frame = window_update(stream_id: stream_id, window_size_increment: increment)
+    conn = send!(conn, Frame.encode(frame))
+    {:ok, update.(conn, new_size)}
   end
 
   @doc """
@@ -832,7 +1053,7 @@ defmodule Mint.HTTP2 do
         other
     end
   catch
-    :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
+    :throw, {:mint, conn, error, responses} -> {:error, conn, error, Enum.reverse(responses)}
   end
 
   def stream(%__MODULE__{}, _message) do
@@ -881,7 +1102,7 @@ defmodule Mint.HTTP2 do
         {:error, %{conn | state: :closed}, error, _responses = []}
     end
   catch
-    :throw, {:mint, conn, error, responses} -> {:error, conn, error, responses}
+    :throw, {:mint, conn, error, responses} -> {:error, conn, error, Enum.reverse(responses)}
   end
 
   def recv(_conn, _byte_count, _timeout) do
@@ -971,7 +1192,27 @@ defmodule Mint.HTTP2 do
     scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
+
+    connection_window_size =
+      Keyword.get(opts, :connection_window_size, @default_connection_window_size)
+
+    validate_window_size!(:connection_window_size, connection_window_size)
+
+    receive_window_update_threshold =
+      Keyword.get(
+        opts,
+        :receive_window_update_threshold,
+        @default_receive_window_update_threshold
+      )
+
+    validate_receive_window_update_threshold!(receive_window_update_threshold)
     client_settings_params = Keyword.get(opts, :client_settings, [])
+
+    client_settings_params =
+      client_settings_params
+      |> Keyword.put_new(:initial_window_size, @default_stream_window_size)
+      |> Keyword.put_new(:max_header_list_size, @default_max_header_list_size)
+
     validate_client_settings!(client_settings_params)
     # If the port is the default for the scheme, don't add it to the :authority pseudo-header
     authority =
@@ -1000,12 +1241,26 @@ defmodule Mint.HTTP2 do
       mode: mode,
       scheme: scheme_string,
       state: :handshaking,
-      log: log?
+      log: log?,
+      receive_window_size: connection_window_size,
+      receive_window_remaining: connection_window_size,
+      receive_window_update_threshold: receive_window_update_threshold
     }
 
+    # Mirror the advertised client settings into `conn.client_settings` up
+    # front. Streams opened before the server's SETTINGS ACK arrives read
+    # their initial receive window from this map; without this, they would
+    # track the library default instead of the value we actually sent in
+    # the SETTINGS frame, and stream-level WINDOW_UPDATEs would never fire
+    # when the advertised window is smaller than the default.
+    conn =
+      update_in(conn.client_settings, fn settings ->
+        Enum.into(client_settings_params, settings)
+      end)
+
+    preface = build_preface(client_settings_params, connection_window_size)
+
     with :ok <- Util.inet_opts(transport, socket),
-         client_settings = settings(stream_id: 0, params: client_settings_params),
-         preface = [@connection_preface, Frame.encode(client_settings)],
          :ok <- transport.send(socket, preface),
          conn = update_in(conn.client_settings_queue, &:queue.in(client_settings_params, &1)),
          conn = put_in(conn.socket, socket),
@@ -1015,6 +1270,34 @@ defmodule Mint.HTTP2 do
       error ->
         transport.close(socket)
         error
+    end
+  end
+
+  defp build_preface(client_settings_params, connection_window_size) do
+    settings_frame = Frame.encode(settings(stream_id: 0, params: client_settings_params))
+
+    if connection_window_size > @default_window_size do
+      increment = connection_window_size - @default_window_size
+      update_frame = Frame.encode(window_update(stream_id: 0, window_size_increment: increment))
+      [@connection_preface, settings_frame, update_frame]
+    else
+      [@connection_preface, settings_frame]
+    end
+  end
+
+  defp validate_window_size!(name, value) do
+    unless is_integer(value) and value >= @default_window_size and value <= @max_window_size do
+      raise ArgumentError,
+            "the :#{name} option must be an integer in " <>
+              "#{@default_window_size}..#{@max_window_size}, got: #{inspect(value)}"
+    end
+  end
+
+  defp validate_receive_window_update_threshold!(value) do
+    unless is_integer(value) and value >= 1 and value <= @max_window_size do
+      raise ArgumentError,
+            "the :receive_window_update_threshold option must be a positive integer no larger than " <>
+              "#{@max_window_size}, got: #{inspect(value)}"
     end
   end
 
@@ -1040,6 +1323,15 @@ defmodule Mint.HTTP2 do
   @impl true
   def put_proxy_headers(%__MODULE__{} = conn, headers) when is_list(headers) do
     %{conn | proxy_headers: headers}
+  end
+
+  @doc """
+  See `Mint.HTTP.request_body_window/2`.
+  """
+  @doc since: "1.8.0"
+  @impl true
+  def request_body_window(%__MODULE__{} = conn, ref) do
+    min(get_window_size(conn, :connection), get_window_size(conn, {:request, ref}))
   end
 
   ## Helpers
@@ -1075,7 +1367,7 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp open_stream(conn) do
+  defp open_stream(conn, method) do
     max_concurrent_streams = conn.server_settings.max_concurrent_streams
 
     if conn.open_client_stream_count >= max_concurrent_streams do
@@ -1086,8 +1378,22 @@ defmodule Mint.HTTP2 do
       id: conn.next_stream_id,
       ref: make_ref(),
       state: :idle,
-      window_size: conn.server_settings.initial_window_size,
-      received_first_headers?: false
+      # Client send window — decremented as we send body bytes, refilled
+      # by incoming WINDOW_UPDATE frames from the server. Bounded initially
+      # by the server's SETTINGS_INITIAL_WINDOW_SIZE.
+      send_window_size: conn.server_settings.initial_window_size,
+      # Client receive window — the peak we've advertised to the server
+      # for this stream. Starts at whatever we told the server via our
+      # SETTINGS_INITIAL_WINDOW_SIZE; can be bumped per-stream with
+      # `set_window_size/3`.
+      receive_window_size: conn.client_settings.initial_window_size,
+      # Current remaining receive window for this stream, tracked
+      # independently from the peak so that refills can be batched.
+      receive_window_remaining: conn.client_settings.initial_window_size,
+      received_first_headers?: false,
+      method: method,
+      content_length: nil,
+      body_size: 0
     }
 
     conn = put_in(conn.streams[stream.id], stream)
@@ -1216,11 +1522,15 @@ defmodule Mint.HTTP2 do
     data_size = IO.iodata_length(data)
 
     cond do
-      data_size > stream.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_window_size, :request, stream.window_size})})
+      data_size > stream.send_window_size ->
+        throw(
+          {:mint, conn, wrap_error({:exceeds_window_size, :request, stream.send_window_size})}
+        )
 
-      data_size > conn.window_size ->
-        throw({:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.window_size})})
+      data_size > conn.send_window_size ->
+        throw(
+          {:mint, conn, wrap_error({:exceeds_window_size, :connection, conn.send_window_size})}
+        )
 
       # If the data size is greater than the max frame size, we chunk automatically based
       # on the max frame size.
@@ -1248,8 +1558,8 @@ defmodule Mint.HTTP2 do
        when is_integer(stream_id) and is_list(enabled_flags) do
     chunk_size = IO.iodata_length(chunk)
     frame = data(stream_id: stream_id, flags: set_flags(:data, enabled_flags), data: chunk)
-    conn = update_in(conn.streams[stream_id].window_size, &(&1 - chunk_size))
-    conn = update_in(conn.window_size, &(&1 - chunk_size))
+    conn = update_in(conn.streams[stream_id].send_window_size, &(&1 - chunk_size))
+    conn = update_in(conn.send_window_size, &(&1 - chunk_size))
 
     conn =
       if :end_stream in enabled_flags do
@@ -1356,9 +1666,21 @@ defmodule Mint.HTTP2 do
 
   defp add_pseudo_headers(headers, conn, method, path) do
     if same_method?(method, "CONNECT") do
+      # In extended CONNECT (RFC 8441) the caller passes :scheme, :path, and
+      # :protocol explicitly and :authority is the origin, as in a normal
+      # request. In plain CONNECT (RFC 9113, section 8.5) the request target
+      # is the host and port of the tunnel destination, which request/5
+      # receives as its "path" argument.
+      authority =
+        if List.keymember?(headers, ":protocol", 0) do
+          conn.authority
+        else
+          path
+        end
+
       [
         {":method", method},
-        {":authority", conn.authority}
+        {":authority", authority}
         | headers
       ]
     else
@@ -1492,7 +1814,7 @@ defmodule Mint.HTTP2 do
       {nil, _frame} ->
         :ok
 
-      {{stream_id, _, _}, continuation(stream_id: stream_id)} ->
+      {{stream_id, _, _, _}, continuation(stream_id: stream_id)} ->
         :ok
 
       _other ->
@@ -1566,13 +1888,29 @@ defmodule Mint.HTTP2 do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
         assert_stream_in_state(conn, stream, [:open, :half_closed_local])
-        responses = [{:data, stream.ref, data} | responses]
+        body_size = stream.body_size + byte_size(data)
 
-        if flag_set?(flags, :data, :end_stream) do
-          conn = close_stream!(conn, stream.id, :remote_end_stream)
-          {conn, [{:done, stream.ref} | responses]}
+        if stream.content_length && body_size > stream.content_length do
+          conn = close_stream!(conn, stream.id, :protocol_error)
+
+          debug_data =
+            if stream.content_length == 0 do
+              "received DATA for a response that must not have content"
+            else
+              "the response body exceeds the content-length header value of " <>
+                "#{stream.content_length}"
+            end
+
+          {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
         else
-          {conn, responses}
+          conn = put_in(conn.streams[stream.id].body_size, body_size)
+          responses = [{:data, stream.ref, data} | responses]
+
+          if flag_set?(flags, :data, :end_stream) do
+            end_remote_stream(conn, stream, responses)
+          else
+            {conn, responses}
+          end
         end
 
       :error ->
@@ -1581,15 +1919,79 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # Accounts for `data_size` bytes arriving on the connection and on
+  # `stream_id`. Sends a WINDOW_UPDATE for either window only once its
+  # remaining receive credit drops to `conn.receive_window_update_threshold`;
+  # previously we sent one per DATA frame, so an adversarial server
+  # emitting many small frames could amplify its inbound bytes into a
+  # WINDOW_UPDATE flood of outbound frames. Batching caps that ratio at
+  # roughly one update per `(receive_window_size - threshold)` bytes
+  # consumed.
   defp refill_client_windows(conn, stream_id, data_size) do
-    connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
-    stream_frame = window_update(stream_id: stream_id, window_size_increment: data_size)
+    conn = update_in(conn.receive_window_remaining, &(&1 - data_size))
 
-    if open?(conn) do
-      send!(conn, [Frame.encode(connection_frame), Frame.encode(stream_frame)])
+    conn =
+      case Map.fetch(conn.streams, stream_id) do
+        {:ok, _stream} ->
+          update_in(conn.streams[stream_id].receive_window_remaining, &(&1 - data_size))
+
+        :error ->
+          conn
+      end
+
+    frames =
+      []
+      |> maybe_refill_stream(conn, stream_id)
+      |> maybe_refill_conn(conn)
+
+    if frames != [] and open?(conn) do
+      conn = send!(conn, Enum.map(frames, &Frame.encode/1))
+      apply_refills(conn, frames)
     else
       conn
     end
+  end
+
+  defp maybe_refill_conn(frames, conn) do
+    increment = conn.receive_window_size - conn.receive_window_remaining
+
+    if conn.receive_window_remaining <= conn.receive_window_update_threshold and increment > 0 do
+      [window_update(stream_id: 0, window_size_increment: increment) | frames]
+    else
+      frames
+    end
+  end
+
+  defp maybe_refill_stream(frames, conn, stream_id) do
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        increment = stream.receive_window_size - stream.receive_window_remaining
+
+        if stream.receive_window_remaining <= conn.receive_window_update_threshold and
+             increment > 0 do
+          [
+            window_update(stream_id: stream_id, window_size_increment: increment) | frames
+          ]
+        else
+          frames
+        end
+
+      :error ->
+        frames
+    end
+  end
+
+  defp apply_refills(conn, frames) do
+    Enum.reduce(frames, conn, fn
+      window_update(stream_id: 0), conn ->
+        put_in(conn.receive_window_remaining, conn.receive_window_size)
+
+      window_update(stream_id: stream_id), conn ->
+        put_in(
+          conn.streams[stream_id].receive_window_remaining,
+          conn.streams[stream_id].receive_window_size
+        )
+    end)
   end
 
   # HEADERS
@@ -1608,7 +2010,7 @@ defmodule Mint.HTTP2 do
       decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?)
     else
       callback = &decode_hbf_and_add_responses(&1, &2, &3, &4, end_stream?)
-      conn = put_in(conn.headers_being_processed, {stream_id, hbf, callback})
+      conn = start_headers_being_processed(conn, stream_id, hbf, callback)
       {conn, responses}
     end
   end
@@ -1630,22 +2032,25 @@ defmodule Mint.HTTP2 do
   defp handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?) do
     %{ref: ref, received_first_headers?: received_first_headers?} = stream
 
+    case validate_response_headers(headers, _trailers? = received_first_headers?) do
+      :ok ->
+        handle_valid_headers_for_stream(conn, responses, stream, headers, end_stream?)
+
+      {:error, reason} ->
+        conn = close_stream!(conn, stream.id, :protocol_error)
+        {conn, [{:error, ref, wrap_error(reason)} | responses]}
+    end
+  end
+
+  defp handle_valid_headers_for_stream(conn, responses, stream, headers, end_stream?) do
+    %{ref: ref, received_first_headers?: received_first_headers?} = stream
+
     case headers do
       # Interim response (1xx), which is made of only one HEADERS plus zero or more CONTINUATIONs.
       # There can be zero or more interim responses before a "proper" response.
       # https://httpwg.org/specs/rfc9113.html#HttpFraming
       [{":status", <<?1, _, _>> = status} | headers] ->
         cond do
-          received_first_headers? ->
-            conn = close_stream!(conn, stream.id, :protocol_error)
-
-            debug_data =
-              "informational response (1xx) must appear before final response, got a #{status} status"
-
-            error = wrap_error({:protocol_error, debug_data})
-            responses = [{:error, stream.ref, error} | responses]
-            {conn, responses}
-
           end_stream? ->
             conn = close_stream!(conn, stream.id, :protocol_error)
             debug_data = "informational response (1xx) must not have the END_STREAM flag set"
@@ -1662,45 +2067,56 @@ defmodule Mint.HTTP2 do
         end
 
       [{":status", status} | headers] when not received_first_headers? ->
-        conn = put_in(conn.streams[stream.id].received_first_headers?, true)
         status = String.to_integer(status)
         headers = join_cookie_headers(headers)
-        new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
-        cond do
-          # :reserved_remote means that this was a promised stream. As soon as headers come,
-          # the stream goes in the :half_closed_local state (unless it's not allowed because
-          # of the client's max concurrent streams limit, or END_STREAM is set).
-          stream.state == :reserved_remote ->
+        case response_content_length(stream, status, headers) do
+          {:ok, content_length} ->
+            conn =
+              update_in(
+                conn.streams[stream.id],
+                &%{&1 | received_first_headers?: true, content_length: content_length}
+              )
+
+            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+
             cond do
-              conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
-                conn = close_stream!(conn, stream.id, :refused_stream)
-                {conn, responses}
+              # :reserved_remote means that this was a promised stream. As soon as headers come,
+              # the stream goes in the :half_closed_local state (unless it's not allowed because
+              # of the client's max concurrent streams limit, or END_STREAM is set).
+              stream.state == :reserved_remote ->
+                cond do
+                  conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
+                    conn = close_stream!(conn, stream.id, :refused_stream)
+                    {conn, responses}
+
+                  end_stream? ->
+                    end_remote_stream(conn, stream, new_responses)
+
+                  true ->
+                    conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+                    conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
+                    conn = put_in(conn.streams[stream.id].state, :half_closed_local)
+                    {conn, new_responses}
+                end
 
               end_stream? ->
-                conn = close_stream!(conn, stream.id, :remote_end_stream)
-                {conn, [{:done, ref} | new_responses]}
+                end_remote_stream(conn, stream, new_responses)
 
               true ->
-                conn = update_in(conn.open_server_stream_count, &(&1 + 1))
-                conn = put_in(conn.streams[stream.id].state, :half_closed_local)
                 {conn, new_responses}
             end
 
-          end_stream? ->
-            conn = close_stream!(conn, stream.id, :remote_end_stream)
-            {conn, [{:done, ref} | new_responses]}
-
-          true ->
-            {conn, new_responses}
+          {:error, reason} ->
+            conn = close_stream!(conn, stream.id, :protocol_error)
+            {conn, [{:error, ref, wrap_error(reason)} | responses]}
         end
 
       # Trailer headers. We don't care about the :status header here.
       headers when received_first_headers? ->
         if end_stream? do
-          conn = close_stream!(conn, stream.id, :remote_end_stream)
           headers = headers |> Headers.remove_unallowed_trailer() |> join_cookie_headers()
-          {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
+          end_remote_stream(conn, stream, [{:headers, ref, headers} | responses])
         else
           # Trailer headers must set the END_STREAM flag because they're
           # the last thing allowed on the stream (other than RST_STREAM and
@@ -1734,9 +2150,129 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  # RFC 9113 8.2.1 and 8.3: pseudo-header fields come before regular fields, only
+  # :status is defined for responses and it appears exactly once, trailers carry
+  # no pseudo-header fields, and field names and values are limited to the
+  # characters allowed by the RFC.
+  defp validate_response_headers(headers, trailers?) do
+    validate_response_headers(headers, trailers?, _status? = false, _regular? = false)
+  end
+
+  defp validate_response_headers([], _trailers?, _status?, _regular?), do: :ok
+
+  defp validate_response_headers([{":" <> _ = name, value} | rest], trailers?, status?, regular?) do
+    cond do
+      trailers? ->
+        {:error, {:protocol_error, "pseudo-header #{inspect(name)} is not allowed in trailers"}}
+
+      regular? ->
+        {:error,
+         {:protocol_error,
+          "pseudo-header #{inspect(name)} must appear before regular header fields"}}
+
+      name != ":status" ->
+        {:error, {:protocol_error, "undefined pseudo-header #{inspect(name)} in response"}}
+
+      status? ->
+        {:error, {:protocol_error, "the :status pseudo-header appears more than once"}}
+
+      not valid_status?(value) ->
+        {:error, {:invalid_status_header, value}}
+
+      true ->
+        validate_response_headers(rest, trailers?, true, regular?)
+    end
+  end
+
+  defp validate_response_headers([{name, value} | rest], trailers?, status?, _regular?) do
+    cond do
+      not valid_field_name?(name) -> {:error, {:invalid_header_name, name}}
+      not valid_field_value?(value) -> {:error, {:invalid_header_value, name, value}}
+      true -> validate_response_headers(rest, trailers?, status?, true)
+    end
+  end
+
+  # RFC 9110 15: status-code = 3DIGIT
+  defp valid_status?(<<a, b, c>>) when a in ?0..?9 and b in ?0..?9 and c in ?0..?9, do: true
+  defp valid_status?(_other), do: false
+
+  # RFC 9113 8.2.1: a field name must not contain characters in 0x00-0x20, 0x41-0x5A
+  # (uppercase letters) or 0x7F-0xFF, and only a pseudo-header field can contain a colon.
+  defp valid_field_name?(<<>>), do: false
+  defp valid_field_name?(name), do: field_name_chars?(name)
+
+  defp field_name_chars?(<<char, _rest::binary>>)
+       when char in 0x00..0x20 or char in ?A..?Z or char in 0x7F..0xFF or char == ?:,
+       do: false
+
+  defp field_name_chars?(<<_char, rest::binary>>), do: field_name_chars?(rest)
+  defp field_name_chars?(<<>>), do: true
+
+  # RFC 9113 8.2.1: a field value must not contain NUL, LF or CR and must not start or
+  # end with SP or HTAB.
+  defp valid_field_value?(<<char, _rest::binary>>) when char in [?\s, ?\t], do: false
+
+  defp valid_field_value?(value) do
+    byte_size(value) == 0 or
+      (:binary.last(value) not in [?\s, ?\t] and field_value_chars?(value))
+  end
+
+  defp field_value_chars?(<<char, _rest::binary>>) when char in [0, ?\n, ?\r], do: false
+  defp field_value_chars?(<<_char, rest::binary>>), do: field_value_chars?(rest)
+  defp field_value_chars?(<<>>), do: true
+
+  # RFC 9113 8.1.1: a response with content is malformed if the sum of the DATA
+  # frame payload lengths doesn't equal the content-length header value. Responses
+  # to HEAD and 204 and 304 responses must not have content, whatever their
+  # content-length header says, and 2xx responses to CONNECT carry tunnel data.
+  defp response_content_length(%{method: method}, status, headers) do
+    cond do
+      method == "HEAD" -> {:ok, 0}
+      status in [204, 304] -> {:ok, 0}
+      method == "CONNECT" and status in 200..299 -> {:ok, nil}
+      true -> content_length(headers)
+    end
+  end
+
+  defp content_length(headers) do
+    case for {"content-length", value} <- headers, do: value do
+      [] ->
+        {:ok, nil}
+
+      [value | rest] ->
+        cond do
+          Enum.any?(rest, &(&1 != value)) ->
+            {:error, :disagreeing_content_length_headers}
+
+          not ParsingTools.only_digits?(value) ->
+            {:error, {:invalid_content_length_header, value}}
+
+          true ->
+            {:ok, String.to_integer(value)}
+        end
+    end
+  end
+
+  defp end_remote_stream(conn, stream, responses) do
+    stream = conn.streams[stream.id]
+
+    if stream.content_length in [nil, stream.body_size] do
+      conn = close_stream!(conn, stream.id, :remote_end_stream)
+      {conn, [{:done, stream.ref} | responses]}
+    else
+      conn = close_stream!(conn, stream.id, :protocol_error)
+
+      debug_data =
+        "the response body is #{stream.body_size} bytes but the content-length header " <>
+          "value is #{stream.content_length}"
+
+      {conn, [{:error, stream.ref, wrap_error({:protocol_error, debug_data})} | responses]}
+    end
+  end
+
   defp join_cookie_headers(headers) do
     # If we have 0 or 1 Cookie headers, we just use the old list of headers.
-    case Enum.split_with(headers, fn {name, _value} -> Headers.lower_raw(name) == "cookie" end) do
+    case Enum.split_with(headers, fn {name, _value} -> name == "cookie" end) do
       {[], _headers} ->
         headers
 
@@ -1849,9 +2385,19 @@ defmodule Mint.HTTP2 do
     end
   end
 
+  valid_client_settings_without_iws =
+    @valid_client_settings -- [:initial_window_size, :header_table_size]
+
   defp apply_client_settings(conn, client_settings) do
     Enum.reduce(client_settings, conn, fn
-      {setting, value}, conn when setting in @valid_client_settings ->
+      {:initial_window_size, initial_window_size}, conn ->
+        update_client_initial_window_size(conn, initial_window_size)
+
+      {:header_table_size, header_table_size}, conn ->
+        conn = update_in(conn.decode_table, &HPAX.protocol_resize(&1, header_table_size))
+        put_in(conn.client_settings.header_table_size, header_table_size)
+
+      {setting, value}, conn when setting in unquote(valid_client_settings_without_iws) ->
         update_in(conn.client_settings, &%{&1 | setting => value})
 
       {setting, _value}, _conn ->
@@ -1867,20 +2413,40 @@ defmodule Mint.HTTP2 do
         for {stream_id, stream} <- streams,
             stream.state in [:open, :half_closed_remote],
             into: streams do
-          window_size = stream.window_size + diff
+          send_window_size = stream.send_window_size + diff
 
-          if window_size > @max_window_size do
+          if send_window_size > @max_window_size do
             debug_data =
-              "INITIAL_WINDOW_SIZE parameter of #{window_size} makes some window sizes too big"
+              "INITIAL_WINDOW_SIZE parameter of #{send_window_size} makes some window sizes too big"
 
             send_connection_error!(conn, :flow_control_error, debug_data)
           end
 
-          {stream_id, %{stream | window_size: window_size}}
+          {stream_id, %{stream | send_window_size: send_window_size}}
         end
       end)
 
     put_in(conn.server_settings.initial_window_size, new_iws)
+  end
+
+  defp update_client_initial_window_size(conn, new_iws) do
+    diff = new_iws - conn.client_settings.initial_window_size
+
+    conn =
+      update_in(conn.streams, fn streams ->
+        for {stream_id, stream} <- streams,
+            stream.state in [:open, :half_closed_local, :reserved_remote],
+            into: streams do
+          {stream_id,
+           %{
+             stream
+             | receive_window_size: stream.receive_window_size + diff,
+               receive_window_remaining: stream.receive_window_remaining + diff
+           }}
+        end
+      end)
+
+    put_in(conn.client_settings.initial_window_size, new_iws)
   end
 
   # PUSH_PROMISE
@@ -1917,7 +2483,7 @@ defmodule Mint.HTTP2 do
       )
     else
       callback = &decode_push_promise_headers_and_add_response(&1, &2, &3, &4, promised_stream_id)
-      conn = put_in(conn.headers_being_processed, {stream_id, hbf, callback})
+      conn = start_headers_being_processed(conn, stream_id, hbf, callback)
       {conn, responses}
     end
   end
@@ -1929,19 +2495,55 @@ defmodule Mint.HTTP2 do
          stream,
          promised_stream_id
        ) do
+    # The header block fragment must always be decoded to keep the HPACK decode
+    # table in sync with the server, even when we end up refusing the stream.
     {conn, headers} = decode_hbf(conn, hbf)
 
-    promised_stream = %{
-      id: promised_stream_id,
-      ref: make_ref(),
-      state: :reserved_remote,
-      window_size: conn.server_settings.initial_window_size,
-      received_first_headers?: false
-    }
+    # A reserved stream stays in `conn.streams` until its response HEADERS
+    # arrive, so promised streams have to be counted against the concurrency
+    # limit at promise time. Otherwise a server can pin an unbounded number of
+    # reserved streams by sending PUSH_PROMISE frames and never following up
+    # with the HEADERS that would open them.
+    server_stream_count = conn.open_server_stream_count + conn.reserved_server_stream_count
 
-    conn = put_in(conn.streams[promised_stream.id], promised_stream)
-    new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
-    {conn, [new_response | responses]}
+    if server_stream_count >= conn.client_settings.max_concurrent_streams do
+      conn = refuse_promised_stream(conn, promised_stream_id)
+      {conn, responses}
+    else
+      promised_stream = %{
+        id: promised_stream_id,
+        ref: make_ref(),
+        state: :reserved_remote,
+        send_window_size: conn.server_settings.initial_window_size,
+        receive_window_size: conn.client_settings.initial_window_size,
+        receive_window_remaining: conn.client_settings.initial_window_size,
+        received_first_headers?: false,
+        method: promised_method(headers),
+        content_length: nil,
+        body_size: 0
+      }
+
+      conn = put_in(conn.streams[promised_stream.id], promised_stream)
+      conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
+      new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
+      {conn, [new_response | responses]}
+    end
+  end
+
+  defp promised_method(headers) do
+    case List.keyfind(headers, ":method", 0) do
+      {":method", method} -> method
+      nil -> nil
+    end
+  end
+
+  defp refuse_promised_stream(conn, promised_stream_id) do
+    if open?(conn) do
+      rst_stream_frame = rst_stream(stream_id: promised_stream_id, error_code: :refused_stream)
+      send!(conn, Frame.encode(rst_stream_frame))
+    else
+      conn
+    end
   end
 
   defp assert_valid_promised_stream_id(conn, promised_stream_id) do
@@ -2032,12 +2634,12 @@ defmodule Mint.HTTP2 do
          window_update(stream_id: 0, window_size_increment: wsi),
          responses
        ) do
-    new_window_size = conn.window_size + wsi
+    new_window_size = conn.send_window_size + wsi
 
     if new_window_size > @max_window_size do
       send_connection_error!(conn, :flow_control_error, "window size too big")
     else
-      conn = put_in(conn.window_size, new_window_size)
+      conn = put_in(conn.send_window_size, new_window_size)
       {conn, responses}
     end
   end
@@ -2047,16 +2649,24 @@ defmodule Mint.HTTP2 do
          window_update(stream_id: stream_id, window_size_increment: wsi),
          responses
        ) do
-    stream = fetch_stream!(conn, stream_id)
-    new_window_size = conn.streams[stream_id].window_size + wsi
+    case Map.fetch(conn.streams, stream_id) do
+      {:ok, stream} ->
+        new_window_size = stream.send_window_size + wsi
 
-    if new_window_size > @max_window_size do
-      conn = close_stream!(conn, stream_id, :flow_control_error)
-      error = wrap_error({:flow_control_error, "window size too big"})
-      {conn, [{:error, stream.ref, error} | responses]}
-    else
-      conn = put_in(conn.streams[stream_id].window_size, new_window_size)
-      {conn, responses}
+        if new_window_size > @max_window_size do
+          conn = close_stream!(conn, stream_id, :flow_control_error)
+          error = wrap_error({:flow_control_error, "window size too big"})
+          {conn, [{:error, stream.ref, error} | responses]}
+        else
+          conn = put_in(conn.streams[stream_id].send_window_size, new_window_size)
+          {conn, responses}
+        end
+
+      # RFC 9113 5.1: a WINDOW_UPDATE can arrive on a stream shortly after it was
+      # closed, for example after the client reset it, and must be ignored.
+      :error ->
+        log(conn, :debug, "Received WINDOW_UPDATE frame on closed stream ID #{stream_id}")
+        {conn, responses}
     end
   end
 
@@ -2070,15 +2680,58 @@ defmodule Mint.HTTP2 do
       assert_stream_in_state(conn, stream, [:open, :half_closed_local, :reserved_remote])
     end
 
-    {^stream_id, hbf_acc, callback} = conn.headers_being_processed
+    {^stream_id, hbf_acc, callback, acc_size} = conn.headers_being_processed
 
     if flag_set?(flags, :continuation, :end_headers) do
       hbf = IO.iodata_to_binary([hbf_acc, hbf_chunk])
       conn = put_in(conn.headers_being_processed, nil)
       callback.(conn, responses, hbf, stream)
     else
-      conn = put_in(conn.headers_being_processed, {stream_id, [hbf_acc, hbf_chunk], callback})
-      {conn, responses}
+      if byte_size(hbf_chunk) == 0 do
+        # An empty fragment does not contribute header-block data. Keeping the
+        # existing accumulator avoids adding an unbounded number of empty
+        # iodata nodes when END_HEADERS is withheld.
+        {conn, responses}
+      else
+        new_size = acc_size + byte_size(hbf_chunk)
+        conn = assert_header_block_within_max_size(conn, new_size)
+
+        conn =
+          put_in(
+            conn.headers_being_processed,
+            {stream_id, [hbf_acc, hbf_chunk], callback, new_size}
+          )
+
+        {conn, responses}
+      end
+    end
+  end
+
+  defp start_headers_being_processed(conn, stream_id, hbf, callback) do
+    hbf_size = byte_size(hbf)
+    conn = assert_header_block_within_max_size(conn, hbf_size)
+    put_in(conn.headers_being_processed, {stream_id, hbf, callback, hbf_size})
+  end
+
+  # The header block accumulated from a HEADERS frame and its trailing
+  # CONTINUATION frames is buffered (in compressed form) until END_HEADERS
+  # arrives. A server can withhold END_HEADERS and stream CONTINUATION frames
+  # indefinitely, so the buffered size is bounded by the locally advertised
+  # SETTINGS_MAX_HEADER_LIST_SIZE. Empty fragments are not retained in the
+  # accumulator. The compressed accumulator is never larger than the
+  # uncompressed header list it decodes to, so the size limit never rejects a
+  # header block that fits within the advertised limit.
+  defp assert_header_block_within_max_size(conn, size) do
+    case conn.client_settings.max_header_list_size do
+      :infinity ->
+        conn
+
+      max_size when size > max_size ->
+        debug_data = "header block exceeds SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
+      _max_size ->
+        conn
     end
   end
 
@@ -2138,6 +2791,11 @@ defmodule Mint.HTTP2 do
         # Stream initiated by the server.
         stream_open? and Integer.is_even(stream.id) ->
           update_in(conn.open_server_stream_count, &(&1 - 1))
+
+        # Stream reserved by the server through a PUSH_PROMISE, but whose
+        # response HEADERS never arrived to open it.
+        stream.state == :reserved_remote ->
+          update_in(conn.reserved_server_stream_count, &(&1 - 1))
 
         true ->
           conn
@@ -2226,6 +2884,15 @@ defmodule Mint.HTTP2 do
     "can't stream chunk of data because the request is unknown"
   end
 
+  def format_error({:unknown_request_to_stream, ref}) do
+    "request with reference #{inspect(ref)} was not found"
+  end
+
+  def format_error({:window_size_too_small, current, new_size}) do
+    "set_window_size/3 can only grow a window; new size #{new_size} is " <>
+      "smaller than the current size #{current}"
+  end
+
   def format_error(:request_is_not_streaming) do
     "can't send more data on this request since it's not streaming"
   end
@@ -2236,6 +2903,26 @@ defmodule Mint.HTTP2 do
 
   def format_error(:missing_status_header) do
     "the :status pseudo-header (which is required in HTTP/2) is missing from the response"
+  end
+
+  def format_error({:invalid_status_header, value}) do
+    "invalid :status pseudo-header in the response: #{inspect(value)}"
+  end
+
+  def format_error({:invalid_header_name, name}) do
+    "invalid header name in the response: #{inspect(name)}"
+  end
+
+  def format_error({:invalid_header_value, name, value}) do
+    "invalid value for header #{inspect(name)} in the response: #{inspect(value)}"
+  end
+
+  def format_error({:invalid_content_length_header, value}) do
+    "invalid content-length header in the response: #{inspect(value)}"
+  end
+
+  def format_error(:disagreeing_content_length_headers) do
+    "the response contains content-length headers with different values"
   end
 
   def format_error({:server_closed_request, error_code}) do

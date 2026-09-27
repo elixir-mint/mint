@@ -1,7 +1,7 @@
 defmodule Mint.HTTP1Test do
   use ExUnit.Case, async: true
 
-  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer}
+  alias Mint.{HTTPError, HTTP1, HTTP1.TestServer, TransportError}
 
   require Mint.HTTP
 
@@ -50,6 +50,18 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, " 200 OK\r\n"})
   end
 
+  test "limits an incomplete response status line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    line = "HTTP/1.1 200 " <> String.duplicate("x", 51)
+    assert byte_size(line) == 64
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, line})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
   test "headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -71,6 +83,26 @@ defmodule Mint.HTTP1Test do
     assert {:ok, _conn, [headers]} = HTTP1.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
 
     assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
+  end
+
+  test "limits the size of a response header section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 10)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+    assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 11, 10}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
+  test "limits an incomplete response header section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 9)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    assert {:ok, conn, [_status]} = HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 10, 9}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "foo: bar\r\n"})
   end
 
   test "status and headers", %{conn: conn} do
@@ -96,7 +128,7 @@ defmodule Mint.HTTP1Test do
              HTTP1.stream(conn, {:tcp, conn.socket, "BODY2"})
 
     assert {:ok, conn, [{:done, ^ref}]} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "body with content-length", %{conn: conn} do
@@ -124,6 +156,54 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  test "no body in 2xx response to CONNECT request", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n\r\nXXX"})
+
+    assert conn.buffer == "XXX"
+  end
+
+  test "HTTP/1.0 2xx response to CONNECT leaves the tunnel socket open", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(
+               conn,
+               {:tcp, conn.socket, "HTTP/1.0 200 Connection established\r\n\r\n"}
+             )
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "content-length is ignored in 2xx response to CONNECT request", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"
+
+    assert {:ok, conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert conn.buffer == ""
+  end
+
+  test "transfer-encoding and content-length are ignored in 2xx response to CONNECT request",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\ncontent-length: 10\r\n\r\n"
+
+    assert {:ok, _conn, [_status, _headers, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
+  test "non-2xx response to CONNECT request has a body", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+    response = "HTTP/1.1 407 Proxy Authentication Required\r\ncontent-length: 6\r\n\r\ndenied"
+
+    assert {:ok, _conn, [_status, _headers, {:data, ^ref, "denied"}, {:done, ^ref}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+  end
+
   test "status, headers, and body", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
     response = "HTTP/1.1 200 OK\r\ncontent-length: 1\r\n\r\nX"
@@ -134,7 +214,18 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: {:unexpected_data, "X"}}, []} =
              HTTP1.stream(conn, {:tcp, conn.socket, "X"})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
+  end
+
+  test "responses before an error are returned in order", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nhello\r\nXX"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_chunk_size}, responses} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "hello"}] = responses
+    assert_closed_and_released(conn)
   end
 
   test "connection: close", %{conn: conn} do
@@ -144,7 +235,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "connection: keep-alive", %{conn: conn} do
@@ -164,7 +255,7 @@ defmodule Mint.HTTP1Test do
     assert {:ok, conn, [_status, _headers, {:data, ^ref, "X"}, {:done, ^ref}]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "implicit connection: keep-alive on http/1.1", %{conn: conn} do
@@ -184,7 +275,17 @@ defmodule Mint.HTTP1Test do
     assert {:error, conn, %HTTPError{reason: :more_than_one_content_length_header},
             [{:status, _ref, 200}]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
 
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
+  end
+
+  test "error with invalid status line", %{conn: conn} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HELLO 200 OK\r\n"
+
+    assert {:error, conn, %HTTPError{reason: :invalid_status_line}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert_closed_and_released(conn)
   end
 
   test "raises error connecting with invalid optional_responses params", %{port: port} do
@@ -251,6 +352,27 @@ defmodule Mint.HTTP1Test do
            ] = responses
   end
 
+  test "connection stays open after a response completes with another request in flight",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nXXXXX"
+
+    assert {:ok, conn,
+            [{:status, ^ref1, _}, {:headers, ^ref1, _}, {:data, ^ref1, _}, {:done, ^ref1}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+
+    assert {:ok, conn,
+            [{:status, ^ref2, _}, {:headers, ^ref2, _}, {:data, ^ref2, _}, {:done, ^ref2}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+    assert {:ok, conn} = HTTP1.close(conn)
+    refute HTTP1.open?(conn)
+  end
+
   test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -270,20 +392,118 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == "XXX"
   end
 
+  for chunk_size <- ["+5", "+0", "-0"] do
+    test "rejects signed chunk size #{chunk_size}", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+          unquote(chunk_size) <> "\r\nHELLO\r\n0\r\n\r\n"
+
+      assert {:error, _conn, %HTTPError{reason: :invalid_chunk_size}, _responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, response})
+    end
+  end
+
+  for tail <- [
+        "ZZZZZ",
+        " anything at all",
+        "\tfoo",
+        " 9",
+        "}~!",
+        " ",
+        ";",
+        ";=value",
+        ";name=",
+        ";name=value extra",
+        ";name=\"unterminated",
+        ";name=\"value\"extra",
+        ";name=\"bad\x00value\"",
+        ";name=\"bad\\\nvalue\"",
+        "\nignored"
+      ],
+      size <- ["5", "0"],
+      delivery <- [:whole, :bytewise] do
+    test "rejects chunk line #{inspect(size <> tail)} with #{delivery} delivery", %{conn: conn} do
+      {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      body =
+        case unquote(size) do
+          "5" -> "5" <> unquote(tail) <> "\r\nHELLO\r\n0\r\n\r\n"
+          "0" -> "5\r\nHELLO\r\n0" <> unquote(tail) <> "\r\n\r\n"
+        end
+
+      response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <> body
+
+      result =
+        case unquote(delivery) do
+          :whole -> HTTP1.stream(conn, {:tcp, conn.socket, response})
+          :bytewise -> stream_message_bytewise(response, conn, [])
+        end
+
+      assert {:error, conn, %HTTPError{reason: :invalid_chunk_size}, _responses} = result
+      assert_closed_and_released(conn)
+    end
+  end
+
+  for delivery <- [:whole, :bytewise] do
+    test "chunk extensions with #{delivery} delivery", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+          "5 \t; name \t= \t\"a;\\\"b\\\\c\";flag;empty=\"\";token=value\r\nHELLO\r\n" <>
+          "0;last=\"\x80\xFF\"\r\nmy-trailer: value\r\n\r\n"
+
+      result =
+        case unquote(delivery) do
+          :whole -> HTTP1.stream(conn, {:tcp, conn.socket, response})
+          :bytewise -> stream_message_bytewise(response, conn, [])
+        end
+
+      assert {:ok, _conn, [{:status, ^ref, 200}, {:headers, ^ref, _} | responses]} = result
+      {data, trailers_and_done} = Enum.split_while(responses, &match?({:data, ^ref, _}, &1))
+      assert IO.iodata_to_binary(Enum.map(data, fn {:data, ^ref, bytes} -> bytes end)) == "HELLO"
+      assert trailers_and_done == [{:headers, ref, [{"my-trailer", "value"}]}, {:done, ref}]
+    end
+  end
+
+  test "rejects a chunk size longer than 16 digits when streamed bytewise", %{conn: conn} do
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    conn =
+      Enum.reduce(1..16, conn, fn _index, conn ->
+        assert {:ok, conn, []} = HTTP1.stream(conn, {:tcp, conn.socket, "0"})
+        conn
+      end)
+
+    assert {:error, _conn, %HTTPError{reason: :invalid_chunk_size}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "0"})
+  end
+
   test "body with chunked transfer-encoding streamed bytewise", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
-    assert {:ok, _conn, [status, headers, data1, data2, done]} =
+    assert {:ok, _conn, [status, headers | rest]} =
              stream_message_bytewise(response, conn, [])
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "chunked"}]}
-    assert data1 == {:data, ref, "01"}
-    assert data2 == {:data, ref, "23"}
+
+    # When a chunk is streamed one byte at a time, its data is emitted as it
+    # arrives rather than buffered until the chunk completes, so the body may be
+    # split across several {:data, ...} responses.
+    {data_responses, [done]} = Enum.split(rest, -1)
     assert done == {:done, ref}
+    assert Enum.all?(data_responses, &match?({:data, ^ref, _}, &1))
+    body = data_responses |> Enum.map(fn {:data, ^ref, data} -> data end) |> IO.iodata_to_binary()
+    assert body == "0123"
   end
 
   test "body with chunked transfer-encoding streamed on chunk boundary", %{conn: conn} do
@@ -307,12 +527,60 @@ defmodule Mint.HTTP1Test do
     assert data2 == {:data, ref, "23"}
   end
 
+  test "chunked transfer-encoding emits partial chunk data before the chunk completes",
+       %{conn: conn} do
+    # Regression test for GHSA-c59h-fq4p-r36r: a server can announce a huge chunk
+    # and dribble bytes. Mint must emit the partial data as it arrives instead of
+    # buffering the whole (never-completed) chunk in memory.
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n7FFFFFFF\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    # Bytes belonging to the not-yet-complete chunk are emitted immediately.
+    assert {:ok, conn, [{:data, ^ref, "hello"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "hello"})
+
+    assert {:ok, conn, [{:data, ^ref, "world"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "world"})
+
+    # Nothing is retained in the body buffer between calls.
+    assert IO.iodata_to_binary(conn.request.data_buffer) == ""
+  end
+
+  test "limits an incomplete chunk-size line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+    conn = %{conn | max_header_list_size: 15}
+
+    assert {:ok, conn, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("f", 15)})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 16, 15}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "f"})
+  end
+
+  test "limits an incomplete chunk-extension line", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 64)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5;"
+    assert {:ok, conn, [_status, _headers]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, String.duplicate("x", 63)})
+
+    assert {:error, _conn, %HTTPError{reason: {:response_line_too_long, 65, 64}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, "x"})
+  end
+
   test "body with chunked transfer-encoding with metadata and trailers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\nmy-trailer: value\r\n\r\nXXX"
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\nmy-trailer: value\r\n\r\nXXX"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
@@ -325,6 +593,19 @@ defmodule Mint.HTTP1Test do
     assert done == {:done, ref}
 
     assert conn.buffer == "XXX"
+  end
+
+  test "limits the size of a chunked trailer section", %{port: port} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, max_header_list_size: 30)
+    {:ok, conn, _ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "1\r\nX\r\n0\r\nfoo: " <> String.duplicate("x", 25) <> "\r\n"
+
+    assert {:error, _conn, %HTTPError{reason: {:max_header_list_size_exceeded, 32, 30}},
+            [{:status, _, 200}, {:headers, _, _}, {:data, _, "X"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
   end
 
   test "100 Continue informational response followed by final response", %{conn: conn} do
@@ -430,7 +711,7 @@ defmodule Mint.HTTP1Test do
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <>
-        "2meta\r\n01\r\n2\r\n23\r\n0meta\r\n" <>
+        "2;meta\r\n01\r\n2\r\n23\r\n0;meta\r\n" <>
         "my-trailer: value\r\ncontent-type: application/json\r\n\r\n"
 
     assert {:ok, conn, [status, headers, data1, data2, trailers, done]} =
@@ -464,7 +745,7 @@ defmodule Mint.HTTP1Test do
   test "close/1", %{conn: conn} do
     assert HTTP1.open?(conn)
     assert {:ok, conn} = HTTP1.close(conn)
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   test "close/1 an already closed connection with default inet_backend does not cause error", %{
@@ -474,7 +755,7 @@ defmodule Mint.HTTP1Test do
     # ignore the returned conn, otherwise transport.close/1 will not be called
     assert {:ok, _conn} = HTTP1.close(conn)
     assert {:ok, conn} = HTTP1.close(conn)
-    refute HTTP1.open?(conn)
+    assert_closed_and_released(conn)
   end
 
   if List.to_integer(:erlang.system_info(:otp_release)) < 23 do
@@ -913,6 +1194,25 @@ defmodule Mint.HTTP1Test do
                  """)
       end
     end
+
+    test "RST from the server does not leave an open socket" do
+      # we need to test passive because in active mode, the VM kills the port automatically
+      {:ok, port, server_ref} = TestServer.start()
+      {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      # send the RST
+      :inet.setopts(server_socket, linger: {true, 0})
+      :gen_tcp.close(server_socket)
+
+      # wait until the RST arrives
+      assert {:error, _} = :gen_tcp.recv(conn.socket, 0, 1000)
+
+      assert {:error, conn, %TransportError{reason: :closed}} =
+               HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert_closed_and_released(conn)
+    end
   end
 
   describe "streaming requests" do
@@ -1126,6 +1426,28 @@ defmodule Mint.HTTP1Test do
       assert [{:status, ^ref4, _}, {:headers, ^ref4, _}, {:data, ^ref4, "XXXXX"}, {:done, ^ref4}] =
                responses
     end
+
+    test "RST from the server does not leave an open socket" do
+      # we need to test passive because in active mode, the VM kills the port automatically
+      {:ok, port, server_ref} = TestServer.start()
+      {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+      assert_receive {^server_ref, server_socket}
+
+      assert {:ok, conn, ref} =
+               HTTP1.request(conn, "GET", "/", [], :stream)
+
+      # send the RST
+      :inet.setopts(server_socket, linger: {true, 0})
+      :gen_tcp.close(server_socket)
+
+      # wait until the RST arrives
+      assert {:error, _} = :gen_tcp.recv(conn.socket, 0, 1000)
+
+      assert {:error, conn, %TransportError{reason: :closed}} =
+               HTTP1.stream_request_body(conn, ref, "chunk")
+
+      assert_closed_and_released(conn)
+    end
   end
 
   defp request_string(string) do
@@ -1151,6 +1473,188 @@ defmodule Mint.HTTP1Test do
     {:ok, conn, responses}
   end
 
+  describe "request_body_window/2" do
+    test "returns :infinity for an active streaming request", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], :stream)
+      assert HTTP1.request_body_window(conn, ref) == :infinity
+    end
+
+    test "raises if no request is currently streaming a body", %{conn: conn} do
+      assert_raise ArgumentError, ~r/was not found or is not streaming a body/, fn ->
+        HTTP1.request_body_window(conn, make_ref())
+      end
+    end
+  end
+
+  describe "stream_headers option" do
+    setup %{port: port} do
+      assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, stream_headers: true)
+      assert_receive {_server_ref, server_socket}
+      [conn: conn, server_socket: server_socket]
+    end
+
+    test "emits all complete headers from a chunk at once when stream_headers is true", %{
+      conn: conn
+    } do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send two complete headers plus start of third header in one chunk
+      # This should emit the two complete headers together
+      assert {:ok, conn, [headers1]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\nQux"})
+
+      assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers1
+
+      # Complete the third header and end headers section
+      assert {:ok, _conn, [headers2]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, ": Quux\r\n\r\n"})
+
+      assert {:headers, ^ref, [{"qux", "Quux"}]} = headers2
+    end
+
+    test "emits multiple headers from one packet together", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nBaz: Boz\r\n\r\n"})
+
+      assert [headers] = responses
+      assert {:headers, ^ref, [{"foo", "Bar"}, {"baz", "Boz"}]} = headers
+    end
+
+    test "handles partial headers with streaming", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send first header with partial second header
+      assert {:ok, conn, [header1]} = HTTP1.stream(conn, {:tcp, conn.socket, "Foo: Bar\r\nB"})
+      assert {:headers, ^ref, [{"foo", "Bar"}]} = header1
+
+      # Complete second header and end headers
+      assert {:ok, _conn, [header2]} = HTTP1.stream(conn, {:tcp, conn.socket, "az: Boz\r\n\r\n"})
+      assert {:headers, ^ref, [{"baz", "Boz"}]} = header2
+    end
+
+    test "emits header immediately when packet ends exactly after LF", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      # Send a complete header ending exactly at packet boundary (no subsequent bytes)
+      assert {:ok, conn, responses} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "X-Progress: 50\r\nX-Other: value\r\n"}
+               )
+
+      assert [{:headers, ^ref, [{"x-progress", "50"}, {"x-other", "value"}]}] = responses
+
+      # Send another complete header ending exactly at packet boundary
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Progress: 100\r\n"})
+
+      assert [{:headers, ^ref, [{"x-progress", "100"}]}] = responses
+
+      # End the header section
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "\r\n"})
+      assert [] = responses
+    end
+
+    test "streams trailer headers from same chunk together", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "5\r\nhello\r\n"})
+      assert [{:data, ^ref, "hello"}] = responses
+
+      # Send last chunk and trailer headers in one chunk
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket, "0\r\nX-Trailer-1: value1\r\nX-Trailer-2: value2\r\n\r\n"}
+               )
+
+      assert [trailers, done] = responses
+      assert {:headers, ^ref, [{"x-trailer-1", "value1"}, {"x-trailer-2", "value2"}]} = trailers
+      assert {:done, ^ref} = done
+    end
+
+    test "filters unallowed trailer headers when streaming", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      # Send last chunk with allowed and unallowed trailer headers
+      assert {:ok, _conn, responses} =
+               HTTP1.stream(
+                 conn,
+                 {:tcp, conn.socket,
+                  "0\r\nContent-Length: 100\r\nX-Custom-Trailer: allowed\r\n\r\n"}
+               )
+
+      # Content-Length should be filtered out, only X-Custom-Trailer should appear
+      assert [trailer, done] = responses
+      assert {:headers, ^ref, [{"x-custom-trailer", "allowed"}]} = trailer
+      assert {:done, ^ref} = done
+    end
+
+    test "emits trailer header immediately when packet ends exactly after LF", %{conn: conn} do
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      assert {:ok, conn, [_status]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "HTTP/1.1 200 OK\r\n"})
+
+      assert {:ok, conn, [_headers]} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "Transfer-Encoding: chunked\r\n\r\n"})
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "5\r\nhello\r\n"})
+      assert [{:data, ^ref, "hello"}] = responses
+
+      # Send last chunk (ending exactly at boundary)
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "0\r\n"})
+      assert [] = responses
+
+      # Send a complete trailer header ending exactly at packet boundary (no subsequent bytes)
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Trailer-1: value1\r\n"})
+
+      assert [{:headers, ^ref, [{"x-trailer-1", "value1"}]}] = responses
+
+      # Send another complete trailer header ending exactly at packet boundary
+      assert {:ok, conn, responses} =
+               HTTP1.stream(conn, {:tcp, conn.socket, "X-Trailer-2: value2\r\n"})
+
+      assert [{:headers, ^ref, [{"x-trailer-2", "value2"}]}] = responses
+
+      # End the trailer section
+      assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, "\r\n"})
+      assert [{:done, ^ref}] = responses
+    end
+  end
+
   @mint_user_agent "mint/#{Mix.Project.config()[:version]}"
   defp mint_user_agent, do: @mint_user_agent
+
+  defp assert_closed_and_released(conn) do
+    refute HTTP1.open?(conn)
+    assert Port.info(conn.socket) == nil
+  end
 end

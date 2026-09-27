@@ -80,9 +80,12 @@ defmodule Mint.IntegrationTest do
                  transport_opts: [log_alert: false, reuse_sessions: false]
                )
 
-      # OTP 21.3 changes the format of SSL errors. Let's support both ways for now.
+      # OTP 21.3 changes the format of SSL errors. OTP 29 reports a hostname
+      # mismatch as a "bad certificate" alert instead of "handshake failure".
+      # Support all the variants.
       assert reason == {:tls_alert, ~c"handshake failure"} or
-               match?({:tls_alert, {:handshake_failure, _}}, reason)
+               match?({:tls_alert, {:handshake_failure, _}}, reason) or
+               match?({:tls_alert, {:bad_certificate, _}}, reason)
 
       assert {:ok, _conn} =
                HTTP.connect(

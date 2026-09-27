@@ -20,14 +20,15 @@ defmodule Mint.HTTP2.TestHelpers do
         maybe_done(conn, rest_responses, responses)
 
       {^tag, _socket, _data} = message ->
-        assert {:ok, %Mint.HTTP2{} = conn, new_responses} = Mint.HTTP2.stream(conn, message)
+        assert {:ok, conn, new_responses} = Mint.HTTP2.stream(conn, message)
         maybe_done(conn, new_responses, responses)
 
       {^closed_tag, _socket} = message ->
-        assert {:error, %Mint.HTTP2{}, :closed} = Mint.HTTP2.stream(conn, message)
+        assert {:error, _conn, %Mint.TransportError{reason: :closed}, _responses} =
+                 Mint.HTTP2.stream(conn, message)
 
       {^error_tag, _reason} = message ->
-        assert {:error, %Mint.HTTP2{}, _reason} = Mint.HTTP2.stream(conn, message)
+        assert {:error, _conn, _reason, _responses} = Mint.HTTP2.stream(conn, message)
 
       other ->
         flunk("Received unexpected message: #{inspect(other)}")

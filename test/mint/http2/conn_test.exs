@@ -133,6 +133,124 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "set_window_size/3" do
+    @describetag connect_options: [connection_window_size: 65_535]
+
+    test "bumps the connection-level receive window by sending WINDOW_UPDATE on stream 0",
+         %{conn: conn} do
+      assert HTTP2.get_window_size(conn, :connection) == 65_535
+      assert conn.receive_window_size == 65_535
+      assert conn.receive_window_remaining == 65_535
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+
+      assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window_remaining == 1_000_000
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 934_465)
+      ]
+    end
+
+    test "bumps a per-stream receive window by sending WINDOW_UPDATE on that stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+      assert conn.streams[stream_id].receive_window_remaining == current
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, current + 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == current + 10_000
+      assert conn.streams[stream_id].receive_window_remaining == current + 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 10_000)
+      ]
+    end
+
+    test "uses acknowledged client initial_window_size when bumping an open stream",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, conn} = HTTP2.put_settings(conn, initial_window_size: 1_000)
+      assert_recv_frames [settings(params: [initial_window_size: 1_000])]
+
+      assert {:ok, conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert conn.streams[stream_id].receive_window_size == 1_000
+
+      assert {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 10_000)
+
+      assert conn.streams[stream_id].receive_window_size == 10_000
+
+      assert_recv_frames [
+        window_update(stream_id: ^stream_id, window_size_increment: 9_000)
+      ]
+    end
+
+    test "is a no-op when the new size equals the current size", %{conn: conn} do
+      assert {:ok, ^conn} = HTTP2.set_window_size(conn, :connection, 65_535)
+
+      # Nothing should have gone out on the wire.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink the connection window", %{conn: conn} do
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 1_000_000)
+      assert_recv_frames [window_update(stream_id: 0)]
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, :connection, 500_000)
+
+      assert_http2_error error, {:window_size_too_small, 1_000_000, 500_000}
+
+      # No WINDOW_UPDATE was sent for the invalid call.
+      assert_recv_frames []
+    end
+
+    test "returns an error when attempting to shrink a stream window", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      current = conn.streams[stream_id].receive_window_size
+      after_grow = current + 10_000
+      shrink_target = current + 5_000
+
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, after_grow)
+      assert_recv_frames [window_update(stream_id: ^stream_id)]
+
+      assert {:error, ^conn, error} =
+               HTTP2.set_window_size(conn, {:request, ref}, shrink_target)
+
+      assert_http2_error error, {:window_size_too_small, ^after_grow, ^shrink_target}
+    end
+
+    test "returns an error for an unknown request ref", %{conn: conn} do
+      fake_ref = make_ref()
+
+      assert {:error, ^conn, error} = HTTP2.set_window_size(conn, {:request, fake_ref}, 1_000_000)
+
+      assert_http2_error error, {:unknown_request_to_stream, ^fake_ref}
+    end
+
+    test "raises on out-of-range new_size", %{conn: conn} do
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 0)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, 3_000_000_000)
+      end
+
+      assert_raise ArgumentError, ~r/1\.\.2147483647/, fn ->
+        HTTP2.set_window_size(conn, :connection, :nope)
+      end
+    end
+  end
+
   describe "open?/1" do
     test "returns true if the state is :open or :handshaking", %{conn: conn} do
       assert HTTP2.open?(%{conn | state: :open})
@@ -425,6 +543,27 @@ defmodule Mint.HTTP2Test do
 
       refute HTTP2.open?(conn, :write)
       assert HTTP2.open?(conn, :read)
+    end
+
+    test "responses before a GOAWAY error are returned in order", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{}, error, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: server_encode_headers([{":status", "200"}]),
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [])),
+                 goaway(last_stream_id: stream_id, error_code: :protocol_error, debug_data: "")
+               ])
+
+      assert_http2_error error, {:server_closed_connection, :protocol_error, ""}
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "hello"}] = responses
     end
 
     test "with GOAWAY with :no_error and responses after the GOAWAY frame", %{conn: conn} do
@@ -845,6 +984,95 @@ defmodule Mint.HTTP2Test do
       end)
     end
 
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a flood of CONTINUATION frames past max_header_list_size is a connection error",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Each CONTINUATION is individually under the limit, but together they
+      # accumulate past the advertised SETTINGS_MAX_HEADER_LIST_SIZE. The client
+      # must refuse to buffer the header block without bound rather than growing
+      # `headers_being_processed` until it runs out of memory.
+      chunk = :binary.copy(<<0>>, 400)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: "", flags: set_flags(:headers, [])),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: chunk,
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "SETTINGS_MAX_HEADER_LIST_SIZE"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    # Regression for GitHub Security Advisory GHSA-8pf6-g464-h6h9.
+    test "empty CONTINUATION frames do not grow the header block accumulator", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      empty_continuations =
+        List.duplicate(
+          continuation(stream_id: stream_id, hbf: "", flags: set_flags(:continuation, [])),
+          10_000
+        )
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: "", flags: set_flags(:headers, []))
+                 | empty_continuations
+               ])
+
+      assert {^stream_id, "", _callback, 0} = conn.headers_being_processed
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a single oversized HEADERS fragment past max_header_list_size is a connection error",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      oversized_hbf = :binary.copy(<<0>>, 2_000)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: oversized_hbf, flags: set_flags(:headers, []))
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "SETTINGS_MAX_HEADER_LIST_SIZE"
+
+      assert_recv_frames [goaway(error_code: :protocol_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "client advertises a default SETTINGS_MAX_HEADER_LIST_SIZE", %{conn: conn} do
+      assert HTTP2.get_client_setting(conn, :max_header_list_size) == 256 * 1024
+    end
+
     test ":authority pseudo-header includes port", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
@@ -922,7 +1150,7 @@ defmodule Mint.HTTP2Test do
           {":status", "200"},
           {"accept", "text/plain"},
           {"cookie", "a=b"},
-          {"Cookie", "c=d; e=f"},
+          {"cookie", "c=d; e=f"},
           {"content-type", "application/json"},
           {"cookie", "g=h"},
           {"x-header", "value"}
@@ -944,18 +1172,18 @@ defmodule Mint.HTTP2Test do
       assert cookie == "a=b; c=d; e=f; g=h"
     end
 
-    test "a CONNECT request omits :scheme and :path pseudo-headers", %{conn: conn} do
-      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", [], nil)
+    test "a CONNECT request uses path as :authority and omits :scheme and :path", %{conn: conn} do
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
 
-      assert_recv_frames [headers(hbf: hbf)]
+      assert_recv_frames [headers(hbf: hbf) = frame]
 
-      refute hbf
-             |> server_decode_headers()
-             |> List.keymember?(":scheme", 0)
+      assert [
+               {":method", "CONNECT"},
+               {":authority", "example.com:443"},
+               {"user-agent", _}
+             ] = server_decode_headers(hbf)
 
-      refute hbf
-             |> server_decode_headers()
-             |> List.keymember?(":path", 0)
+      refute flag_set?(headers(frame, :flags), :headers, :end_stream)
 
       assert HTTP2.open?(conn)
     end
@@ -969,13 +1197,15 @@ defmodule Mint.HTTP2Test do
         {":protocol", "websocket"}
       ]
 
-      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/", headers, :stream)
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "CONNECT", "/ws", headers, :stream)
 
       assert_recv_frames [headers(hbf: hbf)]
 
+      connection_authority = conn.authority
+
       assert [
                {":method", "CONNECT"},
-               {":authority", _},
+               {":authority", ^connection_authority},
                {":scheme", _},
                {":path", "/ws"},
                {":protocol", "websocket"},
@@ -983,6 +1213,399 @@ defmodule Mint.HTTP2Test do
              ] = server_decode_headers(hbf)
 
       assert HTTP2.open?(conn)
+    end
+  end
+
+  describe "response header validation" do
+    for status <- ["abc", "", "+200", "2000", "20", "200 ", " 200", "1ab"] do
+      test "an invalid :status of #{inspect(status)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}], [:end_headers]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_status_header, unquote(status)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for name <- ["Foo", "fo o", "", "foo:bar", "f\x7Fo", "f\xC3\xA4"] do
+      test "an invalid header name #{inspect(name)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {unquote(name), "bar"}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_header_name, unquote(name)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for value <- ["b\0ar", "b\rar", "b\nar", " bar", "bar ", "bar\t"] do
+      test "an invalid header value #{inspect(value)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {"foo", unquote(value)}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_header_value, "foo", unquote(value)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "header values may be empty or contain obs-text and inner whitespace", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [
+        {":status", "200"},
+        {"empty", ""},
+        {"foo", "b\xC3\xA4r \tbaz"},
+        {"a-b_c.d!", "v"}
+      ]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, tl(headers)},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    for {label, headers, debug_data} <- [
+          {"a pseudo-header after a regular header", [{"foo", "bar"}, {":status", "200"}],
+           "must appear before regular header fields"},
+          {"an undefined pseudo-header", [{":status", "200"}, {":path", "/"}],
+           "undefined pseudo-header \":path\""},
+          {"a duplicate :status pseudo-header", [{":status", "200"}, {":status", "404"}],
+           "appears more than once"}
+        ] do
+      test "#{label} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, unquote(headers), [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ unquote(debug_data)
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "a pseudo-header in trailers is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, [{":status", "500"}, {"x-trailer", "v"}],
+                  [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "not allowed in trailers"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "an invalid header name in trailers is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, [{"X-Trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:invalid_header_name, "X-Trailer"}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+  end
+
+  describe "response content-length" do
+    for {method, status} <- [{"HEAD", "200"}, {"GET", "204"}, {"GET", "304"}] do
+      test "DATA on a #{method} #{status} response is a stream error", %{conn: conn} do
+        assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, unquote(method), "/", [], nil)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}, {"content-length", "5"}],
+                    [:end_headers]},
+                   data(stream_id: stream_id, data: "x", flags: set_flags(:data, [:end_stream]))
+                 ])
+
+        assert [{:status, ^ref, _}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ "must not have content"
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "a body matching the content-length header completes the request", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hel", flags: set_flags(:data, [])),
+                 data(stream_id: stream_id, data: "lo", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, [{"content-length", "5"}]},
+               {:data, ref, "hel"},
+               {:data, ref, "lo"},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "a body shorter than the content-length header is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "10"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:error, ^ref, error}
+             ] =
+               responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 2 bytes but the content-length header value is 10"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "a body longer than the content-length header is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "1"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, []))
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "exceeds the content-length header value of 1"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "END_STREAM on the headers with a non-zero content-length is a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                  [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 0 bytes but the content-length header value is 5"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "trailers ending a body shorter than the content-length header are a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "3"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [])),
+                 {:headers, stream_id, [{"x-trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:headers, ^ref, [{"x-trailer", "v"}]},
+               {:error, ^ref, error}
+             ] = responses
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "body is 2 bytes but the content-length header value is 3"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "trailers ending a body matching the content-length header complete the request",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"content-length", "2"}],
+                  [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [])),
+                 {:headers, stream_id, [{"x-trailer", "v"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [
+               {:status, ^ref, 200},
+               {:headers, ^ref, _},
+               {:data, ^ref, "hi"},
+               {:headers, ^ref, _},
+               {:done, ^ref}
+             ] =
+               responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    for {method, status} <- [{"HEAD", "200"}, {"GET", "204"}, {"GET", "304"}, {"CONNECT", "200"}] do
+      test "a #{status} response to #{method} ignores the content-length header", %{conn: conn} do
+        assert {:ok, conn, ref} = HTTP2.request(conn, unquote(method), "/", [], nil)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", unquote(status)}, {"content-length", "5"}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:status, ^ref, _}, {:headers, ^ref, _}, {:done, ^ref}] = responses
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "identical content-length headers are accepted", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [{":status", "200"}, {"content-length", "2"}, {"content-length", "2"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, headers, [:end_headers]},
+                 data(stream_id: stream_id, data: "hi", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "hi"}, {:done, ^ref}] =
+               responses
+
+      assert HTTP2.open?(conn)
+    end
+
+    test "different content-length headers are a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [{":status", "200"}, {"content-length", "1"}, {"content-length", "2"}]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, :disagreeing_content_length_headers
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    for value <- ["abc", "-1", "", "1a", "+1"] do
+      test "a content-length header of #{inspect(value)} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {"content-length", unquote(value)}],
+                    [:end_headers, :end_stream]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:invalid_content_length_header, unquote(value)}
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
     end
   end
 
@@ -1104,8 +1727,7 @@ defmodule Mint.HTTP2Test do
 
       assert_http2_error error, {:protocol_error, debug_data}
 
-      assert debug_data =~
-               "informational response (1xx) must appear before final response, got a 101 status"
+      assert debug_data =~ "pseudo-header \":status\" is not allowed in trailers"
 
       assert HTTP2.open?(conn)
     end
@@ -1446,7 +2068,7 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [client_settings: [max_concurrent_streams: 1]]
-    test "if the server reaches the max number of client streams, the client sends an error",
+    test "promised streams beyond max_concurrent_streams are refused at promise time",
          %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -1476,36 +2098,67 @@ defmodule Mint.HTTP2Test do
                  )
                ])
 
+      # Only the first promise is accepted: it fills the single available slot.
+      # The second is refused at decode time, before it can be inserted into the
+      # streams map, so it never surfaces as a :push_promise response.
       assert [
-               {:push_promise, ^ref, promised_ref1, _},
-               {:push_promise, ^ref, _promised_ref2, _},
+               {:push_promise, ^ref, _promised_ref1, _},
                {:status, ^ref, 200},
                {:headers, ^ref, []},
                {:done, ^ref}
              ] = responses
 
-      # Here we send headers for the two promised streams. Note that neither of the
-      # header frames have the END_STREAM flag set otherwise we close the streams and
-      # they don't count towards the open stream count.
-      assert {:ok, %HTTP2{} = conn, responses} =
-               stream_frames(conn, [
-                 headers(
-                   stream_id: 4,
-                   hbf: normal_headers_hbf,
-                   flags: set_flags(:headers, [:end_headers])
-                 ),
-                 headers(
-                   stream_id: 6,
-                   hbf: normal_headers_hbf,
-                   flags: set_flags(:headers, [:end_headers])
-                 )
-               ])
-
-      assert [{:status, ^promised_ref1, 200}, {:headers, ^promised_ref1, []}] = responses
-
       assert_recv_frames [
         rst_stream(stream_id: 6, error_code: :refused_stream)
       ]
+
+      refute Map.has_key?(conn.streams, 6)
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_concurrent_streams: 5]]
+    test "a flood of PUSH_PROMISE frames cannot grow the streams map past max_concurrent_streams",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      promised_headers_hbf = server_encode_headers([{":method", "GET"}])
+
+      # The server promises many more streams than the client's limit but never
+      # follows up with the response HEADERS for any of them. Each promise must
+      # still be HPACK-decoded to keep the decode table in sync, but only the
+      # first five may be retained as reserved streams.
+      promised_ids = Enum.map(1..100, &(&1 * 2 + 2))
+
+      promise_frames =
+        Enum.map(promised_ids, fn promised_stream_id ->
+          push_promise(
+            stream_id: stream_id,
+            hbf: promised_headers_hbf,
+            promised_stream_id: promised_stream_id,
+            flags: set_flags(:push_promise, [:end_headers])
+          )
+        end)
+
+      assert {:ok, %HTTP2{} = conn, responses} = stream_frames(conn, promise_frames)
+
+      # Only five promises surface as responses; the rest are refused.
+      assert length(responses) == 5
+
+      reserved_ids =
+        for {id, %{state: :reserved_remote}} <- conn.streams, do: id
+
+      assert length(reserved_ids) == 5
+      assert reserved_ids == Enum.take(promised_ids, 5)
+
+      # Every refused promise gets a RST_STREAM with REFUSED_STREAM.
+      refused_ids = Enum.drop(promised_ids, 5)
+      rst_frames = recv_next_frames(length(refused_ids))
+
+      for {frame, expected_id} <- Enum.zip(rst_frames, refused_ids) do
+        assert rst_stream(stream_id: ^expected_id, error_code: :refused_stream) = frame
+      end
 
       assert HTTP2.open?(conn)
     end
@@ -1661,13 +2314,12 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
-    test "server sends invalid WINDOW_UPDATE on a stream that is in the half-closed (remote) state (RFC9113§5.1)",
-         %{conn: conn} do
+    test "a WINDOW_UPDATE on a stream the server has ended is ignored", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      assert {:error, %HTTP2{} = conn, reason, responses} =
+      assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
                  headers(
                    stream_id: stream_id,
@@ -1678,16 +2330,30 @@ defmodule Mint.HTTP2Test do
                  window_update(stream_id: stream_id, window_size_increment: 1000)
                ])
 
-      assert Enum.reverse(responses) == [
+      assert responses == [
                {:status, ref, 200},
                {:headers, ref, []},
                {:data, ref, ""},
                {:done, ref}
              ]
 
-      assert_http2_error reason, {:stream_not_found, ^stream_id}
+      assert HTTP2.open?(conn)
+    end
 
-      # Conn stays open.
+    test "a WINDOW_UPDATE on a stream the client cancelled is ignored", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      {:ok, conn} = HTTP2.cancel_request(conn, ref)
+
+      assert_recv_frames [
+        headers(stream_id: stream_id),
+        rst_stream(stream_id: stream_id, error_code: :cancel)
+      ]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 window_update(stream_id: stream_id, window_size_increment: 1000)
+               ])
+
       assert HTTP2.open?(conn)
     end
 
@@ -1772,9 +2438,415 @@ defmodule Mint.HTTP2Test do
         HTTP2.get_window_size(conn, {:request, make_ref()})
       end
     end
+
+    test "request_body_window/2 returns the minimum of connection and request window sizes",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      send_window = HTTP2.request_body_window(conn, ref)
+      conn_window = HTTP2.get_window_size(conn, :connection)
+      request_window = HTTP2.get_window_size(conn, {:request, ref})
+
+      assert send_window == min(conn_window, request_window)
+    end
+
+    test "request_body_window/2 decreases after streaming body data", %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      initial_send_window = HTTP2.request_body_window(conn, ref)
+      assert initial_send_window > 0
+
+      body_chunk = "hello"
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, body_chunk)
+
+      assert HTTP2.request_body_window(conn, ref) == initial_send_window - byte_size(body_chunk)
+    end
+
+    test "request_body_window/2 raises if the request is not found", %{conn: conn} do
+      assert_raise ArgumentError, ~r/request with request reference .+ was not found/, fn ->
+        HTTP2.request_body_window(conn, make_ref())
+      end
+    end
+
+    @tag server_settings: [initial_window_size: 5]
+    test "streaming a body larger than the window using request_body_window/2 in a loop",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn, :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      body = "0123456789ABCDE"
+
+      # First chunk: window is 5, so we send 5 bytes.
+      assert HTTP2.request_body_window(conn, ref) == 5
+      <<chunk1::binary-size(5), rest1::binary>> = body
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, chunk1)
+
+      assert HTTP2.request_body_window(conn, ref) == 0
+
+      assert_recv_frames [data(stream_id: ^stream_id, data: ^chunk1, flags: flags1)]
+      assert flags1 == set_flags(:data, [])
+
+      # Server replenishes the stream window so we can send more.
+      {:ok, conn, []} =
+        stream_frames(conn, [window_update(stream_id: stream_id, window_size_increment: 5)])
+
+      assert HTTP2.request_body_window(conn, ref) == 5
+      <<chunk2::binary-size(5), rest2::binary>> = rest1
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, chunk2)
+
+      assert_recv_frames [data(stream_id: ^stream_id, data: ^chunk2)]
+
+      # Final replenishment for the remaining bytes plus :eof.
+      {:ok, conn, []} =
+        stream_frames(conn, [
+          window_update(stream_id: stream_id, window_size_increment: byte_size(rest2))
+        ])
+
+      assert HTTP2.request_body_window(conn, ref) == byte_size(rest2)
+      {:ok, conn} = HTTP2.stream_request_body(conn, ref, rest2)
+      {:ok, _conn} = HTTP2.stream_request_body(conn, ref, :eof)
+
+      assert_recv_frames [
+        data(stream_id: ^stream_id, data: ^rest2),
+        data(stream_id: ^stream_id, data: "", flags: end_flags)
+      ]
+
+      assert end_flags == set_flags(:data, [:end_stream])
+    end
+  end
+
+  describe "default receive windows" do
+    test "advertises the configured connection window with a WINDOW_UPDATE in the preface",
+         %{conn: conn} do
+      # The default :connection_window_size is 16 MB; the preface carries
+      # a WINDOW_UPDATE for `16 MB - 65_535` so the server sees the peak
+      # from the start.
+      assert conn.receive_window_size == 16 * 1024 * 1024
+      assert conn.receive_window_remaining == 16 * 1024 * 1024
+    end
+
+    test "advertises the configured stream window via SETTINGS", %{conn: conn} do
+      # The default :client_settings[:initial_window_size] is 4 MB.
+      assert conn.client_settings.initial_window_size == 4 * 1024 * 1024
+
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert conn.streams[stream_id].receive_window_size == 4 * 1024 * 1024
+      assert conn.streams[stream_id].receive_window_remaining == 4 * 1024 * 1024
+    end
+
+    @tag connect_options: [connection_window_size: 1_000_000]
+    test "supports a custom :connection_window_size", %{conn: conn} do
+      assert conn.receive_window_size == 1_000_000
+      assert conn.receive_window_remaining == 1_000_000
+    end
+
+    @tag :no_connection
+    test "streams opened before the SETTINGS ACK track the advertised window, not the default",
+         %{server_port: port, server_socket_task: server_socket_task} do
+      # Regression: when the user advertises a stream window smaller than
+      # the library default (4 MB), streams opened before the server's
+      # SETTINGS ACK must track the advertised value. Otherwise the
+      # client holds onto credit the server never granted, never crosses
+      # the refill threshold, never sends a stream-level WINDOW_UPDATE,
+      # and the connection stalls after the server exhausts its send
+      # window.
+      assert {:ok, conn} =
+               HTTP2.connect(:https, "localhost", port,
+                 transport_opts: [verify: :verify_none],
+                 client_settings: [initial_window_size: 65_535]
+               )
+
+      {:ok, _server_socket} = Task.await(server_socket_task)
+
+      # Open a request *before* the server has ACKed our SETTINGS — this
+      # is the pre-ACK window where the struct must already reflect what
+      # was advertised, not the library default.
+      assert {:ok, conn, ref} = HTTP2.request(conn, "GET", "/", [], nil)
+
+      stream_id = conn.ref_to_stream_id[ref]
+      assert conn.streams[stream_id].receive_window_size == 65_535
+      assert conn.streams[stream_id].receive_window_remaining == 65_535
+    end
+
+    @tag connect_options: [connection_window_size: 65_535]
+    test "omits the preface WINDOW_UPDATE when the configured window equals the spec default",
+         %{conn: conn} do
+      # At 65_535 there's nothing to advertise beyond SETTINGS — the
+      # preface should not carry an extra WINDOW_UPDATE.
+      assert conn.receive_window_size == 65_535
+      assert conn.receive_window_remaining == 65_535
+    end
+
+    test "rejects a :connection_window_size below the spec minimum" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 1024)
+      end
+    end
+
+    test "rejects a :connection_window_size above 2^31-1" do
+      assert_raise ArgumentError, ~r/:connection_window_size/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, connection_window_size: 2_147_483_648)
+      end
+    end
+
+    test "rejects a non-positive :receive_window_update_threshold" do
+      assert_raise ArgumentError, ~r/:receive_window_update_threshold/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, receive_window_update_threshold: 0)
+      end
+    end
+  end
+
+  describe "receive window batching" do
+    @describetag connect_options: [
+                   connection_window_size: 100_000,
+                   receive_window_update_threshold: 40_000,
+                   client_settings: [initial_window_size: 100_000]
+                 ]
+
+    test "does not send WINDOW_UPDATE until remaining window drops below threshold",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 50_000 bytes consumed leaves 50_000 remaining on both windows,
+      # above the 40_000 threshold, so no WINDOW_UPDATE should go out.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames []
+    end
+
+    test "sends one WINDOW_UPDATE topping both windows back to peak once the threshold is crossed",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 60_000 bytes consumed drops both windows to exactly the 40_000
+      # threshold; the 7th frame lands after the refill so there's
+      # still just one WINDOW_UPDATE per window.
+      chunk = String.duplicate("a", 10_000)
+
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 60_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 60_000)
+      ]
+    end
+
+    test "set_window_size/3 raises the target so subsequent refills top up to the new peak",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Raise the connection peak mid-flight. set_window_size sends its own
+      # WINDOW_UPDATE for the bump; drain that before proceeding.
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 500_000)
+      assert_recv_frames [window_update(stream_id: 0, window_size_increment: 400_000)]
+
+      # Also raise the stream peak so the stream doesn't bottleneck the
+      # connection-level test.
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 500_000)
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 400_000)]
+
+      # Consume enough to drop both windows to the 40_000 threshold;
+      # the refill should top up to the raised 500_000 peak, not the
+      # original 100_000 configured at connect.
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..46, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 460_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 460_000)
+      ]
+    end
   end
 
   describe "settings" do
+    test "the header table size setting is applied when the server acknowledges it",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 8192)
+      assert_recv_frames [settings(params: [header_table_size: 8192])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert HTTP2.get_client_setting(conn, :header_table_size) == 8192
+
+      # The server can now signal a dynamic table size of 8192 at the start of a block.
+      server = Process.get(@server_pdict_key)
+      Process.put(@server_pdict_key, update_in(server.encode_table, &HPAX.resize(&1, 8192)))
+
+      assert {:ok, %HTTP2{}, [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers, :end_stream]}
+               ])
+    end
+
+    test "a raised header table size leaves the table size to the server", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # The server picks a 64 byte table and stores ":status: 404" in it, which takes 42 bytes.
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x3F, 0x21, 0x48, 3, "404">>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 404}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 8192)
+      assert_recv_frames [settings(params: [header_table_size: 8192])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      # The server didn't ask for more room, so storing ":status: 500" evicts ":status: 404".
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x48, 3, "500">>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 500}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0xBF>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert_http2_error error, {:compression_error, debug_data}
+      assert debug_data =~ "unable to decode headers: {:index_not_found, 63}"
+
+      assert_recv_frames [goaway(error_code: :compression_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "a lowered header table size has to be signalled by the server", %{conn: conn} do
+      conn = fill_server_header_table(conn)
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 0)
+      assert_recv_frames [settings(params: [header_table_size: 0])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x88>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert_http2_error error, {:compression_error, debug_data}
+      assert debug_data =~ "unable to decode headers: :missing_size_update"
+
+      assert_recv_frames [goaway(error_code: :compression_error)]
+
+      refute HTTP2.open?(conn)
+    end
+
+    test "a response that signals the lowered header table size is accepted", %{conn: conn} do
+      conn = fill_server_header_table(conn)
+
+      {:ok, conn} = HTTP2.put_settings(conn, header_table_size: 0)
+      assert_recv_frames [settings(params: [header_table_size: 0])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x20, 0x88>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [
+           receive_window_update_threshold: 8,
+           client_settings: [initial_window_size: 16]
+         ]
+    test "shrinking the initial window size keeps the remaining credit in sync",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "123456")
+               ])
+
+      assert conn.streams[stream_id].receive_window_remaining == 10
+
+      {:ok, conn} = HTTP2.put_settings(conn, initial_window_size: 8)
+      assert_recv_frames [settings(params: [initial_window_size: 8])]
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [settings(flags: set_flags(:settings, [:ack]), params: [])])
+
+      assert conn.streams[stream_id].receive_window_size == 8
+      assert conn.streams[stream_id].receive_window_remaining == 2
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "12"}]} =
+               stream_frames(conn, [data(stream_id: stream_id, data: "12")])
+
+      assert conn.streams[stream_id].receive_window_remaining == 8
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 8)]
+    end
+
     test "put_settings/2 can be used to send settings to server", %{conn: conn} do
       {:ok, conn} =
         HTTP2.put_settings(conn, max_concurrent_streams: 123, initial_window_size: 1_000)
@@ -1935,6 +3007,172 @@ defmodule Mint.HTTP2Test do
 
     test "get_client_setting/2", %{conn: conn} do
       assert HTTP2.get_client_setting(conn, :max_concurrent_streams) == 100
+    end
+  end
+
+  describe "CONNECT tunnels" do
+    test "tunnels bytes in both directions", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:80", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "hello")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "hello") = data_frame]
+      refute flag_set?(data(data_frame, :flags), :data, :end_stream)
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "world"}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "world", flags: set_flags(:data, []))
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "again")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "again")]
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "content-length: 0 on the response does not end the tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}, {"content-length", "0"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "tunneled", flags: set_flags(:data, []))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, [{"content-length", "0"}]},
+               {:data, ref, "tunneled"}
+             ]
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "out")
+      assert_recv_frames [data(stream_id: ^stream_id, data: "out")]
+
+      assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "an END_STREAM from the server closes the whole tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "bye", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 200},
+               {:headers, ref, []},
+               {:data, ref, "bye"},
+               {:done, ref}
+             ]
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :no_error)]
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "x")
+      assert_http2_error error, :unknown_request_to_stream
+
+      assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.open?(conn)
+    end
+
+    test "an :eof from the client half-closes the tunnel and data can still be received",
+         %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 )
+               ])
+
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, "last")
+      assert {:ok, conn} = HTTP2.stream_request_body(conn, ref, :eof)
+
+      assert_recv_frames [
+        data(stream_id: ^stream_id, data: "last") = data1,
+        data(stream_id: ^stream_id, data: "") = data2
+      ]
+
+      refute flag_set?(data(data1, :flags), :data, :end_stream)
+      assert flag_set?(data(data2, :flags), :data, :end_stream)
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, "still coming"}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "still coming", flags: set_flags(:data, []))
+               ])
+
+      assert {:ok, %HTTP2{} = conn, [{:data, ^ref, ""}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert_recv_frames []
+
+      assert HTTP2.open_request_count(conn) == 0
+      assert HTTP2.open?(conn)
+    end
+
+    test "a CONNECT request with a nil body opens a receive-only tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], nil)
+
+      assert_recv_frames [headers(stream_id: stream_id) = headers_frame]
+      assert flag_set?(headers(headers_frame, :flags), :headers, :end_stream)
+
+      hbf = server_encode_headers([{":status", "200"}])
+
+      assert {:ok, %HTTP2{} = conn,
+              [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, "in"}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "in", flags: set_flags(:data, []))
+               ])
+
+      assert {:error, %HTTP2{} = conn, error} = HTTP2.stream_request_body(conn, ref, "x")
+      assert_http2_error error, :request_is_not_streaming
+
+      assert HTTP2.open?(conn)
     end
   end
 
@@ -2353,6 +3591,26 @@ defmodule Mint.HTTP2Test do
       assert log =~
                "Received frame: PING[stream_id: 0, flags: 0, opaque_data: <<1, 2, 3, 4, 5, 6, 7, 8>>]"
     end
+  end
+
+  defp fill_server_header_table(conn) do
+    {conn, ref} = open_request(conn)
+
+    assert_recv_frames [headers(stream_id: stream_id)]
+
+    # ":status: 404" stored with incremental indexing, 42 bytes in the server's table.
+    assert {:ok, %HTTP2{} = conn, responses} =
+             stream_frames(conn, [
+               headers(
+                 stream_id: stream_id,
+                 hbf: <<0x48, 3, "404">>,
+                 flags: set_flags(:headers, [:end_headers, :end_stream])
+               )
+             ])
+
+    assert [{:status, ^ref, 404}, {:headers, ^ref, []}, {:done, ^ref}] = responses
+
+    conn
   end
 
   defp start_server_async(_context) do

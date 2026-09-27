@@ -384,14 +384,6 @@ defmodule Mint.Core.Transport.SSLTest do
     end
   end
 
-  describe "upgrade/4" do
-    test "raises an error if the scheme is :https" do
-      assert_raise RuntimeError, "nested SSL sessions are not supported", fn ->
-        SSL.upgrade(_fake_socket = nil, :https, ~c"localhost", _port = 0, _timeout = 5000)
-      end
-    end
-  end
-
   defp cn_cert(_context) do
     [cert: load_cert(@cn_cert)]
   end

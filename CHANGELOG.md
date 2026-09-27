@@ -1,5 +1,83 @@
 # Changelog
 
+## v1.10.1
+
+**Security fixes**:
+
+  * Validate chunk extensions in HTTP/1 chunked responses in `Mint.HTTP1`. Previously, any bytes between the chunk size and the CRLF were accepted, letting a malicious server frame a chunked response differently from a strict intermediary on a shared connection. This is a fix for **CVE-2026-82672** (GitHub advisory [GHSA-rj5m-69wp-cxq9](https://github.com/elixir-mint/mint/security/advisories/GHSA-rj5m-69wp-cxq9)).
+
+Bug fixes:
+
+  * Close TCP sockets on errors in HTTP/1.
+  * Keep HTTP/1.0 `CONNECT` tunnel sockets open.
+
+## v1.10.0
+
+This is a minor version bump with *no breaking changes*. Please do upgrade from 1.9.x versions as it contains fixes for two recently-published CVEs.
+
+**Security fixes**:
+
+  * Set bounds for a HTTP/1 server's returned *status line* and *chunk-extension line*. Previous, `Mint.HTTP1` would parse these without any size cap, allowing a malicious actor to stream bytes indefinitely, exhausting the client's host memory. This is a fix for **CVE-2026-82728** (GitHub advisory [GHSA-g83f-2j6r-q6m4](https://github.com/elixir-mint/mint/security/advisories/GHSA-g83f-2j6r-q6m4)).
+  * Set a bound for chunked responses chunk-size field in `Mint.HTTP1`, which prevents an attack where the malicious actor could send a chunk size made of a huge run of hex digits and burn CPU on the client host. This is a fix for **CVE-2026-82729** (GitHub advisory [GHSA-7p8w-j234-7qc8](https://github.com/elixir-mint/mint/security/advisories/GHSA-7p8w-j234-7qc8)).
+
+New features:
+
+  * Support processing HTTP/1.1 headers as they arrive.
+  * Add support for HTTPS proxies for HTTPS connections.
+
+Bug fixes:
+
+  * Send origin `Host` header for plain-HTTP proxied requests.
+  * Fix `CONNECT` response framing and IPv6 authority in tunnel proxies.
+  * Fix a bug where we would "leak" target options into the proxy connection in forward-proxy mode.
+  * Return a tunnel timeout error when the `CONNECT` deadline elapses.
+  * Fix hostname/address handling in tunnel proxiesFix hostname/address handling in tunnel proxies.
+  * Use the request target as the `CONNECT` `:authority` in `Mint.HTTP2`.
+
+## v1.9.3
+
+  * Prevent signed integers when parsing HTTP/1 chunk sizes. This is a fix for **CVE-2026-59249** ([GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-x3x7-96vm-6h2w)).
+
+## v1.9.2
+
+  * Cap HTTP/1 total header size for responses. This is a fix for **CVE-2026-58229** (GitHub advisory [GHSA-qrfr-wh4c-3qhw](https://github.com/elixir-mint/mint/security/advisories/GHSA-qrfr-wh4c-3qhw)).
+  * Do not store empty `CONTINUATION` (HTTP/2) frames. This is a fix for **CVE-2026-59246** (GitHub advisory [GHSA-8pf6-g464-h6h9](https://github.com/elixir-mint/mint/security/advisories/GHSA-8pf6-g464-h6h9)).
+
+## v1.9.1
+
+### Security
+
+  * HTTP/1.1 chunked response bodies are now emitted as `{:data, ref, data}` tuples as soon as data from the chunked body is received. This prevents `CVE-2026-56810`: the previous behavior was to buffer body chunks according to their advertised length. An attacker could craft a chunked response with a very large chunk length, and Mint would keep accumulating incoming chunked bytes in memory until reaching that length—allowing the attacker to OOM the application using Mint. See also [the `GHSA-c59h-fq4p-r36r` GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-c59h-fq4p-r36r).
+
+## v1.9.0
+
+### Security
+
+  * Validate the HTTP/1.1 request method as an RFC 9110 token, rejecting CRLF and other control characters. Forwarding attacker-controlled input as the request method was exposed to CRLF injection (request header injection and request smuggling). Fixes [GHSA-2pg6-44cx-c49v](https://github.com/elixir-mint/mint/security/advisories/GHSA-2pg6-44cx-c49v).
+  * Reject HTTP/1.1 `content-length` header values that are not strictly `1*DIGIT`, so signed values (such as `+0`) and embedded whitespace no longer parse as valid lengths. This parser disagreement with a strict fronting proxy was a response-smuggling primitive. Fixes [GHSA-mjqx-c6f6-7rc2](https://github.com/elixir-mint/mint/security/advisories/GHSA-mjqx-c6f6-7rc2).
+  * Bound the HTTP/2 accumulated header block by the locally advertised `SETTINGS_MAX_HEADER_LIST_SIZE` (now defaulting to 256 KB instead of `:infinity`), so a malicious server can no longer exhaust client memory with an unbounded chain of `CONTINUATION` frames. Fixes [GHSA-2p26-p43x-fhp8](https://github.com/elixir-mint/mint/security/advisories/GHSA-2p26-p43x-fhp8).
+  * Count reserved HTTP/2 streams against `max_concurrent_streams` at `PUSH_PROMISE` time and refuse promises past the limit with `RST_STREAM`, so a malicious server can no longer exhaust client memory by flooding `PUSH_PROMISE` frames. Fixes [GHSA-g586-ccqf-7x4r](https://github.com/elixir-mint/mint/security/advisories/GHSA-g586-ccqf-7x4r).
+
+### Bug Fixes and Improvements
+
+  * `Mint.HTTP.stream/2` now returns `:unknown` (not `:unknown_message`) when given a message it does not recognize.
+
+## v1.8.0
+
+### New features
+
+  * Raise the default HTTP/2 receive windows to 16 MB (connection) and 4 MB (stream), and batch HTTP/2 receive-window refills. The larger windows lift the per-stream throughput cap (`window / RTT`), giving substantially higher throughput on higher-latency connections, in exchange for higher peak memory use per connection. The connection-level window is now configurable via the new `:connection_window_size` option to `Mint.HTTP.connect/4`, and refill batching is configurable via the new `:receive_window_update_threshold` option.
+  * Add `Mint.HTTP2.set_window_size/3` for advertising a larger receive window to the server after a connection has been established.
+  * Add `Mint.HTTP.request_body_window/2` for querying the available send-window when streaming a request body.
+  * Introduce the `:optional_responses` option for `Mint.HTTP1.connect/4`, with a `:status_reason` value that surfaces the HTTP/1.1 status reason-phrase as a new `{:status_reason, request_ref, reason_phrase}` response.
+  * Change `t:Mint.HTTP.t/0` from an opaque to an open type.
+  * Add `t:Mint.HTTPError.reason/0` and `t:Mint.TransportError.reason/0`.
+
+### Bug Fixes and Improvements
+
+  * Fix HTTP/1 handling of `1xx` informational responses.
+  * Forbid or replace empty targets in HTTP/1.1 requests.
+
 ## v1.7.1
 
 ### Bug Fixes and Improvements

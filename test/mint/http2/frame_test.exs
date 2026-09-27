@@ -104,6 +104,17 @@ defmodule Mint.HTTP2.FrameTest do
                           )
       end
     end
+
+    test "with priority and a truncated priority section" do
+      for length <- 0..4 do
+        data = :binary.copy(<<0>>, length)
+        payload = <<0>> <> data
+        flags = set_flags(:headers, [:padded, :priority])
+
+        assert Frame.decode_next(encode_raw(0x01, flags, 3, payload)) ==
+                 {:error, {:frame_size_error, :headers}}
+      end
+    end
   end
 
   describe "PRIORITY" do
@@ -207,6 +218,17 @@ defmodule Mint.HTTP2.FrameTest do
                           )
       end
     end
+
+    test "with a truncated promised stream ID" do
+      for length <- 0..3 do
+        data = :binary.copy(<<0>>, length)
+        payload = <<0>> <> data
+        flags = set_flags(:push_promise, [:padded])
+
+        assert Frame.decode_next(encode_raw(0x05, flags, 3, payload)) ==
+                 {:error, {:frame_size_error, :push_promise}}
+      end
+    end
   end
 
   describe "PING" do
@@ -234,6 +256,15 @@ defmodule Mint.HTTP2.FrameTest do
                             error_code: error_code,
                             debug_data: debug_data
                           )
+      end
+    end
+
+    test "with a truncated payload" do
+      for length <- 0..7 do
+        payload = :binary.copy(<<0>>, length)
+
+        assert Frame.decode_next(encode_raw(0x07, 0x00, 0, payload)) ==
+                 {:error, {:frame_size_error, :goaway}}
       end
     end
   end

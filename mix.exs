@@ -1,21 +1,21 @@
 defmodule Mint.MixProject do
   use Mix.Project
 
-  @version "1.7.1"
+  @version "1.10.1"
   @repo_url "https://github.com/elixir-mint/mint"
 
   def project do
     [
       app: :mint,
       version: @version,
-      elixir: "~> 1.12",
+      elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
 
-      # Xref
-      xref: [
-        exclude: [
+      # Suppress "undefined function" warnings for optional/runtime deps.
+      elixirc_options: [
+        no_warn_undefined: [
           {:ssl, :cipher_suites, 1},
           {:public_key, :cacerts_get, 0},
           CAStore
@@ -24,10 +24,9 @@ defmodule Mint.MixProject do
 
       # Dialyxir
       dialyzer: [
-        plt_add_apps: [:castore],
+        plt_add_apps: [:castore, :ex_unit],
         plt_local_path: "plts",
-        plt_core_path: "plts",
-        ignore_warnings: ".dialyzer_ignore"
+        plt_core_path: "plts"
       ],
 
       # Code coverage
@@ -77,7 +76,7 @@ defmodule Mint.MixProject do
   defp deps do
     [
       {:castore, "~> 0.1.0 or ~> 1.0", optional: true},
-      {:hpax, "~> 0.1.1 or ~> 0.2.0 or ~> 1.0"},
+      {:hpax, "~> 1.1"},
 
       # Dev/test dependencies
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
