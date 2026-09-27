@@ -3398,10 +3398,12 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [mode: :passive]
-    test "timeouts are bubbled up in recv/3", %{conn: conn} do
+    test "timeouts are bubbled up in recv/3 and keep the connection open", %{conn: conn} do
       assert {:error, conn, error, _responses = []} = HTTP2.recv(conn, 0, 0)
       assert_transport_error error, :timeout
-      refute HTTP2.open?(conn)
+      assert HTTP2.open?(conn)
+
+      assert {:ok, _conn, _ref} = HTTP2.request(conn, "GET", "/", [], nil)
     end
 
     @tag connect_options: [mode: :passive]
