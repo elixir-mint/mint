@@ -359,6 +359,36 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closed streams" do
+    for phase <- [:before_the_headers, :during_the_body] do
+      test "RST_STREAM with NO_ERROR #{phase} is an error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        conn =
+          if unquote(phase) == :during_the_body do
+            assert {:ok, %HTTP2{} = conn,
+                    [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "x"}]} =
+                     stream_frames(conn, [
+                       {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                        [:end_headers]},
+                       data(stream_id: stream_id, data: "x")
+                     ])
+
+            conn
+          else
+            conn
+          end
+
+        assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+                 stream_frames(conn, [rst_stream(stream_id: stream_id, error_code: :no_error)])
+
+        assert_http2_error error, {:server_closed_request, :no_error}
+        refute Map.has_key?(conn.streams, stream_id)
+        assert HTTP2.open?(conn)
+      end
+    end
+
     test "server closes a stream with RST_STREAM", %{conn: conn} do
       {conn, ref} = open_request(conn)
 

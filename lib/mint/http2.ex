@@ -2333,14 +2333,11 @@ defmodule Mint.HTTP2 do
         # If we receive RST_STREAM then the stream is definitely closed.
         # We won't send anything else on the stream so we can simply delete
         # it, so that if we get things like DATA on that stream we error out.
+        # Streams are removed as soon as the server ends them, so a RST_STREAM on a
+        # stream we still track means the response is incomplete, whatever the code.
         conn = delete_stream(conn, stream)
-
-        if error_code == :no_error do
-          {conn, [{:done, stream.ref} | responses]}
-        else
-          error = wrap_error({:server_closed_request, error_code})
-          {conn, [{:error, stream.ref, error} | responses]}
-        end
+        error = wrap_error({:server_closed_request, error_code})
+        {conn, [{:error, stream.ref, error} | responses]}
 
       :error ->
         {conn, responses}
