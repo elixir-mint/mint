@@ -191,6 +191,9 @@ defmodule Mint.HTTP2 do
 
     # Fields of the connection.
     buffer: "",
+    # Highest stream ID the server has promised through PUSH_PROMISE. Promised IDs must
+    # increase, and it is the last server-initiated stream reported in GOAWAY frames.
+    last_promised_stream_id: 0,
     # `send_window_size` is the client *send* window for the connection
     # — how much request-body data we're allowed to send to the server
     # before it refills the window with a WINDOW_UPDATE frame.
@@ -348,7 +351,9 @@ defmodule Mint.HTTP2 do
 
     * `:too_many_concurrent_requests` - when the maximum number of concurrent requests
       allowed by the server is reached. To find out what this limit is, use `get_setting/2`
-      with the `:max_concurrent_streams` setting name.
+      with the `:max_concurrent_streams` setting name. It's also returned for a promised
+      request whose pushed response is refused because it would exceed the client's
+      `:max_concurrent_streams` setting.
 
     * `{:max_header_list_size_exceeded, size, max_size}` - when the maximum size of
       the header list is reached. `size` is the actual value of the header list size,
@@ -390,8 +395,9 @@ defmodule Mint.HTTP2 do
       When this error is returned, it means that the server hasn't processed the request at all,
       so it's safe to retry the given request on a different or new connection.
 
-    * `{:server_closed_request, error_code}` - when the server closes the request.
-      `error_code` is the reason why the request was closed.
+    * `{:server_closed_request, error_code}` - when the server closes the request before
+      the response is complete. `error_code` is the reason why the request was closed,
+      which can be `:no_error` when the server ends a response early.
 
     * `{:server_closed_connection, reason, debug_data}` - when the server closes the connection
       gracefully or because of an error. In HTTP/2, this corresponds to a `GOAWAY` frame.
@@ -1409,6 +1415,13 @@ defmodule Mint.HTTP2 do
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, {:eof, trailers}) do
+    stream = fetch_stream!(conn, stream_id)
+
+    if stream.state != :open do
+      error = wrap_error(:request_is_not_streaming)
+      throw({:mint, conn, error})
+    end
+
     trailers = Headers.from_raw(trailers)
 
     if unallowed_trailer_header = Headers.find_unallowed_trailer(trailers) do
@@ -1417,7 +1430,10 @@ defmodule Mint.HTTP2 do
     end
 
     trailer_headers = Headers.to_raw(trailers, _case_sensitive = false)
-    encode_headers(conn, stream_id, trailer_headers, [:end_headers, :end_stream])
+    enabled_flags = [:end_headers, :end_stream]
+    {conn, payload} = encode_header_block(conn, stream_id, trailer_headers, enabled_flags)
+    conn = put_in(conn.streams[stream_id].state, :half_closed_local)
+    {conn, payload}
   end
 
   defp encode_stream_body_request_payload(conn, stream_id, iodata) do
@@ -1439,12 +1455,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp encode_headers(conn, stream_id, headers, enabled_flags) do
-    assert_headers_smaller_than_max_header_list_size(conn, headers)
-
-    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
-    {hbf, conn} = get_and_update_in(conn.encode_table, &HPAX.encode(headers, &1))
-
-    payload = headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)
+    {conn, payload} = encode_header_block(conn, stream_id, headers, enabled_flags)
 
     stream_state = if :end_stream in enabled_flags, do: :half_closed_local, else: :open
 
@@ -1452,6 +1463,15 @@ defmodule Mint.HTTP2 do
     conn = update_in(conn.open_client_stream_count, &(&1 + 1))
 
     {conn, payload}
+  end
+
+  defp encode_header_block(conn, stream_id, headers, enabled_flags) do
+    assert_headers_smaller_than_max_header_list_size(conn, headers)
+
+    headers = Enum.map(headers, fn {name, value} -> {:store_name, name, value} end)
+    {hbf, conn} = get_and_update_in(conn.encode_table, &HPAX.encode(headers, &1))
+
+    {conn, headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags)}
   end
 
   defp assert_headers_smaller_than_max_header_list_size(
@@ -1855,13 +1875,22 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
-  # RFC 9113 5.1: PRIORITY is the only frame the server can send on an idle stream.
-  # Client streams are opened in order, so odd stream IDs from next_stream_id on are
-  # idle.
+  # RFC 9113 5.1: PRIORITY frames are allowed on idle streams. Client streams are
+  # opened in order, so odd stream IDs from next_stream_id on are idle and the server
+  # can't send other frames on them. Server streams are only opened through
+  # PUSH_PROMISE (RFC 9113 8.4 and 5.1.1), so even stream IDs above the last promised
+  # one are idle too.
   defp assert_stream_id_is_allowed(_conn, :priority, _stream_id), do: :ok
 
   defp assert_stream_id_is_allowed(conn, _frame, stream_id) do
-    if Integer.is_odd(stream_id) and stream_id >= conn.next_stream_id do
+    idle? =
+      cond do
+        stream_id == 0 -> false
+        Integer.is_odd(stream_id) -> stream_id >= conn.next_stream_id
+        true -> stream_id > conn.last_promised_stream_id
+      end
+
+    if idle? do
       debug_data = "frame with stream ID #{inspect(stream_id)} has not been opened yet"
       send_connection_error!(conn, :protocol_error, debug_data)
     else
@@ -2095,53 +2124,42 @@ defmodule Mint.HTTP2 do
             {conn, responses}
 
           true ->
-            assert_stream_in_state(conn, stream, [:open, :half_closed_local])
-            status = String.to_integer(status)
-            headers = join_cookie_headers(headers)
-            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
-            {conn, new_responses}
+            case open_promised_stream(conn, stream) do
+              {:ok, conn} ->
+                status = String.to_integer(status)
+                headers = join_cookie_headers(headers)
+                new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+                {conn, new_responses}
+
+              {:refused, conn} ->
+                error = wrap_error(:too_many_concurrent_requests)
+                {conn, [{:error, ref, error} | responses]}
+            end
         end
 
       [{":status", status} | headers] when not received_first_headers? ->
         status = String.to_integer(status)
         headers = join_cookie_headers(headers)
 
-        case response_content_length(stream, status, headers) do
-          {:ok, content_length} ->
-            conn =
-              update_in(
-                conn.streams[stream.id],
-                &%{&1 | received_first_headers?: true, content_length: content_length}
-              )
+        with {:ok, content_length} <- response_content_length(stream, status, headers),
+             {:ok, conn} <- open_promised_stream(conn, stream) do
+          conn =
+            update_in(
+              conn.streams[stream.id],
+              &%{&1 | received_first_headers?: true, content_length: content_length}
+            )
 
-            new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
+          new_responses = [{:headers, ref, headers}, {:status, ref, status} | responses]
 
-            cond do
-              # :reserved_remote means that this was a promised stream. As soon as headers come,
-              # the stream goes in the :half_closed_local state (unless it's not allowed because
-              # of the client's max concurrent streams limit, or END_STREAM is set).
-              stream.state == :reserved_remote ->
-                cond do
-                  conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams ->
-                    conn = close_stream!(conn, stream.id, :refused_stream)
-                    {conn, responses}
-
-                  end_stream? ->
-                    end_remote_stream(conn, stream, new_responses)
-
-                  true ->
-                    conn = update_in(conn.open_server_stream_count, &(&1 + 1))
-                    conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
-                    conn = put_in(conn.streams[stream.id].state, :half_closed_local)
-                    {conn, new_responses}
-                end
-
-              end_stream? ->
-                end_remote_stream(conn, stream, new_responses)
-
-              true ->
-                {conn, new_responses}
-            end
+          if end_stream? do
+            end_remote_stream(conn, stream, new_responses)
+          else
+            {conn, new_responses}
+          end
+        else
+          {:refused, conn} ->
+            error = wrap_error(:too_many_concurrent_requests)
+            {conn, [{:error, ref, error} | responses]}
 
           {:error, reason} ->
             conn = close_stream!(conn, stream.id, :protocol_error)
@@ -2173,6 +2191,21 @@ defmodule Mint.HTTP2 do
         {conn, responses}
     end
   end
+
+  # RFC 9113 5.1: HEADERS frames move a stream reserved by a PUSH_PROMISE to the
+  # half-closed (local) state, where it counts against the client's concurrency
+  # limit. Streams that don't fit within the limit are refused.
+  defp open_promised_stream(conn, %{state: :reserved_remote} = stream) do
+    if conn.open_server_stream_count >= conn.client_settings.max_concurrent_streams do
+      {:refused, close_stream!(conn, stream.id, :refused_stream)}
+    else
+      conn = update_in(conn.open_server_stream_count, &(&1 + 1))
+      conn = update_in(conn.reserved_server_stream_count, &(&1 - 1))
+      {:ok, put_in(conn.streams[stream.id].state, :half_closed_local)}
+    end
+  end
+
+  defp open_promised_stream(conn, _stream), do: {:ok, conn}
 
   defp decode_hbf(conn, hbf) do
     case HPAX.decode(hbf, conn.decode_table) do
@@ -2524,10 +2557,18 @@ defmodule Mint.HTTP2 do
       hbf: hbf
     ) = frame
 
-    assert_valid_promised_stream_id(conn, promised_stream_id)
+    assert_valid_push_promise_stream_ids(conn, stream_id, promised_stream_id)
+    conn = put_in(conn.last_promised_stream_id, promised_stream_id)
 
-    stream = fetch_stream!(conn, stream_id)
-    assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+    # RFC 9113 6.6: the stream may already be closed because the client reset it
+    # before the server processed the RST_STREAM, so a missing stream is not an
+    # error. The header block still has to be decoded to keep the HPACK table in
+    # sync and the promised stream has to be reset.
+    stream = Map.get(conn.streams, stream_id)
+
+    if stream do
+      assert_stream_in_state(conn, stream, [:open, :half_closed_local])
+    end
 
     if flag_set?(flags, :push_promise, :end_headers) do
       decode_push_promise_headers_and_add_response(
@@ -2562,27 +2603,45 @@ defmodule Mint.HTTP2 do
     # with the HEADERS that would open them.
     server_stream_count = conn.open_server_stream_count + conn.reserved_server_stream_count
 
-    if server_stream_count >= conn.client_settings.max_concurrent_streams do
-      conn = refuse_promised_stream(conn, promised_stream_id)
-      {conn, responses}
-    else
-      promised_stream = %{
-        id: promised_stream_id,
-        ref: make_ref(),
-        state: :reserved_remote,
-        send_window_size: conn.server_settings.initial_window_size,
-        receive_window_size: conn.client_settings.initial_window_size,
-        receive_window_remaining: conn.client_settings.initial_window_size,
-        received_first_headers?: false,
-        method: promised_method(headers),
-        content_length: nil,
-        body_size: 0
-      }
+    cond do
+      is_nil(stream) ->
+        log(
+          conn,
+          :debug,
+          "Received PUSH_PROMISE frame on closed stream, resetting the promised stream"
+        )
 
-      conn = put_in(conn.streams[promised_stream.id], promised_stream)
-      conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
-      new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
-      {conn, [new_response | responses]}
+        conn = reset_promised_stream(conn, promised_stream_id, :cancel)
+        {conn, responses}
+
+      debug_data = promised_headers_error(headers) ->
+        log(conn, :debug, "Resetting promised stream #{promised_stream_id}: #{debug_data}")
+        conn = reset_promised_stream(conn, promised_stream_id, :protocol_error)
+        {conn, responses}
+
+      server_stream_count >= conn.client_settings.max_concurrent_streams ->
+        conn = reset_promised_stream(conn, promised_stream_id, :refused_stream)
+        {conn, responses}
+
+      true ->
+        promised_stream = %{
+          id: promised_stream_id,
+          ref: make_ref(),
+          state: :reserved_remote,
+          send_window_size: conn.server_settings.initial_window_size,
+          receive_window_size: conn.client_settings.initial_window_size,
+          receive_window_remaining: conn.client_settings.initial_window_size,
+          received_first_headers?: false,
+          method: promised_method(headers),
+          content_length: nil,
+          body_size: 0
+        }
+
+        conn = put_in(conn.streams[promised_stream.id], promised_stream)
+        conn = put_in(conn.ref_to_stream_id[promised_stream.ref], promised_stream.id)
+        conn = update_in(conn.reserved_server_stream_count, &(&1 + 1))
+        new_response = {:push_promise, stream.ref, promised_stream.ref, headers}
+        {conn, [new_response | responses]}
     end
   end
 
@@ -2593,30 +2652,116 @@ defmodule Mint.HTTP2 do
     end
   end
 
-  defp refuse_promised_stream(conn, promised_stream_id) do
+  defp reset_promised_stream(conn, promised_stream_id, error_code) do
     if open?(conn) do
-      rst_stream_frame = rst_stream(stream_id: promised_stream_id, error_code: :refused_stream)
+      rst_stream_frame = rst_stream(stream_id: promised_stream_id, error_code: error_code)
       send!(conn, Frame.encode(rst_stream_frame))
     else
       conn
     end
   end
 
-  defp assert_valid_promised_stream_id(conn, promised_stream_id) do
+  # RFC 9113 8.4: PUSH_PROMISE frames are only allowed on client-initiated streams.
+  # RFC 9113 5.1.1: server-initiated streams have even identifiers, 0 is reserved for
+  # the connection, and the identifier of a new stream must be greater than all the
+  # streams the server has already opened or reserved.
+  defp assert_valid_push_promise_stream_ids(conn, stream_id, promised_stream_id) do
     cond do
-      not is_integer(promised_stream_id) or Integer.is_odd(promised_stream_id) ->
+      Integer.is_even(stream_id) ->
+        debug_data = "PUSH_PROMISE frame on server-initiated stream #{stream_id}"
+        send_connection_error!(conn, :protocol_error, debug_data)
+
+      promised_stream_id == 0 or Integer.is_odd(promised_stream_id) ->
         debug_data = "invalid promised stream ID: #{inspect(promised_stream_id)}"
         send_connection_error!(conn, :protocol_error, debug_data)
 
-      Map.has_key?(conn.streams, promised_stream_id) ->
+      promised_stream_id <= conn.last_promised_stream_id ->
         debug_data =
-          "stream with ID #{inspect(promised_stream_id)} already exists and can't be " <>
-            "reserved by the server"
+          "promised stream ID #{promised_stream_id} is not greater than the last " <>
+            "promised stream ID #{conn.last_promised_stream_id}"
 
         send_connection_error!(conn, :protocol_error, debug_data)
 
       true ->
         :ok
+    end
+  end
+
+  @promised_pseudo_headers [":method", ":scheme", ":authority", ":path"]
+
+  # RFC 9113 8.4.1: a promised request must be cacheable and safe and must not have
+  # content, and RFC 9113 8.4 and 8.3.1 require the :method, :scheme, :authority and
+  # :path pseudo-headers. Field names and values follow the same rules as response
+  # headers, except that "te" is allowed with the "trailers" value (RFC 9113 8.2.2).
+  defp promised_headers_error(headers) do
+    case validate_promised_fields(headers, _pseudo = %{}, _regular? = false) do
+      {:error, debug_data} ->
+        debug_data
+
+      {:ok, pseudo} ->
+        cond do
+          not Map.has_key?(pseudo, ":method") ->
+            "missing :method pseudo-header in promised request"
+
+          pseudo[":scheme"] in [nil, ""] ->
+            "missing or empty :scheme pseudo-header in promised request"
+
+          pseudo[":authority"] in [nil, ""] ->
+            "missing or empty :authority pseudo-header in promised request"
+
+          not String.starts_with?(pseudo[":path"] || "", "/") ->
+            "missing or invalid :path pseudo-header in promised request"
+
+          pseudo[":method"] not in ["GET", "HEAD"] ->
+            "promised request method #{inspect(pseudo[":method"])} is not safe and cacheable"
+
+          true ->
+            case content_length(headers) do
+              {:ok, content_length} when content_length in [nil, 0] -> nil
+              {:ok, _content_length} -> "promised request must not have content"
+              {:error, _reason} -> "invalid content-length header in promised request"
+            end
+        end
+    end
+  end
+
+  defp validate_promised_fields([], pseudo, _regular?), do: {:ok, pseudo}
+
+  defp validate_promised_fields([{":" <> _ = name, value} | rest], pseudo, regular?) do
+    cond do
+      regular? ->
+        {:error, "pseudo-header #{inspect(name)} must appear before regular header fields"}
+
+      name not in @promised_pseudo_headers ->
+        {:error, "undefined pseudo-header #{inspect(name)} in promised request"}
+
+      Map.has_key?(pseudo, name) ->
+        {:error, "the #{name} pseudo-header appears more than once"}
+
+      not valid_field_value?(value) ->
+        {:error, "invalid value for pseudo-header #{inspect(name)}"}
+
+      true ->
+        validate_promised_fields(rest, Map.put(pseudo, name, value), regular?)
+    end
+  end
+
+  defp validate_promised_fields([{name, value} | rest], pseudo, _regular?) do
+    cond do
+      not valid_field_name?(name) ->
+        {:error, "invalid header name #{inspect(name)}"}
+
+      not valid_field_value?(value) ->
+        {:error, "invalid value for header #{inspect(name)}"}
+
+      name == "te" and String.downcase(value, :ascii) == "trailers" ->
+        validate_promised_fields(rest, pseudo, true)
+
+      connection_specific?(name) ->
+        {:error, elem(connection_specific_error(name), 1)}
+
+      true ->
+        validate_promised_fields(rest, pseudo, true)
     end
   end
 
@@ -2661,9 +2806,12 @@ defmodule Mint.HTTP2 do
 
     # We gather all the unprocessed requests and form {:error, _, _} tuples for each one.
     # At the same time, we delete all the unprocessed requests from the stream set.
+    # RFC 9113 6.8: the last stream ID only covers streams initiated by the client, so
+    # server-initiated (even) streams are never unprocessed.
     {unprocessed_request_responses, conn} =
       Enum.flat_map_reduce(conn.streams, conn, fn
-        {stream_id, _stream}, conn_acc when stream_id <= last_stream_id ->
+        {stream_id, _stream}, conn_acc
+        when Integer.is_even(stream_id) or stream_id <= last_stream_id ->
           {[], conn_acc}
 
         {_stream_id, stream}, conn_acc ->
@@ -2795,7 +2943,12 @@ defmodule Mint.HTTP2 do
 
   defp send_connection_error!(conn, error_code, debug_data) do
     frame =
-      goaway(stream_id: 0, last_stream_id: 2, error_code: error_code, debug_data: debug_data)
+      goaway(
+        stream_id: 0,
+        last_stream_id: conn.last_promised_stream_id,
+        error_code: error_code,
+        debug_data: debug_data
+      )
 
     # Try to send the GOAWAY frame and close connection.
     # If the frame fails to send, we still want to set the close
@@ -2909,9 +3062,10 @@ defmodule Mint.HTTP2 do
   end
 
   def format_error(:too_many_concurrent_requests) do
-    "the number of max concurrent HTTP/2 requests supported by the server has been reached. " <>
-      "Use Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name " <>
-      "to find out the maximum number of concurrent requests supported by the server."
+    "the maximum number of concurrent HTTP/2 streams has been reached. For requests, use " <>
+      "Mint.HTTP2.get_server_setting/2 with the :max_concurrent_streams setting name to find " <>
+      "out the limit supported by the server. For pushed responses, the limit is the " <>
+      ":max_concurrent_streams client setting."
   end
 
   def format_error({:max_header_list_size_exceeded, size, max_size}) do
