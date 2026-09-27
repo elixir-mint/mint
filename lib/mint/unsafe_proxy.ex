@@ -2,6 +2,7 @@ defmodule Mint.UnsafeProxy do
   @moduledoc false
 
   alias Mint.{Types, UnsafeProxy}
+  alias Mint.Core.Util
 
   @behaviour Mint.Core.Conn
 
@@ -174,7 +175,9 @@ defmodule Mint.UnsafeProxy do
   end
 
   defp request_line(%UnsafeProxy{scheme: scheme, hostname: hostname, port: port}, path) do
-    %URI{scheme: Atom.to_string(scheme), host: hostname, port: port, path: path}
+    host = Util.uri_host_without_brackets(hostname)
+
+    %URI{scheme: Atom.to_string(scheme), host: host, port: port, path: path}
     |> URI.to_string()
   end
 
@@ -226,6 +229,8 @@ defmodule Mint.UnsafeProxy do
   # Mirrors the default-port handling in Mint.HTTP1: omit the port when it is the
   # default for the scheme.
   defp host_header_value(%UnsafeProxy{scheme: scheme, hostname: hostname, port: port}) do
+    hostname = Util.uri_host(hostname)
+
     if URI.default_port(Atom.to_string(scheme)) == port do
       hostname
     else

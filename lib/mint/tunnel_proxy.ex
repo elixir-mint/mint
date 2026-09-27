@@ -112,17 +112,9 @@ defmodule Mint.TunnelProxy do
   end
 
   # The CONNECT request targets the connection address (the host the proxy
-  # should dial), not the :hostname identity. IPv6 addresses must be enclosed
-  # in square brackets in the authority-form request target (RFC 3986,
-  # section 3.2.2).
+  # should dial), not the :hostname identity.
   defp connect_authority(address, port, opts) do
-    address = format_address(address, opts)
-
-    if String.contains?(address, ":") do
-      "[#{address}]:#{port}"
-    else
-      "#{address}:#{port}"
-    end
+    "#{Mint.Core.Util.uri_host(format_address(address, opts))}:#{port}"
   end
 
   defp format_address(address, _opts) when is_binary(address), do: address
