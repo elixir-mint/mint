@@ -34,6 +34,15 @@ defmodule Mint.UnsafeProxyHostHeaderTest do
     assert host_header(request) == "host: [::1]:8080"
   end
 
+  test "leaves the zone ID of an IPv6 literal origin out of the request target and Host header" do
+    for host <- ["fe80::1%eth0", "fe80::1%25eth0"] do
+      request = proxied_request(:http, host, 8080, "GET", "/", [])
+
+      assert request =~ "GET http://[fe80::1]:8080/ HTTP/1.1"
+      assert host_header(request) == "host: [fe80::1]:8080"
+    end
+  end
+
   test "does not override a caller-supplied Host header" do
     request = proxied_request(:http, "example.com", 80, "GET", "/", [{"host", "other.example"}])
 

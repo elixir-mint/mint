@@ -85,6 +85,19 @@ defmodule Mint.TunnelProxyConnectTest do
     assert head =~ "CONNECT [::1]:443 HTTP/1.1\r\n"
   end
 
+  test "the zone ID of an IPv6 address target is left out of the CONNECT authority" do
+    for address <- ["fe80::1%eth0", "fe80::1%25eth0"] do
+      {proxy_port, proxy_ref} = start_capturing_proxy()
+
+      assert {:error, _reason} =
+               HTTP.connect(:https, address, 443, proxy: {:http, "localhost", proxy_port, []})
+
+      assert_receive {^proxy_ref, :connect, head}, 2000
+      assert head =~ "CONNECT [fe80::1]:443 HTTP/1.1\r\n"
+      assert host_header(head) == "host: [fe80::1]:443"
+    end
+  end
+
   test "the CONNECT authority and Host header use the address, not the :hostname identity" do
     {proxy_port, proxy_ref} = start_capturing_proxy()
 

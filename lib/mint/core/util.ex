@@ -17,16 +17,33 @@ defmodule Mint.Core.Util do
     end
   end
 
-  # RFC 9112 3.2.2 and RFC 3986 3.2.2: an IPv6 literal in the Host header or the
-  # :authority pseudo-header must be enclosed in square brackets. The RFC 3986
-  # IP-literal has no zone ID ("fe80::1%eth0"), so it's left out.
+  # RFC 9112 3.2.2 and RFC 3986 3.2.2: an IPv6 literal in the Host header, the
+  # :authority pseudo-header or a request target must be enclosed in square
+  # brackets.
   @spec uri_host(String.t()) :: String.t()
   def uri_host(hostname) do
+    case without_zone_id(hostname) do
+      {:ipv6, address} -> "[" <> address <> "]"
+      :other -> hostname
+    end
+  end
+
+  # The RFC 3986 IP-literal has no zone ID ("fe80::1%eth0"), so it's left out of
+  # IPv6 literals sent to the server.
+  @spec uri_host_without_brackets(String.t()) :: String.t()
+  def uri_host_without_brackets(hostname) do
+    case without_zone_id(hostname) do
+      {:ipv6, address} -> address
+      :other -> hostname
+    end
+  end
+
+  defp without_zone_id(hostname) do
     [address | _zone_id] = String.split(hostname, "%", parts: 2)
 
     case :inet.parse_ipv6strict_address(String.to_charlist(address)) do
-      {:ok, _address} -> "[" <> address <> "]"
-      {:error, :einval} -> hostname
+      {:ok, _address} -> {:ipv6, address}
+      {:error, :einval} -> :other
     end
   end
 

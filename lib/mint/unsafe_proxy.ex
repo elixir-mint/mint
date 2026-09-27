@@ -175,7 +175,9 @@ defmodule Mint.UnsafeProxy do
   end
 
   defp request_line(%UnsafeProxy{scheme: scheme, hostname: hostname, port: port}, path) do
-    %URI{scheme: Atom.to_string(scheme), host: hostname, port: port, path: path}
+    host = Util.uri_host_without_brackets(hostname)
+
+    %URI{scheme: Atom.to_string(scheme), host: host, port: port, path: path}
     |> URI.to_string()
   end
 
