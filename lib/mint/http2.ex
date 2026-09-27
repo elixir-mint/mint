@@ -1875,13 +1875,22 @@ defmodule Mint.HTTP2 do
     :ok
   end
 
-  # RFC 9113 5.1: PRIORITY is the only frame the server can send on an idle stream.
-  # Client streams are opened in order, so odd stream IDs from next_stream_id on are
-  # idle.
+  # RFC 9113 5.1: PRIORITY frames are allowed on idle streams. Client streams are
+  # opened in order, so odd stream IDs from next_stream_id on are idle and the server
+  # can't send other frames on them. Server streams are only opened through
+  # PUSH_PROMISE (RFC 9113 8.4 and 5.1.1), so even stream IDs above the last promised
+  # one are idle too.
   defp assert_stream_id_is_allowed(_conn, :priority, _stream_id), do: :ok
 
   defp assert_stream_id_is_allowed(conn, _frame, stream_id) do
-    if Integer.is_odd(stream_id) and stream_id >= conn.next_stream_id do
+    idle? =
+      cond do
+        stream_id == 0 -> false
+        Integer.is_odd(stream_id) -> stream_id >= conn.next_stream_id
+        true -> stream_id > conn.last_promised_stream_id
+      end
+
+    if idle? do
       debug_data = "frame with stream ID #{inspect(stream_id)} has not been opened yet"
       send_connection_error!(conn, :protocol_error, debug_data)
     else

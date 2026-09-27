@@ -2782,6 +2782,29 @@ defmodule Mint.HTTP2Test do
       refute HTTP2.open?(conn)
     end
 
+    for {frame_name, frame} <- [
+          headers: quote(do: {:headers, 2, [{":status", "200"}], [:end_headers]}),
+          data: quote(do: data(stream_id: 2, data: "some data")),
+          rst_stream: quote(do: rst_stream(stream_id: 2, error_code: :cancel)),
+          window_update: quote(do: window_update(stream_id: 2, window_size_increment: 1))
+        ] do
+      test "a #{frame_name} frame on a server stream that was never promised is a connection error",
+           %{conn: conn} do
+        {conn, _ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: _stream_id)]
+
+        assert {:error, %HTTP2{} = conn, error, []} = stream_frames(conn, [unquote(frame)])
+
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ "frame with stream ID 2 has not been opened yet"
+
+        assert_recv_frames [goaway(error_code: :protocol_error)]
+
+        refute HTTP2.open?(conn)
+      end
+    end
+
     test "PRIORITY frames on idle streams are ignored", %{conn: conn} do
       {conn, _ref} = open_request(conn)
 
