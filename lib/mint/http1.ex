@@ -60,8 +60,8 @@ defmodule Mint.HTTP1 do
 
     * `:invalid_status_line` - when the HTTP/1 status line is invalid.
 
-    * `{:response_line_too_long, size, max_size}` - when a response status line,
-      chunk-size line, or chunk-extension line exceeds the configured size limit.
+    * `{:response_line_too_long, size, max_size}` - when a response status line or
+      chunk-size line (including chunk extensions) exceeds the configured size limit.
       `size` is the number of bytes received and `max_size` is the configured maximum.
 
     * `{:invalid_request_target, target}` - when the request target is invalid.
@@ -165,8 +165,8 @@ defmodule Mint.HTTP1 do
           This is only available for HTTP/1.1 connections. *Available since v1.8.0*.
 
     * `:max_header_list_size` - (`t:pos_integer/0` or `:infinity`) the maximum number of
-      bytes allowed in a response status line, chunk-size line, chunk-extension line,
-      header section, or chunked trailer section. This includes header names, values,
+      bytes allowed in a response status line, chunk-size line (including chunk
+      extensions), header section, or chunked trailer section. This includes header names, values,
       and line delimiters. Defaults to 256 KiB. *Available since 1.9.2*.
 
     * `:stream_headers` - (`t:boolean/0`) if set to `true`, response headers and trailer headers
@@ -744,18 +744,22 @@ defmodule Mint.HTTP1 do
   defp decode(:status, %{request: request} = conn, data, responses) do
     case Response.decode_status_line(data) do
       {:ok, {version, status, status_reason}, rest} ->
-        request = %{request | version: version, status: status, state: :headers}
-        conn = %{conn | request: request}
-        responses = [{:status, request.ref, status} | responses]
+        with :ok <- check_response_line_size(conn, byte_size(data) - byte_size(rest)) do
+          request = %{request | version: version, status: status, state: :headers}
+          conn = %{conn | request: request}
+          responses = [{:status, request.ref, status} | responses]
 
-        responses =
-          if :status_reason in conn.optional_responses do
-            [{:status_reason, request.ref, status_reason} | responses]
-          else
-            responses
-          end
+          responses =
+            if :status_reason in conn.optional_responses do
+              [{:status_reason, request.ref, status_reason} | responses]
+            else
+              responses
+            end
 
-        decode(:headers, conn, rest, responses)
+          decode(:headers, conn, rest, responses)
+        else
+          {:error, reason} -> {:error, conn, wrap_error(reason), responses}
+        end
 
       :more ->
         buffer_response_line(conn, data, responses)
@@ -912,33 +916,20 @@ defmodule Mint.HTTP1 do
   end
 
   defp decode_body({:chunked, nil}, conn, data, request_ref, responses) do
-    case Parse.chunk_size(data) do
-      :more ->
-        buffer_response_line(conn, data, responses, {:chunked, nil})
-
-      {:ok, 0, rest} ->
+    with {:ok, size, rest} <- Parse.chunk_size(data),
+         {:ok, rest} <- Parse.chunk_extensions(rest),
+         :ok <- check_response_line_size(conn, byte_size(data) - byte_size(rest)) do
+      if size == 0 do
         # Manually collapse the body buffer since we're done with the body
         {conn, responses} = collapse_body_buffer(conn, responses)
-        decode_body({:chunked, :metadata, :trailer}, conn, rest, request_ref, responses)
-
-      {:ok, size, rest} ->
-        decode_body({:chunked, :metadata, size}, conn, rest, request_ref, responses)
-
-      :error ->
-        {:error, conn, wrap_error(:invalid_chunk_size), responses}
-    end
-  end
-
-  defp decode_body({:chunked, :metadata, size}, conn, data, request_ref, responses) do
-    case Parse.chunk_extensions(data) do
-      {:ok, rest} ->
+        decode_body({:chunked, :trailer}, conn, rest, request_ref, responses)
+      else
         decode_body({:chunked, size}, conn, rest, request_ref, responses)
-
-      :more ->
-        buffer_response_line(conn, data, responses, {:chunked, :metadata, size})
-
-      :error ->
-        {:error, conn, wrap_error(:invalid_chunk_size), responses}
+      end
+    else
+      :more -> buffer_response_line(conn, data, responses, {:chunked, nil})
+      :error -> {:error, conn, wrap_error(:invalid_chunk_size), responses}
+      {:error, reason} -> {:error, conn, wrap_error(reason), responses}
     end
   end
 
