@@ -359,6 +359,36 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "closed streams" do
+    for phase <- [:before_the_headers, :during_the_body] do
+      test "RST_STREAM with NO_ERROR #{phase} is an error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        conn =
+          if unquote(phase) == :during_the_body do
+            assert {:ok, %HTTP2{} = conn,
+                    [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "x"}]} =
+                     stream_frames(conn, [
+                       {:headers, stream_id, [{":status", "200"}, {"content-length", "5"}],
+                        [:end_headers]},
+                       data(stream_id: stream_id, data: "x")
+                     ])
+
+            conn
+          else
+            conn
+          end
+
+        assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+                 stream_frames(conn, [rst_stream(stream_id: stream_id, error_code: :no_error)])
+
+        assert_http2_error error, {:server_closed_request, :no_error}
+        refute Map.has_key?(conn.streams, stream_id)
+        assert HTTP2.open?(conn)
+      end
+    end
+
     test "server closes a stream with RST_STREAM", %{conn: conn} do
       {conn, ref} = open_request(conn)
 
@@ -1231,7 +1261,7 @@ defmodule Mint.HTTP2Test do
   end
 
   describe "response header validation" do
-    for status <- ["abc", "", "+200", "2000", "20", "200 ", " 200", "1ab"] do
+    for status <- ["abc", "", "+200", "2000", "20", "200 ", " 200", "1ab", "000", "099"] do
       test "an invalid :status of #{inspect(status)} is a stream error", %{conn: conn} do
         {conn, ref} = open_request(conn)
 
@@ -1248,6 +1278,89 @@ defmodule Mint.HTTP2Test do
         assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
         assert HTTP2.open?(conn)
       end
+    end
+
+    for {name, value} <- [
+          {"connection", "close"},
+          {"keep-alive", "timeout=5"},
+          {"proxy-connection", "keep-alive"},
+          {"transfer-encoding", "chunked"},
+          {"upgrade", "websocket"},
+          {"te", "gzip"},
+          {"te", "trailers"}
+        ] do
+      test "the connection-specific header #{name}: #{value} is a stream error", %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        assert {:ok, %HTTP2{} = conn, responses} =
+                 stream_frames(conn, [
+                   {:headers, stream_id, [{":status", "200"}, {unquote(name), unquote(value)}],
+                    [:end_headers]}
+                 ])
+
+        assert [{:error, ^ref, error}] = responses
+        assert_http2_error error, {:protocol_error, debug_data}
+        assert debug_data =~ "connection-specific header #{inspect(unquote(name))}"
+
+        assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    test "a connection-specific header in an informational response is a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "103"}, {"te", "trailers"}], [:end_headers]}
+               ])
+
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "connection-specific header \"te\""
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "a connection-specific header in trailers is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, [{"te", "trailers"}], [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "connection-specific header \"te\""
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    test "a 101 status is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [{:headers, stream_id, [{":status", "101"}], [:end_headers]}])
+
+      assert [{:error, ^ref, error}] = responses
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "the 101 (Switching Protocols) status code is not supported in HTTP/2"
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
     end
 
     for name <- ["Foo", "fo o", "", "foo:bar", "f\x7Fo", "f\xC3\xA4"] do
@@ -1694,7 +1807,7 @@ defmodule Mint.HTTP2Test do
 
       info_hbf =
         server_encode_headers([
-          {":status", "101"},
+          {":status", "102"},
           {"x-info-header1", "this is an info"}
         ])
 
