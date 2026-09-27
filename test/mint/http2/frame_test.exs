@@ -57,6 +57,14 @@ defmodule Mint.HTTP2.FrameTest do
       assert Frame.decode_next(encode_raw(0x00, 0x08, 3, payload)) ==
                {:error, {:protocol_error, debug_data}}
     end
+
+    test "with the PADDED flag and no payload" do
+      assert Frame.decode_next(encode_raw(0x00, 0x08, 3, <<>>)) ==
+               {:error, {:frame_size_error, :data}}
+
+      assert Frame.decode_next(encode_raw(0x01, 0x08, 3, <<>>)) ==
+               {:error, {:frame_size_error, :headers}}
+    end
   end
 
   describe "HEADERS" do
@@ -179,13 +187,23 @@ defmodule Mint.HTTP2.FrameTest do
           enable_connect_protocol: enable_connect_protocol
         ]
 
-        assert_round_trip settings(stream_id: 0, flags: 0x01, params: params)
+        assert_round_trip settings(stream_id: 0, flags: 0x00, params: params)
       end
     end
 
     test "with bad length" do
       assert Frame.decode_next(encode_raw(0x04, 0x00, 0, <<_not_multiple_of_6 = 3::8>>)) ==
                {:error, {:frame_size_error, :settings}}
+    end
+
+    test "with the ACK flag and a payload" do
+      assert Frame.decode_next(encode_raw(0x04, 0x01, 0, <<0x03::16, 100::32>>)) ==
+               {:error, {:frame_size_error, :settings}}
+    end
+
+    test "with an ENABLE_PUSH value other than 0 or 1" do
+      assert Frame.decode_next(encode_raw(0x04, 0x00, 0, <<0x02::16, 2::32>>)) ==
+               {:error, {:protocol_error, "SETTINGS_ENABLE_PUSH value 2 is not 0 or 1"}}
     end
   end
 
