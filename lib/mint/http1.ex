@@ -578,7 +578,7 @@ defmodule Mint.HTTP1 do
   defp handle_close(%__MODULE__{request: %{body: :until_closed} = request} = conn) do
     conn = pop_request(conn)
     responses = [{:done, request.ref}]
-    {conn, responses} = close_after_response(conn, responses, conn.transport.wrap_error(:closed))
+    {conn, responses} = close_after_response(conn, responses, queued_request_error(conn, request))
     {:ok, conn, Enum.reverse(responses)}
   end
 
@@ -1184,11 +1184,8 @@ defmodule Mint.HTTP1 do
     responses = [{:done, request.ref} | responses]
 
     cond do
-      # The server doesn't process any requests after one it answers with
-      # "Connection: close" (RFC 9112 section 9.6), so the queued requests can
-      # be retried.
       "close" in request.connection ->
-        close_after_response(conn, responses, wrap_error(:unprocessed))
+        close_after_response(conn, responses, queued_request_error(conn, request))
 
       request.version >= {1, 1} ->
         {conn, responses}
@@ -1197,7 +1194,18 @@ defmodule Mint.HTTP1 do
         {conn, responses}
 
       true ->
-        close_after_response(conn, responses, conn.transport.wrap_error(:closed))
+        close_after_response(conn, responses, queued_request_error(conn, request))
+    end
+  end
+
+  # The server doesn't process any requests after one it answers with
+  # "Connection: close" (RFC 9112 section 9.6), so the queued requests can be
+  # retried. Otherwise the server might have processed them before closing.
+  defp queued_request_error(conn, request) do
+    if "close" in request.connection do
+      wrap_error(:unprocessed)
+    else
+      conn.transport.wrap_error(:closed)
     end
   end
 

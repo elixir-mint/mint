@@ -1662,6 +1662,22 @@ defmodule Mint.HTTP1Test do
     assert_closed_and_released(conn)
   end
 
+  test "pipelined requests behind a close-delimited Connection: close response get an :unprocessed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "POST", "/", [], "x")
+
+    response = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhi"
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, _}, {:data, ^ref1, "hi"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
+
+    assert [{:done, ^ref1}, {:error, ^ref2, %HTTPError{reason: :unprocessed}}] = responses
+    assert_closed_and_released(conn)
+  end
+
   test "pipelined requests behind a close-delimited response get a :closed error",
        %{conn: conn} do
     {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
