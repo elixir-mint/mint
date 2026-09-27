@@ -825,6 +825,21 @@ defmodule Mint.HTTP1Test do
     assert responses == [{:status, ref, 200}]
   end
 
+  test "a recv/3 timeout keeps the connection open", %{port: port, server_ref: server_ref} do
+    assert {:ok, conn} = HTTP1.connect(:http, "localhost", port, mode: :passive)
+    assert_receive {^server_ref, server_socket}
+
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:error, conn, %TransportError{reason: :timeout}, []} = HTTP1.recv(conn, 0, 0)
+    assert HTTP1.open?(conn)
+
+    :ok = :gen_tcp.send(server_socket, "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+
+    assert {:ok, _conn, responses} = HTTP1.recv(conn, 0, 100)
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}] = responses
+  end
+
   test "changing the connection mode with set_mode/2",
        %{conn: conn, server_socket: server_socket} do
     assert_raise ArgumentError, ~r"can't use recv/3", fn ->

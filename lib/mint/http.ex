@@ -785,7 +785,9 @@ defmodule Mint.HTTP do
   the updated connection and `responses` is a list of responses. See the "Responses"
   section below. If there's an error, `{:error, conn, reason, responses}` is returned,
   where `conn` is the updated connection, `reason` is the error reason, and `responses`
-  is a list of responses that were correctly parsed before the error.
+  is a list of responses that were correctly parsed before the error. An error
+  **does not** necessarily mean that the connection is closed. Use `open?/1` to verify
+  that the connection is open.
 
   > #### Graceful Close {: .tip}
   >
@@ -948,6 +950,12 @@ defmodule Mint.HTTP do
   is `0`, all available bytes will be returned.
 
   `timeout` is the maximum time to wait before returning an error.
+
+  If no data arrives within `timeout`, this function returns
+  `{:error, conn, %Mint.TransportError{reason: :timeout}, []}` and the connection
+  **stays open**, so you can call `recv/3` again to keep waiting for the response.
+  Other errors can close the connection. Use `open?/1` to check whether the
+  connection is still open after an error.
 
   This function will raise an error if the socket is in active mode.
 
