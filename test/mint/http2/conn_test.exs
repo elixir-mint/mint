@@ -2561,6 +2561,30 @@ defmodule Mint.HTTP2Test do
             {":authority", "localhost"},
             {":path", "/"},
             {"content-length", "zero"}
+          ],
+          space_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a b"}
+          ],
+          fragment_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a#fragment"}
+          ],
+          invalid_percent_encoding_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a%2"}
+          ],
+          scheme_starting_with_digit: [
+            {":method", "GET"},
+            {":scheme", "1https"},
+            {":authority", "localhost"},
+            {":path", "/"}
           ]
         ] do
       test "a PUSH_PROMISE with #{variant} in the promised request resets the promised stream",
@@ -2597,6 +2621,105 @@ defmodule Mint.HTTP2Test do
         assert_recv_frames [headers(stream_id: stream_id)]
 
         promised_headers = promised_headers() ++ unquote(fields)
+
+        assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        refute_receive {:ssl, _socket, _data}, 100
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    # RFC 6874 2: a zone ID is made of unreserved and percent-encoded characters.
+    invalid_zone_id_authorities =
+      for char <- ~c"!$&'()*+,;=", do: {"https", "[fe80::1%25en#{<<char>>}0]"}
+
+    for {scheme, authority} <-
+          [
+            {"https", "user@localhost"},
+            {"http", "user@localhost"},
+            {"HTTPS", "user@localhost"},
+            {"https", "localhost:abc"},
+            {"https", "[::1"},
+            {"https", "[garbage]"},
+            {"https", "localhost:80:90"},
+            {"https", "a[b]"},
+            {"https", "[v.z]"},
+            {"https", "]]]"},
+            {"https", ":443"},
+            {"https", "%zz"},
+            {"https", "[fe80::1%en0]"},
+            {"https", "[::ffff:192.+1.2.3]"},
+            {"https", "[::ffff:01.2.3.4]"},
+            {"https", "[fe80::1%25]"},
+            {"https", "[v1.a%20]"},
+            {"https", "[vg.x]"},
+            {"ftp", "us[er@localhost"}
+          ] ++ invalid_zone_id_authorities do
+      test "a PUSH_PROMISE with :scheme #{scheme} and :authority #{inspect(authority)} " <>
+             "resets the promised stream",
+           %{conn: conn} do
+        {conn, _ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        promised_headers = [
+          {":method", "GET"},
+          {":scheme", unquote(scheme)},
+          {":authority", unquote(authority)},
+          {":path", "/"}
+        ]
+
+        assert {:ok, %HTTP2{} = conn, []} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        assert_recv_frames [rst_stream(stream_id: 2, error_code: :protocol_error)]
+        refute Map.has_key?(conn.streams, 2)
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for {scheme, authority, path} <- [
+          {"https", "[::1]:8443", "/"},
+          {"https", "[fe80::1%25en0]:443", "/"},
+          {"https", "[fe80::1%25en%210]", "/"},
+          {"https", "[::ffff:192.1.2.3]", "/"},
+          {"https", "[v1.fe80::a+en1]", "/"},
+          {"https", "localhost:", "/"},
+          {"https", "%41bc", "/"},
+          {"https", "127.0.0.1:80", "/"},
+          {"HTTPS", "localhost", "/"},
+          {"ftp", "user@localhost", "/"},
+          {"ftp", ":21", "/"},
+          {"coap+tcp-1.0", "localhost", "//a/b;c=d/~e:f@g!$&'()*+,?h=i%20j/?k"}
+        ] do
+      test "a PUSH_PROMISE with :scheme #{scheme}, :authority #{inspect(authority)} and " <>
+             ":path #{inspect(path)} is accepted",
+           %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        promised_headers = [
+          {":method", "GET"},
+          {":scheme", unquote(scheme)},
+          {":authority", unquote(authority)},
+          {":path", unquote(path)}
+        ]
 
         assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
                  stream_frames(conn, [

@@ -126,6 +126,7 @@ defmodule Mint.HTTP2 do
   """
 
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
+  import Mint.HTTP1.Parse, only: [is_alpha: 1, is_digit: 1, is_hex_digit: 1]
 
   alias Mint.{HTTPError, ParsingTools, TransportError}
   alias Mint.Types
@@ -2743,10 +2744,16 @@ defmodule Mint.HTTP2 do
           pseudo[":scheme"] in [nil, ""] ->
             "missing or empty :scheme pseudo-header in promised request"
 
+          not valid_scheme?(pseudo[":scheme"]) ->
+            "invalid :scheme pseudo-header in promised request"
+
           pseudo[":authority"] in [nil, ""] ->
             "missing or empty :authority pseudo-header in promised request"
 
-          not String.starts_with?(pseudo[":path"] || "", "/") ->
+          not valid_authority?(pseudo[":scheme"], pseudo[":authority"]) ->
+            "invalid :authority pseudo-header in promised request"
+
+          not valid_path?(pseudo[":path"]) ->
             "missing or invalid :path pseudo-header in promised request"
 
           pseudo[":method"] not in ["GET", "HEAD"] ->
@@ -2761,6 +2768,113 @@ defmodule Mint.HTTP2 do
         end
     end
   end
+
+  # RFC 3986 3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+  defp valid_scheme?(<<char, rest::binary>>) when is_alpha(char), do: uri_chars?(rest, :scheme)
+  defp valid_scheme?(_scheme), do: false
+
+  # RFC 3986 3.2: authority = [ userinfo "@" ] host [ ":" port ]. RFC 9113 8.3.1
+  # forbids userinfo for the "http" and "https" schemes, and RFC 9110 4.2.1 and
+  # 4.2.2 forbid an empty host for them.
+  defp valid_authority?(scheme, authority) do
+    http? = String.downcase(scheme, :ascii) in ["http", "https"]
+
+    case String.split(authority, "@", parts: 2) do
+      [host_and_port] ->
+        valid_host_and_port?(host_and_port, http?)
+
+      [userinfo, host_and_port] ->
+        not http? and uri_chars?(userinfo, :userinfo) and
+          valid_host_and_port?(host_and_port, http?)
+    end
+  end
+
+  defp valid_host_and_port?("[" <> rest, _http?) do
+    case String.split(rest, "]", parts: 2) do
+      [ip_literal, port] -> valid_ip_literal?(ip_literal) and valid_port?(port)
+      [_rest] -> false
+    end
+  end
+
+  defp valid_host_and_port?(host_and_port, http?) do
+    {reg_name, port} =
+      case String.split(host_and_port, ":", parts: 2) do
+        [reg_name] -> {reg_name, ""}
+        [reg_name, port] -> {reg_name, ":" <> port}
+      end
+
+    # An IPv4address is also a valid reg-name.
+    (reg_name != "" or not http?) and uri_chars?(reg_name, :reg_name) and valid_port?(port)
+  end
+
+  # RFC 3986 3.2.3: port = *DIGIT, after a ":".
+  defp valid_port?(""), do: true
+  defp valid_port?(":" <> port), do: port == "" or ParsingTools.only_digits?(port)
+  defp valid_port?(_port), do: false
+
+  # RFC 3986 3.2.2: IP-literal = "[" ( IPv6address / IPvFuture ) "]", where
+  # IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" ). RFC 6874 2
+  # allows an IPv6address to be followed by "%25" and a zone ID.
+  defp valid_ip_literal?(<<v, rest::binary>>) when v in ~c"vV" do
+    case String.split(rest, ".", parts: 2) do
+      [version, address] ->
+        version != "" and uri_chars?(version, :hex) and address != "" and
+          uri_chars?(address, :ipvfuture)
+
+      [_rest] ->
+        false
+    end
+  end
+
+  defp valid_ip_literal?(ip_literal) do
+    case String.split(ip_literal, "%25", parts: 2) do
+      [address] ->
+        ipv6_address?(address)
+
+      [address, zone_id] ->
+        ipv6_address?(address) and zone_id != "" and uri_chars?(zone_id, :zone_id)
+    end
+  end
+
+  # :inet.parse_ipv6strict_address/1 accepts a zone ID after a bare "%" and signs
+  # in embedded IPv4 octets, which the RFC 3986 3.2.2 IPv6address grammar doesn't
+  # allow, so the address is first restricted to HEXDIG, ":" and ".".
+  defp ipv6_address?(address) do
+    uri_chars?(address, :ipv6) and
+      match?({:ok, _}, :inet.parse_ipv6strict_address(:binary.bin_to_list(address)))
+  end
+
+  # RFC 9113 8.3.1: :path is the RFC 9110 absolute-path, optionally followed by "?"
+  # and the RFC 3986 3.4 query, so it's made of pchar, "/" and "?" characters.
+  defp valid_path?("/" <> rest), do: uri_chars?(rest, :path)
+  defp valid_path?(_path), do: false
+
+  # Checks that a binary is made of characters of the given class, and of RFC 3986
+  # 2.1 pct-encoded characters for the classes that allow them.
+  defp uri_chars?(<<?%, hex1, hex2, rest::binary>>, class)
+       when class in [:userinfo, :reg_name, :zone_id, :path] and is_hex_digit(hex1) and
+              is_hex_digit(hex2),
+       do: uri_chars?(rest, class)
+
+  defp uri_chars?(<<char, rest::binary>>, class),
+    do: uri_char?(char, class) and uri_chars?(rest, class)
+
+  defp uri_chars?(<<>>, _class), do: true
+
+  # RFC 3986 2.3 unreserved and 2.2 sub-delims characters.
+  defguardp is_unreserved(char) when is_alpha(char) or is_digit(char) or char in ~c"-._~"
+  defguardp is_sub_delim(char) when char in ~c"!$&'()*+,;="
+
+  defp uri_char?(char, :scheme), do: is_alpha(char) or is_digit(char) or char in ~c"+-."
+  defp uri_char?(char, :hex), do: is_hex_digit(char)
+  defp uri_char?(char, :ipv6), do: is_hex_digit(char) or char in ~c":."
+  defp uri_char?(char, :zone_id), do: is_unreserved(char)
+  defp uri_char?(char, :reg_name), do: is_unreserved(char) or is_sub_delim(char)
+
+  defp uri_char?(char, class) when class in [:userinfo, :ipvfuture],
+    do: is_unreserved(char) or is_sub_delim(char) or char == ?:
+
+  defp uri_char?(char, :path), do: is_unreserved(char) or is_sub_delim(char) or char in ~c":@/?"
 
   defp validate_promised_fields([], pseudo, _regular?), do: {:ok, pseudo}
 
