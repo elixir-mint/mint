@@ -554,16 +554,15 @@ defmodule Mint.HTTP1 do
     end
   end
 
-  defp handle_close(%__MODULE__{request: request} = conn) do
-    conn = internal_close(conn)
-    conn = request_done(conn)
+  defp handle_close(%__MODULE__{request: %{body: :until_closed} = request} = conn) do
+    conn = pop_request(conn)
+    {conn, responses} = close_after_response(conn, [{:done, request.ref}])
+    {:ok, conn, Enum.reverse(responses)}
+  end
 
-    if request && request.body == :until_closed do
-      conn = put_in(conn.state, :closed)
-      {:ok, conn, [{:done, request.ref}]}
-    else
-      {:error, conn, conn.transport.wrap_error(:closed), []}
-    end
+  defp handle_close(conn) do
+    conn = conn |> internal_close() |> pop_request()
+    {:error, conn, conn.transport.wrap_error(:closed), []}
   end
 
   defp handle_transport_error(conn, error) do
@@ -817,8 +816,16 @@ defmodule Mint.HTTP1 do
 
   defp decode_body(:none, conn, data, request_ref, responses) do
     conn = put_in(conn.buffer, data)
-    conn = request_done(conn)
-    responses = [{:done, request_ref} | responses]
+    {conn, responses} = request_done(conn, [{:done, request_ref} | responses])
+    {:ok, conn, responses}
+  end
+
+  # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
+  # treated as faulty, so the connection is closed after it without processing the
+  # final response, and the current request fails along with the queued ones.
+  defp decode_body(:informational, %{request: request} = conn, _data, _request_ref, responses)
+       when request.version < {1, 1} and request.transfer_encoding != [] do
+    {conn, responses} = close_after_response(conn, responses)
     {:ok, conn, responses}
   end
 
@@ -846,8 +853,7 @@ defmodule Mint.HTTP1 do
 
   defp decode_body(:single, conn, data, request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
-    conn = request_done(conn)
-    responses = [{:done, request_ref} | responses]
+    {conn, responses} = request_done(conn, [{:done, request_ref} | responses])
     {:ok, conn, responses}
   end
 
@@ -866,8 +872,7 @@ defmodule Mint.HTTP1 do
       length <= byte_size(data) ->
         {body, rest} = :erlang.split_binary(data, length)
         {conn, responses} = add_body(conn, body, responses)
-        conn = request_done(conn)
-        responses = [{:done, request_ref} | responses]
+        {conn, responses} = request_done(conn, [{:done, request_ref} | responses])
         next_request(conn, rest, responses)
     end
   end
@@ -971,7 +976,7 @@ defmodule Mint.HTTP1 do
               | add_trailer_headers(headers, conn.request.ref, responses)
             ]
 
-            conn = request_done(conn)
+            {conn, responses} = request_done(conn, responses)
             next_request(conn, rest, responses)
 
           {:error, reason} ->
@@ -1031,6 +1036,12 @@ defmodule Mint.HTTP1 do
           :more
       end
     end
+  end
+
+  # A response that closes the connection is the last one the server sends on
+  # it, so anything after it can't be a response to a queued request.
+  defp next_request(%{state: :closed} = conn, _data, responses) do
+    {:ok, %{conn | buffer: ""}, responses}
   end
 
   defp next_request(%{request: nil} = conn, data, responses) do
@@ -1137,21 +1148,43 @@ defmodule Mint.HTTP1 do
   # lifetime of the underlying socket. In particular, HTTP/1.0 responses are
   # otherwise treated as non-persistent and would close the newly-established
   # tunnel before the caller can use it.
-  defp request_done(%{request: %{method: "CONNECT", status: status}} = conn)
+  defp request_done(%{request: %{method: "CONNECT", status: status}} = conn, responses)
        when status in 200..299 do
-    pop_request(conn)
+    {pop_request(conn), responses}
   end
 
-  defp request_done(%{request: request} = conn) do
+  defp request_done(%{request: request} = conn, responses) do
     conn = pop_request(conn)
 
     cond do
-      !request -> conn
-      "close" in request.connection -> internal_close(conn)
-      request.version >= {1, 1} -> conn
-      "keep-alive" in request.connection -> conn
-      true -> internal_close(conn)
+      "close" in request.connection ->
+        close_after_response(conn, responses)
+
+      request.version >= {1, 1} ->
+        {conn, responses}
+
+      # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
+      # treated as faulty, so the connection is closed after it even if kept alive.
+      "keep-alive" in request.connection and request.transfer_encoding == [] ->
+        {conn, responses}
+
+      true ->
+        close_after_response(conn, responses)
     end
+  end
+
+  # Requests pipelined behind a response that closes the connection never get a
+  # response of their own.
+  defp close_after_response(conn, responses) do
+    error = conn.transport.wrap_error(:closed)
+    requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
+
+    responses =
+      Enum.reduce(requests, responses, fn request, responses ->
+        [{:error, request.ref, error} | responses]
+      end)
+
+    {internal_close(%{conn | request: nil, requests: :queue.new()}), responses}
   end
 
   defp pop_request(conn) do
@@ -1212,8 +1245,16 @@ defmodule Mint.HTTP1 do
       request.transfer_encoding != [] && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
 
-      "chunked" == List.first(request.transfer_encoding) ->
+      # RFC9112 6.3:
+      # > If a Transfer-Encoding header field is present in a response and the
+      # > chunked transfer coding is not the final encoding, the message body
+      # > length is determined by reading the connection until it is closed by
+      # > the server.
+      "chunked" == List.last(request.transfer_encoding) ->
         {:ok, {:chunked, nil}}
+
+      request.transfer_encoding != [] ->
+        {:ok, :until_closed}
 
       request.content_length ->
         {:ok, {:content_length, request.content_length}}

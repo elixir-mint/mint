@@ -362,6 +362,165 @@ defmodule Mint.HTTP1Test do
     refute HTTP1.open?(conn)
   end
 
+  test "chunked framing applies when chunked is the final transfer coding", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: gzip, chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hello"},
+             {:done, ^ref1},
+             {:status, ^ref2, 200},
+             {:headers, ^ref2, _},
+             {:data, ^ref2, "ok"},
+             {:done, ^ref2}
+           ] = responses
+  end
+
+  test "chunked framing applies when chunked is the final of several transfer-encoding headers",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: identity\r\ntransfer-encoding: chunked\r\n\r\n" <>
+        "5\r\nhello\r\n0\r\n\r\n"
+
+    assert {:ok, _conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "hello"}, {:done, ^ref}] =
+             responses
+  end
+
+  test "body is read until close when chunked is not the final transfer coding", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked, gzip\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [{:status, ^ref, 200}, {:headers, ^ref, _}, {:data, ^ref, "5\r\nhello\r\n0\r\n\r\n"}] =
+             responses
+
+    assert {:ok, _conn, [{:done, ^ref}]} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
+  end
+
+  test "bytes after a response read until close are not a pipelined response", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    body = "5\r\nhello\r\n0\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+    response = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked, gzip\r\n\r\n" <> body
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, _}, {:data, ^ref1, ^body}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, [{:done, ^ref1}, {:error, ^ref2, %TransportError{reason: :closed}}]} =
+             HTTP1.stream(conn, {:tcp_closed, conn.socket})
+
+    refute HTTP1.open?(conn)
+  end
+
+  for transfer_encoding <- ["chunked", "gzip, chunked"] do
+    test "an HTTP/1.0 response with transfer-encoding #{transfer_encoding} closes the connection",
+         %{conn: conn} do
+      {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+      {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.0 200 OK\r\nconnection: keep-alive\r\n" <>
+          "transfer-encoding: #{unquote(transfer_encoding)}\r\n\r\n5\r\nhello\r\n0\r\n\r\n" <>
+          "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [
+               {:status, ^ref1, 200},
+               {:headers, ^ref1, _},
+               {:data, ^ref1, "hello"},
+               {:done, ^ref1},
+               {:error, ^ref2, %TransportError{reason: :closed}}
+             ] = responses
+
+      refute HTTP1.open?(conn)
+    end
+  end
+
+  for status <- [100, 103] do
+    test "an HTTP/1.0 #{status} response with transfer-encoding closes the connection",
+         %{conn: conn} do
+      {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+      {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      final = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+      response =
+        "HTTP/1.0 #{unquote(status)} Info\r\ntransfer-encoding: chunked\r\n\r\n" <>
+          final <> final
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [
+               {:status, ^ref1, unquote(status)},
+               {:headers, ^ref1, _},
+               {:error, ^ref1, %TransportError{reason: :closed}},
+               {:error, ^ref2, %TransportError{reason: :closed}}
+             ] = responses
+
+      refute HTTP1.open?(conn)
+    end
+  end
+
+  test "an HTTP/1.0 keep-alive response with content-length keeps the connection open",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.0 200 OK\r\nconnection: keep-alive\r\ncontent-length: 5\r\n\r\nhello" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hello"},
+             {:done, ^ref1},
+             {:status, ^ref2, 200},
+             {:headers, ^ref2, _},
+             {:data, ^ref2, "ok"},
+             {:done, ^ref2}
+           ] = responses
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "chunked in an earlier transfer-encoding field isn't the final coding", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    body = "5\r\nhello\r\n0\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\ntransfer-encoding: gzip\r\n\r\n" <> body
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, _}, {:data, ^ref1, ^body}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, [{:done, ^ref1}, {:error, ^ref2, %TransportError{reason: :closed}}]} =
+             HTTP1.stream(conn, {:tcp_closed, conn.socket})
+
+    refute HTTP1.open?(conn)
+  end
+
   test "body with chunked transfer-encoding", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
@@ -716,19 +875,22 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == ""
   end
 
-  test "do not chunk if unknown transfer-encoding", %{conn: conn} do
+  test "unchunks when chunked is the final transfer coding after an unknown coding",
+       %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
     response =
       "HTTP/1.1 200 OK\r\ntransfer-encoding: custom, chunked\r\n\r\n" <>
-        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"
+        "2\r\n01\r\n2\r\n23\r\n0\r\n\r\n"
 
-    assert {:ok, _conn, [status, headers, body]} =
+    assert {:ok, _conn, [status, headers, data1, data2, done]} =
              HTTP1.stream(conn, {:tcp, conn.socket, response})
 
     assert status == {:status, ref, 200}
     assert headers == {:headers, ref, [{"transfer-encoding", "custom, chunked"}]}
-    assert body == {:data, ref, "2\r\n01\r\n2\r\n23\r\n0\r\n\r\nXXX"}
+    assert data1 == {:data, ref, "01"}
+    assert data2 == {:data, ref, "23"}
+    assert done == {:done, ref}
   end
 
   test "close/1", %{conn: conn} do
@@ -1437,6 +1599,93 @@ defmodule Mint.HTTP1Test do
 
       assert_closed_and_released(conn)
     end
+  end
+
+  test "pipelined requests behind a Connection: close response get a :closed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, [{"connection", "close"}, {"content-length", "2"}]},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}},
+             {:error, ^ref3, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert HTTP1.open_request_count(conn) == 0
+    assert_closed_and_released(conn)
+  end
+
+  test "bytes after a response body that closes the connection are not parsed",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nhi" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert conn.buffer == ""
+    assert_closed_and_released(conn)
+  end
+
+  test "pipelined requests behind an HTTP/1.0 response get a :closed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hi"},
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert_closed_and_released(conn)
+  end
+
+  test "pipelined requests behind a close-delimited response get a :closed error",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref3} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 200 OK\r\n\r\nhi"
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, []}, {:data, ^ref1, "hi"}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp_closed, conn.socket})
+
+    assert [
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}},
+             {:error, ^ref3, %TransportError{reason: :closed}}
+           ] = responses
+
+    assert HTTP1.open_request_count(conn) == 0
+    assert_closed_and_released(conn)
   end
 
   defp request_string(string) do
