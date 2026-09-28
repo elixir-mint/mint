@@ -138,13 +138,11 @@ defmodule Mint.HTTP1.Parse do
   # RFC 9110 10.1.4: transfer-coding = token *( OWS ";" OWS transfer-parameter )
   # and transfer-parameter = token BWS "=" BWS ( token / quoted-string ). Only the
   # coding names are returned. RFC 9112 7.1: chunked defines no parameters and
-  # their presence should be treated as an error.
+  # their presence should be treated as an error. The list may have no elements
+  # (RFC 9110 5.6.1), which adds no transfer coding.
   def transfer_encoding_header(string) do
-    case transfer_coding_list(string, []) do
-      {:ok, []} -> {:error, :empty_token_list}
-      {:ok, codings} -> {:ok, codings}
-      :error -> {:error, {:invalid_token_list, string}}
-    end
+    with :error <- transfer_coding_list(string, []),
+         do: {:error, {:invalid_token_list, string}}
   end
 
   defp transfer_coding_list(<<>>, acc), do: {:ok, :lists.reverse(acc)}
