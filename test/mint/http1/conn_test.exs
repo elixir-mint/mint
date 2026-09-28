@@ -1207,6 +1207,43 @@ defmodule Mint.HTTP1Test do
     assert done == {:done, ref}
   end
 
+  test "chunked framing applies after a transfer coding with parameters", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: custom; level=1 ;name=\"a, b\", chunked\r\n\r\n" <>
+        "5\r\nhello\r\n0\r\n\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "hello"},
+             {:done, ^ref1},
+             {:status, ^ref2, 200},
+             {:headers, ^ref2, _},
+             {:data, ^ref2, "ok"},
+             {:done, ^ref2}
+           ] = responses
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "the chunked transfer coding with parameters is an error", %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked; level=1\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+
+    assert {:error, conn, %HTTPError{reason: {:invalid_token_list, "chunked; level=1"}},
+            [{:status, ^ref, 200}]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    refute HTTP1.open?(conn)
+  end
+
   test "close/1", %{conn: conn} do
     assert HTTP1.open?(conn)
     assert {:ok, conn} = HTTP1.close(conn)
@@ -1861,6 +1898,65 @@ defmodule Mint.HTTP1Test do
       assert receive_request_string(server_socket) == "0\r\n\r\n"
 
       assert HTTP1.open?(conn)
+    end
+
+    test "chunked is appended to a transfer coding with parameters",
+         %{conn: conn, server_socket: server_socket, port: port} do
+      {:ok, conn, ref} =
+        HTTP1.request(conn, "GET", "/", [{"transfer-encoding", "gzip;q=1"}], :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost:#{port}
+               user-agent: #{mint_user_agent()}
+               transfer-encoding: gzip;q=1,chunked
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "5\r\nhello\r\n"
+    end
+
+    test "chunked is appended to the last of several transfer-encoding headers",
+         %{conn: conn, server_socket: server_socket, port: port} do
+      headers = [{"transfer-encoding", "custom;p=1"}, {"transfer-encoding", "gzip"}]
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", headers, :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost:#{port}
+               user-agent: #{mint_user_agent()}
+               transfer-encoding: custom;p=1
+               transfer-encoding: gzip,chunked
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "5\r\nhello\r\n"
+    end
+
+    test "transfer-encoding headers are combined before they're parsed",
+         %{conn: conn, server_socket: server_socket, port: port} do
+      headers = [{"transfer-encoding", ~s(custom;p="a)}, {"transfer-encoding", ~s(b", chunked)}]
+      {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", headers, :stream)
+
+      assert receive_request_string(server_socket) ==
+               request_string("""
+               GET / HTTP/1.1
+               host: localhost:#{port}
+               user-agent: #{mint_user_agent()}
+               transfer-encoding: custom;p="a
+               transfer-encoding: b", chunked
+
+               \
+               """)
+
+      {:ok, conn} = HTTP1.stream_request_body(conn, ref, "hello")
+      assert receive_request_string(server_socket) == "hello"
     end
 
     test "transfer-encoding is not set to chunked if already set to identity",

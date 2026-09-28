@@ -1358,17 +1358,14 @@ defmodule Mint.HTTP1 do
       Headers.has?(headers, "content-length") ->
         {:ok, headers, :identity}
 
-      found = Headers.find(headers, "transfer-encoding") ->
-        {raw_name, value} = found
+      Headers.has?(headers, "transfer-encoding") ->
+        values = for {_name, "transfer-encoding", value} <- headers, do: value
 
-        with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
-          if "chunked" in tokens or "identity" in tokens do
+        with {:ok, codings} <- transfer_codings(values) do
+          if "chunked" in codings or "identity" in codings do
             {:ok, headers, :identity}
           else
-            headers =
-              Headers.replace(headers, raw_name, "transfer-encoding", value <> ",chunked")
-
-            {:ok, headers, :chunked}
+            {:ok, append_chunked_coding(headers), :chunked}
           end
         end
 
@@ -1391,6 +1388,25 @@ defmodule Mint.HTTP1 do
 
     {:ok, Headers.put_new_lazy(headers, "Content-Length", "content-length", length_fun),
      :identity}
+  end
+
+  # Adds chunked as the final transfer coding, after the codings of the last
+  # Transfer-Encoding field.
+  defp append_chunked_coding(headers) do
+    headers = Enum.reverse(headers)
+    {name, "transfer-encoding", value} = List.keyfind(headers, "transfer-encoding", 1)
+
+    headers
+    |> Headers.replace(name, "transfer-encoding", value <> ",chunked")
+    |> Enum.reverse()
+  end
+
+  # RFC 9110 5.3: the field lines are combined with ", " into one field value,
+  # so a quoted string can span two of them.
+  defp transfer_codings(values) do
+    values
+    |> Enum.join(", ")
+    |> Parse.transfer_encoding_header()
   end
 
   defp wrap_error(reason) do
