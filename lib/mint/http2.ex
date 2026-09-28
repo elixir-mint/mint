@@ -313,8 +313,11 @@ defmodule Mint.HTTP2 do
       client, this also bounds the size of an inbound header block (a HEADERS frame plus
       its trailing CONTINUATION frames): the connection is closed with a connection error
       if a server streams a header block larger than this value, which prevents a server
-      from exhausting client memory with an unbounded chain of CONTINUATION frames.
-      Defaults to `256 KB` for the client.
+      from exhausting client memory with an unbounded chain of CONTINUATION frames. A
+      decoded header list larger than this value fails the request with a
+      `{:max_header_list_size_exceeded, size, max_size}` error, and a server push whose
+      promised request headers are larger than this value is refused. Defaults to
+      `256 KB` for the client.
 
     * `:enable_connect_protocol` - corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
       Sets whether the client may invoke the extended connect protocol which is used to
@@ -356,9 +359,10 @@ defmodule Mint.HTTP2 do
       `:max_concurrent_streams` setting.
 
     * `{:max_header_list_size_exceeded, size, max_size}` - when the maximum size of
-      the header list is reached. `size` is the actual value of the header list size,
-      `max_size` is the maximum value allowed. See `get_setting/2` to retrieve the
-      value of the max size.
+      the header list is reached, either for request headers sent to the server or for
+      response headers received from it. `size` is the actual value of the header list
+      size, `max_size` is the maximum value allowed. See `get_server_setting/2` and
+      `get_client_setting/2` to retrieve the value of the max size.
 
     * `{:exceeds_window_size, what, window_size}` - when the data you're trying to send
       exceeds the window size of the connection (if `what` is `:connection`) or of a request
@@ -2079,11 +2083,17 @@ defmodule Mint.HTTP2 do
   defp decode_hbf_and_add_responses(conn, responses, hbf, stream, end_stream?) do
     {conn, headers} = decode_hbf(conn, hbf)
 
-    if stream do
-      handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?)
-    else
-      log(conn, :debug, "Received HEADERS frame on closed stream ID")
-      {conn, responses}
+    cond do
+      is_nil(stream) ->
+        log(conn, :debug, "Received HEADERS frame on closed stream ID")
+        {conn, responses}
+
+      error = header_list_size_error(conn, headers) ->
+        conn = close_stream!(conn, stream.id, :protocol_error)
+        {conn, [{:error, stream.ref, wrap_error(error)} | responses]}
+
+      true ->
+        handle_decoded_headers_for_stream(conn, responses, stream, headers, end_stream?)
     end
   end
 
@@ -2189,6 +2199,25 @@ defmodule Mint.HTTP2 do
         error = wrap_error(:missing_status_header)
         responses = [{:error, stream.ref, error} | responses]
         {conn, responses}
+    end
+  end
+
+  # RFC 9113 6.5.2: the header list size is the sum of the name and value sizes plus
+  # 32 bytes per field. The compressed block is bounded while it is accumulated,
+  # but indexed fields decode to far more bytes than they take on the wire.
+  defp header_list_size_error(conn, headers) do
+    case conn.client_settings.max_header_list_size do
+      :infinity ->
+        nil
+
+      max_size ->
+        # TODO: replace with Enum.sum_by when we depend on 1.18+
+        size =
+          Enum.reduce(headers, 0, fn {name, value}, acc ->
+            acc + byte_size(name) + byte_size(value) + 32
+          end)
+
+        if size > max_size, do: {:max_header_list_size_exceeded, size, max_size}
     end
   end
 
@@ -2612,6 +2641,11 @@ defmodule Mint.HTTP2 do
         )
 
         conn = reset_promised_stream(conn, promised_stream_id, :cancel)
+        {conn, responses}
+
+      header_list_size_error(conn, headers) ->
+        log(conn, :debug, "Promised request headers exceed the max header list size")
+        conn = reset_promised_stream(conn, promised_stream_id, :refused_stream)
         {conn, responses}
 
       debug_data = promised_headers_error(headers) ->
@@ -3070,7 +3104,7 @@ defmodule Mint.HTTP2 do
 
   def format_error({:max_header_list_size_exceeded, size, max_size}) do
     "the given header list (of size #{size}) goes over the max header list size of " <>
-      "#{max_size} supported by the server. In HTTP/2, the header list size is calculated " <>
+      "#{max_size}. In HTTP/2, the header list size is calculated " <>
       "by summing up the size in bytes of each header name, value, plus 32 for each header."
   end
 
