@@ -2210,19 +2210,15 @@ defmodule Mint.HTTP2 do
   # 32 bytes per field. The compressed block is bounded while it is accumulated,
   # but indexed fields decode to far more bytes than they take on the wire.
   defp header_list_size_error(conn, headers) do
-    case conn.client_settings.max_header_list_size do
-      :infinity ->
-        nil
+    max_size = conn.client_settings.max_header_list_size
 
-      max_size ->
-        # TODO: replace with Enum.sum_by when we depend on 1.18+
-        size =
-          Enum.reduce(headers, 0, fn {name, value}, acc ->
-            acc + byte_size(name) + byte_size(value) + 32
-          end)
+    # TODO: replace with Enum.sum_by when we depend on 1.18+
+    size =
+      Enum.reduce(headers, 0, fn {name, value}, acc ->
+        acc + byte_size(name) + byte_size(value) + 32
+      end)
 
-        if size > max_size, do: {:max_header_list_size_exceeded, size, max_size}
-    end
+    if size > max_size, do: {:max_header_list_size_exceeded, size, max_size}
   end
 
   # RFC 9113 5.1: HEADERS frames move a stream reserved by a PUSH_PROMISE to the
@@ -3089,22 +3085,17 @@ defmodule Mint.HTTP2 do
   @max_dynamic_table_size_updates_size 2 * 6
 
   defp assert_header_block_within_max_size(conn, size) do
-    case conn.client_settings.max_header_list_size do
-      :infinity ->
-        conn
+    max_size = conn.client_settings.max_header_list_size
+    max_block_size = div(max_size * 30, 8) + @max_dynamic_table_size_updates_size
 
-      max_size ->
-        max_block_size = div(max_size * 30, 8) + @max_dynamic_table_size_updates_size
+    if size > max_block_size do
+      debug_data =
+        "header block fragments exceed #{max_block_size} bytes, the bound for " <>
+          "SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
 
-        if size > max_block_size do
-          debug_data =
-            "header block fragments exceed #{max_block_size} bytes, the bound for " <>
-              "SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
-
-          send_connection_error!(conn, :protocol_error, debug_data)
-        else
-          conn
-        end
+      send_connection_error!(conn, :protocol_error, debug_data)
+    else
+      conn
     end
   end
 
