@@ -1,12 +1,41 @@
 # Changelog
 
+## v1.11.0
+
+This is a minor version bump with *no breaking changes*. Please do upgrade from 1.10.x versions as it contains fixes for three recently-published CVEs.
+
+### Security
+
+  * Enforce `max_header_list_size` on the decoded header list in `Mint.HTTP2`. Previously, only the compressed header block was checked, letting a malicious server use HPACK-indexed `cookie` fields to make the client allocate about 1 GB per response. This is a fix for **CVE-2026-91043** (GitHub advisory [GHSA-9x8p-qrf4-jq7g](https://github.com/elixir-mint/mint/security/advisories/GHSA-9x8p-qrf4-jq7g)).
+  * Check the HTTP/2 frame length against `max_frame_size` before buffering the payload in `Mint.HTTP2`. Previously, a malicious server could make the client buffer up to 16 MB per connection for a single frame. This is a fix for **CVE-2026-92103** (GitHub advisory [GHSA-q95c-ccq6-j5j6](https://github.com/elixir-mint/mint/security/advisories/GHSA-q95c-ccq6-j5j6)).
+  * Use chunked framing in `Mint.HTTP1` only when `chunked` is the final transfer coding, and close the connection after HTTP/1.0 responses with `Transfer-Encoding`. Previously, a malicious server could frame a response differently from a strict intermediary on a shared connection. This is a fix for **CVE-2026-94194** (GitHub advisory [GHSA-gvrc-75rc-7gj9](https://github.com/elixir-mint/mint/security/advisories/GHSA-gvrc-75rc-7gj9)).
+
+### Bug Fixes and Improvements
+
+  * Don't close the connection on a receive timeout.
+  * Reject invalid HTTP/1 status lines and header fields, and unfold obsolete line folding.
+  * Apply the line size limit to complete HTTP/1 status and chunk-size lines.
+  * Fail HTTP/1 requests pipelined behind a response that closes the connection.
+  * Return errors from `Mint.HTTP1.stream_request_body/3` for requests that aren't streaming, instead of raising.
+  * Return responses before an error in the order they were parsed.
+  * Bracket IPv6 literal hostnames in the `Host` header and `:authority`.
+  * Keep the caller's `:mode` in forward-proxy mode.
+  * Reject HTTP/2 responses with invalid header fields, pseudo-headers or connection-specific headers.
+  * Reject HTTP/2 response bodies that don't match the `content-length` header.
+  * Reject invalid HTTP/2 DATA, padding, SETTINGS and extension frames.
+  * Return an error instead of `{:done, ref}` when an HTTP/2 stream is reset with `NO_ERROR` before the end of the response.
+  * Validate and track HTTP/2 server push streams.
+  * Apply the acknowledged HTTP/2 header table size to the decoding table.
+  * Keep the HTTP/2 receive window in sync when the window shrinks.
+  * Ignore HTTP/2 `WINDOW_UPDATE` frames on closed streams.
+
 ## v1.10.1
 
-**Security fixes**:
+### Security
 
   * Validate chunk extensions in HTTP/1 chunked responses in `Mint.HTTP1`. Previously, any bytes between the chunk size and the CRLF were accepted, letting a malicious server frame a chunked response differently from a strict intermediary on a shared connection. This is a fix for **CVE-2026-82672** (GitHub advisory [GHSA-rj5m-69wp-cxq9](https://github.com/elixir-mint/mint/security/advisories/GHSA-rj5m-69wp-cxq9)).
 
-Bug fixes:
+### Bug Fixes and Improvements
 
   * Close TCP sockets on errors in HTTP/1.
   * Keep HTTP/1.0 `CONNECT` tunnel sockets open.
@@ -15,17 +44,17 @@ Bug fixes:
 
 This is a minor version bump with *no breaking changes*. Please do upgrade from 1.9.x versions as it contains fixes for two recently-published CVEs.
 
-**Security fixes**:
+### Security
 
   * Set bounds for a HTTP/1 server's returned *status line* and *chunk-extension line*. Previous, `Mint.HTTP1` would parse these without any size cap, allowing a malicious actor to stream bytes indefinitely, exhausting the client's host memory. This is a fix for **CVE-2026-82728** (GitHub advisory [GHSA-g83f-2j6r-q6m4](https://github.com/elixir-mint/mint/security/advisories/GHSA-g83f-2j6r-q6m4)).
   * Set a bound for chunked responses chunk-size field in `Mint.HTTP1`, which prevents an attack where the malicious actor could send a chunk size made of a huge run of hex digits and burn CPU on the client host. This is a fix for **CVE-2026-82729** (GitHub advisory [GHSA-7p8w-j234-7qc8](https://github.com/elixir-mint/mint/security/advisories/GHSA-7p8w-j234-7qc8)).
 
-New features:
+### New features
 
   * Support processing HTTP/1.1 headers as they arrive.
   * Add support for HTTPS proxies for HTTPS connections.
 
-Bug fixes:
+### Bug Fixes and Improvements
 
   * Send origin `Host` header for plain-HTTP proxied requests.
   * Fix `CONNECT` response framing and IPv6 authority in tunnel proxies.
@@ -36,9 +65,13 @@ Bug fixes:
 
 ## v1.9.3
 
+### Security
+
   * Prevent signed integers when parsing HTTP/1 chunk sizes. This is a fix for **CVE-2026-59249** ([GitHub advisory](https://github.com/elixir-mint/mint/security/advisories/GHSA-x3x7-96vm-6h2w)).
 
 ## v1.9.2
+
+### Security
 
   * Cap HTTP/1 total header size for responses. This is a fix for **CVE-2026-58229** (GitHub advisory [GHSA-qrfr-wh4c-3qhw](https://github.com/elixir-mint/mint/security/advisories/GHSA-qrfr-wh4c-3qhw)).
   * Do not store empty `CONTINUATION` (HTTP/2) frames. This is a fix for **CVE-2026-59246** (GitHub advisory [GHSA-8pf6-g464-h6h9](https://github.com/elixir-mint/mint/security/advisories/GHSA-8pf6-g464-h6h9)).
