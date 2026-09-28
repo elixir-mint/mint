@@ -133,6 +133,36 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "oversized frames" do
+    for mode <- [:active, :passive] do
+      @tag connect_options: [mode: mode]
+      test "rejects a split header without a payload in #{mode} mode", %{conn: conn} do
+        receive_data = fn conn, data ->
+          case conn.mode do
+            :active ->
+              HTTP2.stream(conn, {:ssl, conn.socket, data})
+
+            :passive ->
+              :ok = :ssl.send(server_get_socket(), data)
+              HTTP2.recv(conn, 0, @recv_timeout)
+          end
+        end
+
+        <<first::binary-size(8), last::binary>> = <<16_777_215::24, 0, 0, 0::1, 1::31>>
+
+        assert {:ok, conn, []} = receive_data.(conn, first)
+        assert conn.buffer == first
+
+        assert {:error, conn, error, []} = receive_data.(conn, last)
+        debug_data = "frame payload exceeds connection's max frame size"
+        assert_http2_error error, {:frame_size_error, ^debug_data}
+        refute HTTP2.open?(conn)
+
+        assert_recv_frames [goaway(error_code: :frame_size_error, debug_data: ^debug_data)]
+      end
+    end
+  end
+
   describe "set_window_size/3" do
     @describetag connect_options: [connection_window_size: 65_535]
 

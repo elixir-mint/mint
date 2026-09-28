@@ -33,6 +33,45 @@ defmodule Mint.HTTP2.FrameTest do
     assert Frame.decode_next(<<>>) == :more
   end
 
+  test "decode_next/2 rejects oversized frames before receiving the payload" do
+    for max_frame_size <- [16_384, 32_768],
+        length <- [max_frame_size + 1, 16_777_215],
+        type <- [0x00, 0xFF],
+        payload <- [<<>>, <<0>>] do
+      frame = <<length::24, type, 0, 0::1, 1::31, payload::binary>>
+
+      assert Frame.decode_next(frame, max_frame_size) == {:error, :payload_too_big}
+    end
+  end
+
+  test "decode_next/1 waits for a complete frame header" do
+    header = <<16_385::24, 0, 0, 0::1, 1::31>>
+
+    for size <- 0..8 do
+      assert Frame.decode_next(binary_part(header, 0, size)) == :more
+    end
+
+    assert Frame.decode_next(header) == {:error, :payload_too_big}
+  end
+
+  test "decode_next/2 accepts frames at the configured size limit" do
+    for max_frame_size <- [16_384, 32_768] do
+      header = <<max_frame_size::24, 0, 0, 0::1, 1::31>>
+      payload = :binary.copy(<<0>>, max_frame_size)
+
+      assert Frame.decode_next(header, max_frame_size) == :more
+
+      assert Frame.decode_next(
+               header <> binary_part(payload, 0, max_frame_size - 1),
+               max_frame_size
+             ) ==
+               :more
+
+      assert {:ok, data(stream_id: 1, data: ^payload), "rest"} =
+               Frame.decode_next(header <> payload <> "rest", max_frame_size)
+    end
+  end
+
   describe "DATA" do
     test "without padding" do
       check all stream_id <- non_zero_stream_id(),
