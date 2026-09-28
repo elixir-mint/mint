@@ -135,9 +135,81 @@ defmodule Mint.HTTP1.Parse do
     split_into_downcase_tokens(string)
   end
 
+  # RFC 9110 10.1.4: transfer-coding = token *( OWS ";" OWS transfer-parameter )
+  # and transfer-parameter = token BWS "=" BWS ( token / quoted-string ). Only the
+  # coding names are returned. RFC 9112 7.1: chunked defines no parameters and
+  # their presence should be treated as an error. The list may have no elements
+  # (RFC 9110 5.6.1), which adds no transfer coding.
   def transfer_encoding_header(string) do
-    split_into_downcase_tokens(string)
+    with :error <- transfer_coding_list(string, []),
+         do: {:error, {:invalid_token_list, string}}
   end
+
+  defp transfer_coding_list(<<>>, acc), do: {:ok, :lists.reverse(acc)}
+
+  defp transfer_coding_list(<<char, rest::binary>>, acc)
+       when is_whitespace(char) or is_comma(char),
+       do: transfer_coding_list(rest, acc)
+
+  defp transfer_coding_list(<<char, _::binary>> = string, acc) when is_tchar(char) do
+    {coding, rest} = take_token_downcase(string, <<>>)
+    transfer_parameters(trim_leading_whitespace(rest), [coding | acc])
+  end
+
+  defp transfer_coding_list(_string, _acc), do: :error
+
+  # Parses the parameters of the last coding in acc, then the list separator.
+  defp transfer_parameters(<<>>, acc), do: {:ok, :lists.reverse(acc)}
+
+  defp transfer_parameters(<<char, rest::binary>>, acc) when is_comma(char),
+    do: transfer_coding_list(rest, acc)
+
+  defp transfer_parameters(<<?;, rest::binary>>, [coding | _] = acc) when coding != "chunked" do
+    with {:ok, rest} <- transfer_parameter(trim_leading_whitespace(rest)),
+         do: transfer_parameters(trim_leading_whitespace(rest), acc)
+  end
+
+  defp transfer_parameters(_string, _acc), do: :error
+
+  defp transfer_parameter(<<char, _::binary>> = string) when is_tchar(char) do
+    rest = skip_token(string)
+
+    case trim_leading_whitespace(rest) do
+      <<?=, rest::binary>> -> transfer_parameter_value(trim_leading_whitespace(rest))
+      _other -> :error
+    end
+  end
+
+  defp transfer_parameter(_string), do: :error
+
+  defp transfer_parameter_value(<<?", rest::binary>>), do: quoted_string(rest)
+
+  defp transfer_parameter_value(<<char, _::binary>> = string) when is_tchar(char) do
+    {:ok, skip_token(string)}
+  end
+
+  defp transfer_parameter_value(_string), do: :error
+
+  # RFC 9110 5.6.4: qdtext and quoted-pair, after the opening quote.
+  defp quoted_string(<<?", rest::binary>>), do: {:ok, rest}
+
+  defp quoted_string(<<?\\, char, rest::binary>>)
+       when char == 9 or char in 32..126 or char in 128..255,
+       do: quoted_string(rest)
+
+  defp quoted_string(<<char, rest::binary>>)
+       when char in [9, 32, 33] or char in 35..91 or char in 93..126 or char in 128..255,
+       do: quoted_string(rest)
+
+  defp quoted_string(_string), do: :error
+
+  defp skip_token(<<char, rest::binary>>) when is_tchar(char), do: skip_token(rest)
+  defp skip_token(rest), do: rest
+
+  defp take_token_downcase(<<char, rest::binary>>, acc) when is_tchar(char),
+    do: take_token_downcase(rest, <<acc::binary, downcase_ascii_char(char)>>)
+
+  defp take_token_downcase(rest, acc), do: {acc, rest}
 
   defp split_into_downcase_tokens(string) do
     case token_list_downcase(string) do

@@ -56,6 +56,11 @@ defmodule Mint.HTTP1 do
       `Mint.TransportError` with reason `:closed` instead, since the server might have
       processed them.
 
+    * `:connection_upgraded` - when a pipelined request gets no response because the
+      server answered a previous request with a `101` response. The connection then
+      uses another protocol, and the server might have received the request as part
+      of it.
+
     * `{:unexpected_data, data}` - when unexpected data is received from the server.
 
     * `:invalid_status_line` - when the HTTP/1 status line is invalid.
@@ -865,7 +870,7 @@ defmodule Mint.HTTP1 do
   # treated as faulty, so the connection is closed after it without processing the
   # final response, and the current request fails along with the queued ones.
   defp decode_body(:informational, %{request: request} = conn, _data, _request_ref, responses)
-       when request.version < {1, 1} and request.transfer_encoding != [] do
+       when request.version < {1, 1} and request.transfer_encoding != nil do
     {conn, responses} = close_after_response(conn, responses, conn.transport.wrap_error(:closed))
     {:ok, conn, responses}
   end
@@ -873,6 +878,8 @@ defmodule Mint.HTTP1 do
   # Informational (1xx) responses have no body and must not finalize the
   # request; the final response follows on the same request ref. Reset the
   # request's response-side fields and continue parsing without popping it.
+  # A "close" option is kept, so the connection is closed after the final
+  # response (RFC 9112 9.6).
   defp decode_body(:informational, conn, data, _request_ref, responses) do
     request = %{
       conn.request
@@ -883,8 +890,8 @@ defmodule Mint.HTTP1 do
         headers_size: 0,
         data_buffer: [],
         content_length: nil,
-        connection: [],
-        transfer_encoding: [],
+        connection: if("close" in conn.request.connection, do: ["close"], else: []),
+        transfer_encoding: nil,
         body: nil
     }
 
@@ -892,9 +899,12 @@ defmodule Mint.HTTP1 do
     decode(:status, conn, data, responses)
   end
 
+  # A 101 response switches the connection to another protocol (RFC 9110
+  # 15.2.2), so the bytes after it belong to that protocol.
   defp decode_body(:single, conn, data, _request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
     {conn, responses} = request_done(conn, responses)
+    {conn, responses} = fail_requests(conn, responses, wrap_error(:connection_upgraded))
     {:ok, conn, responses}
   end
 
@@ -1143,9 +1153,11 @@ defmodule Mint.HTTP1 do
          do: {:ok, %{request | connection: connection ++ connection_header}}
   end
 
+  # Transfer-Encoding values are kept unparsed, nil meaning there's no such field.
+  # They're only parsed when they decide the framing of the body, so they don't
+  # fail responses that have no body.
   defp store_header(%{transfer_encoding: transfer_encoding} = request, "transfer-encoding", value) do
-    with {:ok, transfer_encoding_header} <- Parse.transfer_encoding_header(value),
-         do: {:ok, %{request | transfer_encoding: transfer_encoding ++ transfer_encoding_header}}
+    {:ok, %{request | transfer_encoding: List.wrap(transfer_encoding) ++ [value]}}
   end
 
   defp store_header(_request, "content-length", _value) do
@@ -1179,7 +1191,7 @@ defmodule Mint.HTTP1 do
 
       # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
       # treated as faulty, so the connection is closed after it even if kept alive.
-      "keep-alive" in request.connection and request.transfer_encoding == [] ->
+      "keep-alive" in request.connection and request.transfer_encoding == nil ->
         {conn, responses}
 
       true ->
@@ -1201,6 +1213,15 @@ defmodule Mint.HTTP1 do
   # Requests pipelined behind a response that closes the connection never get a
   # response of their own.
   defp close_after_response(conn, responses, error) do
+    {conn, responses} = fail_requests(conn, responses, error)
+    {internal_close(conn), responses}
+  end
+
+  # Returns an error response with the given error for the current request and
+  # every queued one, and removes them from the connection. If one of them is
+  # streaming its body, the streaming state is cleared so the rest of the body
+  # can't be sent.
+  defp fail_requests(conn, responses, error) do
     requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
 
     responses =
@@ -1208,7 +1229,12 @@ defmodule Mint.HTTP1 do
         [{:error, request.ref, error} | responses]
       end)
 
-    {internal_close(%{conn | request: nil, requests: :queue.new()}), responses}
+    # No request can be made while one is streaming its body, so a streaming
+    # request is the last one and it's among the failed ones unless it's done.
+    streaming_request = if requests == [], do: conn.streaming_request
+
+    conn = %{conn | request: nil, requests: :queue.new(), streaming_request: streaming_request}
+    {conn, responses}
   end
 
   defp pop_request(conn) do
@@ -1239,14 +1265,12 @@ defmodule Mint.HTTP1 do
     %{conn | state: :closed}
   end
 
-  # RFC7230 3.3.3:
-  # > If a message is received with both a Transfer-Encoding and a
-  # > Content-Length header field, the Transfer-Encoding overrides the
-  # > Content-Length.  Such a message might indicate an attempt to
-  # > perform request smuggling (Section 9.5) or response splitting
-  # > (Section 9.4) and ought to be handled as an error.  A sender MUST
-  # > remove the received Content-Length field prior to forwarding such
-  # > a message downstream.
+  # Determines the length of a response body following RFC 9112 6.3. A response
+  # to HEAD, a 1xx, 204 or 304 response and a 2xx response to CONNECT have no
+  # body, and the bytes after a 101 response belong to the new protocol. For
+  # other responses, Transfer-Encoding together with Content-Length ought to be
+  # handled as an error, and a response with neither is read until the
+  # connection closes.
   defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       status == 101 ->
@@ -1266,19 +1290,20 @@ defmodule Mint.HTTP1 do
       method == "CONNECT" and status in 200..299 ->
         {:ok, :none}
 
-      request.transfer_encoding != [] && request.content_length ->
+      request.transfer_encoding != nil && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
 
-      # RFC9112 6.3:
-      # > If a Transfer-Encoding header field is present in a response and the
-      # > chunked transfer coding is not the final encoding, the message body
-      # > length is determined by reading the connection until it is closed by
-      # > the server.
-      "chunked" == List.last(request.transfer_encoding) ->
-        {:ok, {:chunked, nil}}
-
-      request.transfer_encoding != [] ->
-        {:ok, :until_closed}
+      # RFC 9112 6.3: with chunked as the final transfer coding the body is
+      # chunked. With another final coding, or a Transfer-Encoding field with no
+      # codings, it's read until the server closes the connection.
+      request.transfer_encoding != nil ->
+        with {:ok, codings} <- transfer_codings(request.transfer_encoding) do
+          if List.last(codings) == "chunked" do
+            {:ok, {:chunked, nil}}
+          else
+            {:ok, :until_closed}
+          end
+        end
 
       request.content_length ->
         {:ok, {:content_length, request.content_length}}
@@ -1331,7 +1356,7 @@ defmodule Mint.HTTP1 do
       data_buffer: [],
       content_length: nil,
       connection: [],
-      transfer_encoding: [],
+      transfer_encoding: nil,
       body: nil
     }
   end
@@ -1358,17 +1383,14 @@ defmodule Mint.HTTP1 do
       Headers.has?(headers, "content-length") ->
         {:ok, headers, :identity}
 
-      found = Headers.find(headers, "transfer-encoding") ->
-        {raw_name, value} = found
+      Headers.has?(headers, "transfer-encoding") ->
+        values = for {_name, "transfer-encoding", value} <- headers, do: value
 
-        with {:ok, tokens} <- Parse.transfer_encoding_header(value) do
-          if "chunked" in tokens or "identity" in tokens do
+        with {:ok, codings} <- transfer_codings(values) do
+          if "chunked" in codings or "identity" in codings do
             {:ok, headers, :identity}
           else
-            headers =
-              Headers.replace(headers, raw_name, "transfer-encoding", value <> ",chunked")
-
-            {:ok, headers, :chunked}
+            {:ok, append_chunked_coding(headers), :chunked}
           end
         end
 
@@ -1393,6 +1415,30 @@ defmodule Mint.HTTP1 do
      :identity}
   end
 
+  # Adds chunked as the final transfer coding, after the codings of the last
+  # Transfer-Encoding field. A last field with no codings is replaced.
+  defp append_chunked_coding(headers) do
+    headers = Enum.reverse(headers)
+    {name, "transfer-encoding", value} = List.keyfind(headers, "transfer-encoding", 1)
+
+    value =
+      if Parse.transfer_encoding_header(value) == {:ok, []},
+        do: "chunked",
+        else: value <> ",chunked"
+
+    headers
+    |> Headers.replace(name, "transfer-encoding", value)
+    |> Enum.reverse()
+  end
+
+  # RFC 9110 5.3: the field lines are combined with ", " into one field value,
+  # so a quoted string can span two of them.
+  defp transfer_codings(values) do
+    values
+    |> Enum.join(", ")
+    |> Parse.transfer_encoding_header()
+  end
+
   defp wrap_error(reason) do
     %HTTPError{reason: reason, module: __MODULE__}
   end
@@ -1407,6 +1453,11 @@ defmodule Mint.HTTP1 do
   def format_error(:unprocessed) do
     "request was not processed because the server answered a previous request with " <>
       "\"connection: close\", so it's safe to retry on a new connection"
+  end
+
+  def format_error(:connection_upgraded) do
+    "request got no response because the server switched the connection to another " <>
+      "protocol in response to a previous request"
   end
 
   def format_error(:request_body_is_streaming) do

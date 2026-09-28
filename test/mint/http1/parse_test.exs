@@ -161,7 +161,31 @@ defmodule Mint.HTTP1.ParseTest do
     assert transfer_encoding_header("gzip,   Chunked  ") == {:ok, ["gzip", "chunked"]}
 
     assert transfer_encoding_header("\n") == {:error, {:invalid_token_list, "\n"}}
-    assert transfer_encoding_header("") == {:error, :empty_token_list}
+    assert transfer_encoding_header("") == {:ok, []}
+    assert transfer_encoding_header(" , ,") == {:ok, []}
+  end
+
+  test "transfer_encoding_header/1 with transfer coding parameters" do
+    assert transfer_encoding_header("Custom;Level=1") == {:ok, ["custom"]}
+
+    assert transfer_encoding_header("custom ; a=1 ;b = x, chunked") ==
+             {:ok, ["custom", "chunked"]}
+
+    assert transfer_encoding_header(~s(custom; a="x, \\"y\\"; z", gzip)) ==
+             {:ok, ["custom", "gzip"]}
+
+    for value <- [
+          "custom;",
+          "custom; a",
+          "custom; a=",
+          "custom; =1",
+          "custom; a=1 b",
+          ~s(custom; a="x),
+          "chunked; a=1",
+          "Chunked;a=1, gzip"
+        ] do
+      assert transfer_encoding_header(value) == {:error, {:invalid_token_list, value}}
+    end
   end
 
   describe "token_list_downcase/1" do
