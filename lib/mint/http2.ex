@@ -2954,22 +2954,40 @@ defmodule Mint.HTTP2 do
   # The header block accumulated from a HEADERS frame and its trailing
   # CONTINUATION frames is buffered (in compressed form) until END_HEADERS
   # arrives. A server can withhold END_HEADERS and stream CONTINUATION frames
-  # indefinitely, so the buffered size is bounded by the locally advertised
-  # SETTINGS_MAX_HEADER_LIST_SIZE. Empty fragments are not retained in the
-  # accumulator. The compressed accumulator is never larger than the
-  # uncompressed header list it decodes to, so the size limit never rejects a
-  # header block that fits within the advertised limit.
+  # indefinitely, so the buffered fragments are bounded by the largest encoding
+  # of a header list within the locally advertised SETTINGS_MAX_HEADER_LIST_SIZE,
+  # which is enforced on the decoded list. The fragment that carries END_HEADERS
+  # isn't buffered or counted. Empty fragments are not retained in the
+  # accumulator.
+  #
+  # The bound assumes minimal integer representations (RFC 7541 5.1) and at most
+  # two dynamic table size updates (RFC 7541 4.2). HPACK decoders also accept
+  # redundant zero continuation bytes in integers and any number of size updates,
+  # which no finite bound covers. A Huffman-coded octet takes at most 30 bits
+  # (RFC 7541 Appendix B), and a field's representation byte, integers (at most 6
+  # bytes each below 2^32) and Huffman padding take less than 15 bytes, so a
+  # field encodes to less than the (name + value + 32) * 30 / 8 bytes that its
+  # decoded size (RFC 9113 6.5.2) allows. A size update takes at most 6 bytes,
+  # since SETTINGS values are 32-bit (RFC 9113 6.5.1).
+  @max_dynamic_table_size_updates_size 2 * 6
+
   defp assert_header_block_within_max_size(conn, size) do
     case conn.client_settings.max_header_list_size do
       :infinity ->
         conn
 
-      max_size when size > max_size ->
-        debug_data = "header block exceeds SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
-        send_connection_error!(conn, :protocol_error, debug_data)
+      max_size ->
+        max_block_size = div(max_size * 30, 8) + @max_dynamic_table_size_updates_size
 
-      _max_size ->
-        conn
+        if size > max_block_size do
+          debug_data =
+            "header block fragments exceed #{max_block_size} bytes, the bound for " <>
+              "SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
+
+          send_connection_error!(conn, :protocol_error, debug_data)
+        else
+          conn
+        end
     end
   end
 
