@@ -1243,14 +1243,12 @@ defmodule Mint.HTTP1 do
     %{conn | state: :closed}
   end
 
-  # RFC7230 3.3.3:
-  # > If a message is received with both a Transfer-Encoding and a
-  # > Content-Length header field, the Transfer-Encoding overrides the
-  # > Content-Length.  Such a message might indicate an attempt to
-  # > perform request smuggling (Section 9.5) or response splitting
-  # > (Section 9.4) and ought to be handled as an error.  A sender MUST
-  # > remove the received Content-Length field prior to forwarding such
-  # > a message downstream.
+  # Determines the length of a response body following RFC 9112 6.3. A response
+  # to HEAD, a 1xx, 204 or 304 response and a 2xx response to CONNECT have no
+  # body, and the bytes after a 101 response belong to the new protocol. For
+  # other responses, Transfer-Encoding together with Content-Length ought to be
+  # handled as an error, and a response with neither is read until the
+  # connection closes.
   defp message_body(%{body: nil, method: method, status: status} = request) do
     cond do
       status == 101 ->
@@ -1273,13 +1271,9 @@ defmodule Mint.HTTP1 do
       request.transfer_encoding != nil && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
 
-      # RFC9112 6.3:
-      # > If a Transfer-Encoding header field is present in a response and the
-      # > chunked transfer coding is not the final encoding, the message body
-      # > length is determined by reading the connection until it is closed by
-      # > the server.
-      # A Transfer-Encoding field with no codings leaves the response without
-      # framing, so it's read until close as well.
+      # RFC 9112 6.3: with chunked as the final transfer coding the body is
+      # chunked. With another final coding, or a Transfer-Encoding field with no
+      # codings, it's read until the server closes the connection.
       request.transfer_encoding != nil ->
         with {:ok, codings} <- transfer_codings(request.transfer_encoding) do
           if List.last(codings) == "chunked" do
