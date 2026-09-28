@@ -89,12 +89,15 @@ defmodule Mint.HTTP2.Frame do
                {:frame_size_error, atom()}
                | {:protocol_error, binary()}
                | :payload_too_big
-  def decode_next(bin, max_frame_size \\ 16_384) when is_binary(bin) do
-    case decode_next_raw(bin) do
-      {:ok, {_type, _flags, _stream_id, payload}, _rest}
-      when byte_size(payload) > max_frame_size ->
-        {:error, :payload_too_big}
+  def decode_next(bin, max_frame_size \\ 16_384)
 
+  def decode_next(<<length::24, _header::binary-size(6), _rest::binary>>, max_frame_size)
+      when length > max_frame_size do
+    {:error, :payload_too_big}
+  end
+
+  def decode_next(bin, _max_frame_size) when is_binary(bin) do
+    case decode_next_raw(bin) do
       {:ok, {type, flags, stream_id, payload}, rest} ->
         {:ok, decode_contents(type, flags, stream_id, payload), rest}
 
