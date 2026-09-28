@@ -861,6 +861,15 @@ defmodule Mint.HTTP1 do
     next_request(conn, data, responses)
   end
 
+  # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
+  # treated as faulty, so the connection is closed after it without processing the
+  # final response, and the current request fails along with the queued ones.
+  defp decode_body(:informational, %{request: request} = conn, _data, _request_ref, responses)
+       when request.version < {1, 1} and request.transfer_encoding != [] do
+    {conn, responses} = close_after_response(conn, responses, conn.transport.wrap_error(:closed))
+    {:ok, conn, responses}
+  end
+
   # Informational (1xx) responses have no body and must not finalize the
   # request; the final response follows on the same request ref. Reset the
   # request's response-side fields and continue parsing without popping it.
@@ -1168,7 +1177,9 @@ defmodule Mint.HTTP1 do
       request.version >= {1, 1} ->
         {conn, responses}
 
-      "keep-alive" in request.connection ->
+      # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
+      # treated as faulty, so the connection is closed after it even if kept alive.
+      "keep-alive" in request.connection and request.transfer_encoding == [] ->
         {conn, responses}
 
       true ->
@@ -1258,8 +1269,16 @@ defmodule Mint.HTTP1 do
       request.transfer_encoding != [] && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
 
-      "chunked" == List.first(request.transfer_encoding) ->
+      # RFC9112 6.3:
+      # > If a Transfer-Encoding header field is present in a response and the
+      # > chunked transfer coding is not the final encoding, the message body
+      # > length is determined by reading the connection until it is closed by
+      # > the server.
+      "chunked" == List.last(request.transfer_encoding) ->
         {:ok, {:chunked, nil}}
+
+      request.transfer_encoding != [] ->
+        {:ok, :until_closed}
 
       request.content_length ->
         {:ok, {:content_length, request.content_length}}
