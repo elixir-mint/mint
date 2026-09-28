@@ -1027,6 +1027,195 @@ defmodule Mint.HTTP2Test do
     end
 
     @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a decoded header list past max_header_list_size is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Each field counts 32 bytes on top of its name and value, so 40 small fields
+      # decode to more than 40 * 32 bytes, over the limit, while the encoded block
+      # stays under it.
+      headers = [{":status", "200"} | for(i <- 1..40, do: {"h#{i}", "v"})]
+
+      assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, size, 1_000}
+      assert size > 1_000
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+
+      # The block was decoded, so the HPACK table is still in sync.
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{},
+              [{:status, ^ref, 200}, {:headers, ^ref, [{"h1", "v"}]}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}, {"h1", "v"}],
+                  [:end_headers, :end_stream]}
+               ])
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "cookie fields are measured before they're joined", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # The two fields decode to 2 * (6 + 450 + 32) bytes plus :status, over the
+      # limit, while the joined cookie would be one field under it.
+      cookie = String.duplicate("c", 450)
+      headers = [{":status", "200"}, {"cookie", cookie}, {"cookie", cookie}]
+
+      assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers, :end_stream]}])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, 1_018, 1_000}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "indexed fields are measured by their decoded size", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # The first response stores the cookie in the dynamic table at index 62.
+      cookie = String.duplicate("c", 400)
+      server = Process.get(@server_pdict_key)
+
+      {hbf, encode_table} =
+        HPAX.encode(
+          [{:no_store, ":status", "200"}, {:store, "cookie", cookie}],
+          server.encode_table
+        )
+
+      Process.put(@server_pdict_key, %{server | encode_table: encode_table})
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, _}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: IO.iodata_to_binary(hbf),
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # :status 200 from the static table and three references to the stored cookie
+      # are four bytes on the wire and 42 + 3 * (6 + 400 + 32) bytes decoded.
+      assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: <<0x88, 0xBE, 0xBE, 0xBE>>,
+                   flags: set_flags(:headers, [:end_headers, :end_stream])
+                 )
+               ])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, 1_356, 1_000}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a decoded informational header list past max_header_list_size is a stream error",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      headers = [{":status", "103"} | for(i <- 1..40, do: {"h#{i}", "v"})]
+
+      assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+               stream_frames(conn, [{:headers, stream_id, headers, [:end_headers]}])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, _size, 1_000}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a decoded header list split over CONTINUATION frames is measured as a whole",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "200"} | for(i <- 1..40, do: {"h#{i}", "v"})])
+      {hbf1, hbf2} = :erlang.split_binary(hbf, div(byte_size(hbf), 2))
+
+      assert {:ok, %HTTP2{} = conn, [{:error, ^ref, error}]} =
+               stream_frames(conn, [
+                 headers(stream_id: stream_id, hbf: hbf1, flags: set_flags(:headers, [])),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert_http2_error error, {:max_header_list_size_exceeded, _size, 1_000}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a decoded trailer list past max_header_list_size is a stream error", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      trailers = for i <- 1..40, do: {"h#{i}", "v"}
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 {:headers, stream_id, trailers, [:end_headers, :end_stream]}
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:error, ^ref, error}] = responses
+      assert_http2_error error, {:max_header_list_size_exceeded, _size, 1_000}
+
+      assert_recv_frames [rst_stream(stream_id: ^stream_id, error_code: :protocol_error)]
+      assert HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a promised header list past max_header_list_size refuses the promised stream",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers(promised_headers() ++ for(i <- 1..40, do: {"h#{i}", "v"}))
+
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 push_promise(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   promised_stream_id: 2,
+                   flags: set_flags(:push_promise, [:end_headers])
+                 )
+               ])
+
+      assert_recv_frames [rst_stream(stream_id: 2, error_code: :refused_stream)]
+      assert HTTP2.open?(conn)
+      refute Map.has_key?(conn.streams, 2)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
     test "a single oversized HEADERS fragment past max_header_list_size is a connection error",
          %{conn: conn} do
       {conn, _ref} = open_request(conn)
@@ -3102,6 +3291,10 @@ defmodule Mint.HTTP2Test do
     {server, headers} = TestServer.decode_headers(server, hbf)
     Process.put(@server_pdict_key, server)
     headers
+  end
+
+  defp promised_headers do
+    [{":method", "GET"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}]
   end
 
   defp open_request(conn, body \\ nil) do
