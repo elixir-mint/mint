@@ -56,6 +56,11 @@ defmodule Mint.HTTP1 do
       `Mint.TransportError` with reason `:closed` instead, since the server might have
       processed them.
 
+    * `:connection_upgraded` - when a pipelined request gets no response because the
+      server answered a previous request with a `101` response. The connection then
+      uses another protocol, and the server might have received the request as part
+      of it.
+
     * `{:unexpected_data, data}` - when unexpected data is received from the server.
 
     * `:invalid_status_line` - when the HTTP/1 status line is invalid.
@@ -894,9 +899,12 @@ defmodule Mint.HTTP1 do
     decode(:status, conn, data, responses)
   end
 
+  # A 101 response switches the connection to another protocol (RFC 9110
+  # 15.2.2), so the bytes after it belong to that protocol.
   defp decode_body(:single, conn, data, _request_ref, responses) do
     {conn, responses} = add_body(conn, data, responses)
     {conn, responses} = request_done(conn, responses)
+    {conn, responses} = fail_requests(conn, responses, wrap_error(:connection_upgraded))
     {:ok, conn, responses}
   end
 
@@ -1205,6 +1213,15 @@ defmodule Mint.HTTP1 do
   # Requests pipelined behind a response that closes the connection never get a
   # response of their own.
   defp close_after_response(conn, responses, error) do
+    {conn, responses} = fail_requests(conn, responses, error)
+    {internal_close(conn), responses}
+  end
+
+  # Returns an error response with the given error for the current request and
+  # every queued one, and removes them from the connection. If one of them is
+  # streaming its body, the streaming state is cleared so the rest of the body
+  # can't be sent.
+  defp fail_requests(conn, responses, error) do
     requests = if conn.request, do: [conn.request | :queue.to_list(conn.requests)], else: []
 
     responses =
@@ -1212,7 +1229,12 @@ defmodule Mint.HTTP1 do
         [{:error, request.ref, error} | responses]
       end)
 
-    {internal_close(%{conn | request: nil, requests: :queue.new()}), responses}
+    # No request can be made while one is streaming its body, so a streaming
+    # request is the last one and it's among the failed ones unless it's done.
+    streaming_request = if requests == [], do: conn.streaming_request
+
+    conn = %{conn | request: nil, requests: :queue.new(), streaming_request: streaming_request}
+    {conn, responses}
   end
 
   defp pop_request(conn) do
@@ -1431,6 +1453,11 @@ defmodule Mint.HTTP1 do
   def format_error(:unprocessed) do
     "request was not processed because the server answered a previous request with " <>
       "\"connection: close\", so it's safe to retry on a new connection"
+  end
+
+  def format_error(:connection_upgraded) do
+    "request got no response because the server switched the connection to another " <>
+      "protocol in response to a previous request"
   end
 
   def format_error(:request_body_is_streaming) do

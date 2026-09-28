@@ -1240,6 +1240,71 @@ defmodule Mint.HTTP1Test do
     assert conn.buffer == <<>>
   end
 
+  test "a request pipelined behind a successful CONNECT gets its response from the tunnel",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "CONNECT", "example.com:80", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    assert {:ok, conn, [{:status, ^ref1, 200}, {:headers, ^ref1, []}, {:done, ^ref1}]} =
+             HTTP1.stream(
+               conn,
+               {:tcp, conn.socket, "HTTP/1.1 200 Connection Established\r\n\r\n"}
+             )
+
+    response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn,
+            [{:status, ^ref2, 200}, {:headers, ^ref2, _}, {:data, ^ref2, "ok"}, {:done, ^ref2}]} =
+             HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "requests pipelined behind a 101 response get no response", %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response = "HTTP/1.1 101 Switching Protocols\r\nupgrade: foo\r\nconnection: upgrade\r\n\r\n"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 101},
+             {:headers, ^ref1, _},
+             {:done, ^ref1},
+             {:error, ^ref2, %HTTPError{reason: :connection_upgraded}}
+           ] = responses
+
+    assert HTTP1.open?(conn)
+    assert HTTP1.open_request_count(conn) == 0
+
+    data = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:error, _conn, %HTTPError{reason: {:unexpected_data, ^data}}, []} =
+             HTTP1.stream(conn, {:tcp, conn.socket, data})
+  end
+
+  test "a streaming request pipelined behind a 101 response can't stream its body",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "POST", "/", [], :stream)
+
+    response = "HTTP/1.1 101 Switching Protocols\r\nupgrade: foo\r\nconnection: upgrade\r\n\r\n"
+
+    assert {:ok, conn,
+            [
+              {:status, ^ref1, 101},
+              {:headers, ^ref1, _},
+              {:done, ^ref1},
+              {:error, ^ref2, %HTTPError{reason: :connection_upgraded}}
+            ]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert {:error, _conn, %HTTPError{reason: :unknown_request_to_stream}} =
+             HTTP1.stream_request_body(conn, ref2, "hello")
+
+    assert_raise ArgumentError, fn -> HTTP1.request_body_window(conn, ref2) end
+  end
+
   test "unallowed trailer headers are removed from the trailer headers", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/", [], nil)
 
