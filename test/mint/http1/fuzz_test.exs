@@ -42,33 +42,45 @@ defmodule Mint.HTTP1.FuzzTest do
     ])
   end
 
+  # Returns the framing headers with the body length RFC 9112 6.3 gives them:
+  # an integer, :until_close, or nil when the headers don't describe the body.
+  # Chunked framing applies only when chunked is the final transfer coding.
   defp framing_headers_gen(body) do
     derived =
       case body do
         :none ->
-          [[], [{"content-length", "0"}]]
+          [{[], :until_close}, {[{"content-length", "0"}], 0}]
 
-        {:cl, _} ->
-          [[{"content-length", :match}]]
+        {:cl, bytes} ->
+          [{[{"content-length", :match}], byte_size(bytes)}]
 
-        {:chunked, _, _, _} ->
-          [[{"transfer-encoding", "chunked"}]]
+        {:chunked, chunks, _, _} ->
+          size = chunks |> Enum.map(&byte_size/1) |> Enum.sum()
+
+          [
+            {[{"transfer-encoding", "chunked"}], size},
+            {[{"transfer-encoding", "gzip, chunked"}], size},
+            {[{"transfer-encoding", "chunked, gzip"}], :until_close}
+          ]
 
         {:close, _} ->
-          [[], [{"connection", "close"}]]
+          [{[], :until_close}, {[{"connection", "close"}], :until_close}]
       end
 
     frequency([
       {9, member_of(derived)},
       {1,
-       member_of([
-         [{"content-length", "5"}],
-         [{"content-length", "-1"}],
-         [{"content-length", "2, 2"}],
-         [{"content-length", "3"}, {"content-length", "3"}],
-         [{"transfer-encoding", "chunked"}, {"content-length", "3"}],
-         [{"transfer-encoding", "chunked"}]
-       ])}
+       map(
+         member_of([
+           [{"content-length", "5"}],
+           [{"content-length", "-1"}],
+           [{"content-length", "2, 2"}],
+           [{"content-length", "3"}, {"content-length", "3"}],
+           [{"transfer-encoding", "chunked"}, {"content-length", "3"}],
+           [{"transfer-encoding", "chunked"}]
+         ]),
+         &{&1, nil}
+       )}
     ])
   end
 
@@ -88,14 +100,23 @@ defmodule Mint.HTTP1.FuzzTest do
                 {1, member_of(["600", "99", "101", "1000", "20"])}
               ]),
             body <- body_gen(),
-            framing <- framing_headers_gen(body),
+            {framing, body_length} <- framing_headers_gen(body),
             headers <- list_of(header_gen(), max_length: 3) do
+      # The framing headers give the body length only in 1.1 responses with a
+      # status that has a body, no 101 prelude and no extra framing headers.
+      known_length? =
+        version == "1.1" and status in ["200", "404", "500"] and
+          not List.keymember?(preludes, "101", 0) and
+          not List.keymember?(headers, "content-length", 0) and
+          not List.keymember?(headers, "transfer-encoding", 0)
+
       %{
         preludes: preludes,
         version: version,
         status: status,
         headers: framing ++ headers,
-        body: body
+        body: body,
+        body_length: if(known_length?, do: body_length)
       }
     end
   end
@@ -211,8 +232,10 @@ defmodule Mint.HTTP1.FuzzTest do
         end
       end)
 
-    bytes = responses |> Enum.map(&render_response/1) |> IO.iodata_to_binary()
+    rendered = Enum.map(responses, &render_response/1)
+    bytes = IO.iodata_to_binary(rendered)
     bytes = mutate(bytes <> scenario.extra, scenario.mutation)
+    meta = put_expected_body_sizes(meta, refs, scenario, rendered)
 
     state = %{
       scenario: scenario,
@@ -249,7 +272,38 @@ defmodule Mint.HTTP1.FuzzTest do
     drain_mailbox()
   end
 
-  defp new_meta(method), do: %{method: method, status: nil, content_length: nil, body_size: 0}
+  defp new_meta(method) do
+    %{method: method, status: nil, content_length: nil, body_size: 0, expected_body_size: nil}
+  end
+
+  # The body size of a response to an initial request is known when the bytes
+  # are sent unmutated, every initial request was issued, and the response and
+  # all the ones before it are to GET or POST and have a known body length. A
+  # body read until close takes every byte after the response's header
+  # section, so no later response has a known size.
+  defp put_expected_body_sizes(meta, refs, scenario, rendered) do
+    if scenario.mutation == nil and length(refs) == length(scenario.methods) do
+      responses = Enum.zip(scenario.responses, rendered)
+      sizes = expected_body_sizes(scenario.methods, responses, scenario.extra)
+
+      Enum.zip_reduce(refs, sizes, meta, fn ref, size, meta ->
+        put_in(meta[ref].expected_body_size, size)
+      end)
+    else
+      meta
+    end
+  end
+
+  defp expected_body_sizes([{method, _} | methods], [{response, [_head, body]} | rest], extra)
+       when method in ["GET", "POST"] do
+    case response.body_length do
+      nil -> []
+      :until_close -> [IO.iodata_length([body, Enum.map(rest, &elem(&1, 1)), extra])]
+      size -> [size | expected_body_sizes(methods, rest, extra)]
+    end
+  end
+
+  defp expected_body_sizes(_methods, _responses, _extra), do: []
 
   defp describe(state) do
     "scenario: #{inspect(state.scenario, limit: :infinity)}\nbytes: #{inspect(state.bytes, limit: :infinity)}\nlog: #{inspect(state.log, limit: :infinity)}"
@@ -308,9 +362,9 @@ defmodule Mint.HTTP1.FuzzTest do
 
   defp run_client_ops(conn, state) do
     ops =
-      for {index, op, arg1, arg2} <- state.scenario.ops,
-          index == state.index,
-          do: {op, arg1, arg2}
+      for op <- state.scenario.ops,
+          elem(op, 0) == state.index,
+          do: Tuple.delete_at(op, 0)
 
     Enum.reduce_while(ops, {:open, conn, state}, fn op, {:open, conn, state} ->
       state = %{state | log: state.log ++ [{:client, op}]}
@@ -497,8 +551,13 @@ defmodule Mint.HTTP1.FuzzTest do
   end
 
   defp update_meta(meta, {:done, ref}, _ref_state, state) when is_map_key(meta, ref) do
-    %{method: method, status: status, content_length: content_length, body_size: body_size} =
-      meta[ref]
+    %{
+      method: method,
+      status: status,
+      content_length: content_length,
+      body_size: body_size,
+      expected_body_size: expected_body_size
+    } = meta[ref]
 
     # A 101 response hands the connection to another protocol, whose bytes are
     # delivered as data whatever the request method was.
@@ -516,6 +575,11 @@ defmodule Mint.HTTP1.FuzzTest do
       not bodiless? and status != 101 and content_length != nil and body_size != content_length ->
         flunk(
           "response completed with #{body_size} body bytes but content-length #{content_length}\n#{describe(state)}"
+        )
+
+      expected_body_size != nil and body_size != expected_body_size ->
+        flunk(
+          "response completed with #{body_size} body bytes but its framing gives #{expected_body_size}\n#{describe(state)}"
         )
 
       true ->
@@ -567,14 +631,16 @@ defmodule Mint.HTTP1.FuzzTest do
       end
 
     [
-      prelude_text,
-      "HTTP/",
-      version,
-      " ",
-      status,
-      " Reason\r\n",
-      render_headers(headers, body_length),
-      "\r\n",
+      [
+        prelude_text,
+        "HTTP/",
+        version,
+        " ",
+        status,
+        " Reason\r\n",
+        render_headers(headers, body_length),
+        "\r\n"
+      ],
       body_bytes
     ]
   end

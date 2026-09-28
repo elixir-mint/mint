@@ -11,6 +11,7 @@ defmodule Mint.HTTP2.FuzzTest do
 
   @recv_timeout 300
   @runs String.to_integer(System.get_env("FUZZ_RUNS", "10"))
+  @initial_window_size 65_535
 
   ## Generators
 
@@ -248,7 +249,7 @@ defmodule Mint.HTTP2.FuzzTest do
        ) do
     drain_mailbox()
     {:ok, port, task} = TestServer.listen_and_accept()
-    conn = start_connection(port, task, scenario)
+    {conn, preface_frames} = start_connection(port, task, scenario)
 
     {conn, refs, sids, meta} =
       Enum.reduce(requests, {conn, [], [], %{}}, fn {method, body}, {conn, refs, sids, meta} ->
@@ -289,10 +290,11 @@ defmodule Mint.HTTP2.FuzzTest do
       meta: meta,
       actions: actions,
       mode: mode,
-      window: %{server_view: conn.receive_window_remaining, buffer: "", exact?: true},
+      window: %{server_view: @initial_window_size, buffer: "", exact?: true},
       log: []
     }
 
+    state = Enum.reduce(preface_frames, state, &account_client_frame/2)
     run(conn, actions, state)
     _ = HTTP2.close(conn)
     _ = :ssl.close(state.server.socket)
@@ -342,8 +344,9 @@ defmodule Mint.HTTP2.FuzzTest do
     end
   end
 
-  # The server's view of the connection window is the initial window minus the
-  # DATA payloads it sent plus the WINDOW_UPDATE increments it received. Once
+  # The server's view of the connection window is the initial 65,535 bytes (RFC
+  # 9113 6.9.2) minus the DATA payloads it sent plus the WINDOW_UPDATE increments
+  # it received on stream 0, including the one after the client preface. Once
   # Mint has processed a segment it must agree with Mint's own view; raw bytes
   # can swallow later frames into a partial frame, so the check is skipped once
   # any were sent.
@@ -616,7 +619,8 @@ defmodule Mint.HTTP2.FuzzTest do
   end
 
   # RFC 9113 8.1.1: the body must match a valid content-length, and responses to
-  # HEAD, 204 and 304 responses have no content.
+  # HEAD, 204 and 304 responses have no content. A 2xx response to CONNECT opens a
+  # tunnel and the DATA after it is tunnel data (RFC 9110 9.3.6, RFC 9113 8.5).
   defp update_meta(meta, {:status, ref, status}, _ref_state, _state) when is_map_key(meta, ref) do
     put_in(meta[ref].status, status)
   end
@@ -642,7 +646,8 @@ defmodule Mint.HTTP2.FuzzTest do
     %{method: method, status: status, content_length: content_length, body_size: body_size} =
       meta[ref]
 
-    bodiless? = method == "HEAD" or status in [204, 304]
+    tunnel? = method == "CONNECT" and status in 200..299
+    bodiless? = method == "HEAD" or (status in [204, 304] and not tunnel?)
 
     cond do
       bodiless? and body_size > 0 ->
@@ -650,8 +655,7 @@ defmodule Mint.HTTP2.FuzzTest do
           "#{method} #{status} response completed with #{body_size} body bytes\n#{describe(state)}"
         )
 
-      not bodiless? and content_length != nil and body_size != content_length and
-          not (method == "CONNECT" and status in 200..299) ->
+      not bodiless? and not tunnel? and content_length != nil and body_size != content_length ->
         flunk(
           "response completed with #{body_size} body bytes but content-length #{content_length}\n#{describe(state)}"
         )
@@ -887,7 +891,23 @@ defmodule Mint.HTTP2.FuzzTest do
       )
 
     {:ok, server_socket} = Task.await(server_socket_task)
-    :ok = TestServer.perform_http2_handshake(server_socket)
+
+    {:ok, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" <> rest} =
+      :ssl.recv(server_socket, 0, @recv_timeout)
+
+    # The client preface is a SETTINGS frame, followed by a WINDOW_UPDATE on
+    # stream 0 when the client raised its connection-level receive window.
+    {:ok, settings(flags: 0), rest} = Frame.decode_next(rest)
+
+    preface_frames =
+      case rest do
+        "" ->
+          []
+
+        _ ->
+          assert {:ok, window_update(stream_id: 0) = frame, ""} = Frame.decode_next(rest)
+          [frame]
+      end
 
     :ok =
       :ssl.send(server_socket, [
@@ -908,7 +928,7 @@ defmodule Mint.HTTP2.FuzzTest do
     {:ok, settings(flags: ^ack_flags, params: []), ""} = Frame.decode_next(data)
     :ok = :ssl.setopts(server_socket, active: true)
     Process.put(:fuzz_server, TestServer.new(server_socket))
-    conn
+    {conn, preface_frames}
   end
 
   defp recv_all_frames do

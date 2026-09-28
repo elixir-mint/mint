@@ -1957,8 +1957,10 @@ defmodule Mint.HTTP2Test do
 
   describe "interim responses (1xx)" do
     test "multiple before a single HEADERS", %{conn: conn} do
-      info_status1 = Enum.random(100..199)
-      info_status2 = Enum.random(100..199)
+      # 101 is rejected in HTTP/2 (RFC 9113 §8.6).
+      info_statuses = Enum.to_list(100..199) -- [101]
+      info_status1 = Enum.random(info_statuses)
+      info_status2 = Enum.random(info_statuses)
 
       {conn, ref} = open_request(conn)
 
