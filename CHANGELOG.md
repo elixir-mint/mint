@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.10.2
+
+This release contains the security fixes from v1.11.0 for users who can't upgrade to v1.11 yet.
+
+**Security fixes**:
+
+  * Enforce `max_header_list_size` on the decoded header list in `Mint.HTTP2`. Previously, only the compressed header block was checked, letting a malicious server use HPACK-indexed `cookie` fields to make the client allocate about 1 GB per response. This is a fix for **CVE-2026-91043** (GitHub advisory [GHSA-9x8p-qrf4-jq7g](https://github.com/elixir-mint/mint/security/advisories/GHSA-9x8p-qrf4-jq7g)).
+  * Check the HTTP/2 frame length against `max_frame_size` before buffering the payload in `Mint.HTTP2`. Previously, a malicious server could make the client buffer up to 16 MB per connection for a single frame. This is a fix for **CVE-2026-92103** (GitHub advisory [GHSA-q95c-ccq6-j5j6](https://github.com/elixir-mint/mint/security/advisories/GHSA-q95c-ccq6-j5j6)).
+  * Use chunked framing in `Mint.HTTP1` only when `chunked` is the final transfer coding, and close the connection after HTTP/1.0 responses with `Transfer-Encoding`. Previously, a malicious server could frame a response differently from a strict intermediary on a shared connection. This is a fix for **CVE-2026-94194** (GitHub advisory [GHSA-gvrc-75rc-7gj9](https://github.com/elixir-mint/mint/security/advisories/GHSA-gvrc-75rc-7gj9)).
+
+Bug fixes:
+
+  * Stop parsing after an HTTP/1 response that closes the connection, and fail the requests pipelined behind it with a `:closed` transport error.
+  * Keep HTTP/1 connections open after a pipelined response completes. Previously, `open?/1` returned `false` and `close/1` raised.
+
 ## v1.10.1
 
 **Security fixes**:
