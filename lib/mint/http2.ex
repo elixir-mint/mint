@@ -91,7 +91,12 @@ defmodule Mint.HTTP2 do
       ] = responses
 
       promised_headers
-      #=> [{":method", "GET"}, {":path", "/style.css"}]
+      #=> [
+      #=>   {":method", "GET"},
+      #=>   {":scheme", "https"},
+      #=>   {":authority", "example.com"},
+      #=>   {":path", "/style.css"}
+      #=> ]
 
   As you can see in the example above, when the server sends a push promise then a
   `:push_promise` response is returned as a response to a request. The `:push_promise`
@@ -100,7 +105,12 @@ defmodule Mint.HTTP2 do
   `promised_headers` are headers that tell the client *what request* the promised response
   will respond to. The idea is that the server tells the client a request the client will
   want to make and then preemptively sends a response for that request. Promised headers
-  will always include `:method`, `:path`, and `:authority`.
+  will always include `:method`, `:scheme`, `:authority`, and `:path`.
+
+  A server may only push responses for origins it's authoritative for (RFC 9113 8.4).
+  Mint doesn't check this. Before using a pushed response, for example to cache it,
+  compare `:scheme` and `:authority` with the origin you connected to, and cancel the
+  promised request with `cancel_request/2` if they don't match.
 
       next_message =
         receive do
@@ -126,6 +136,7 @@ defmodule Mint.HTTP2 do
   """
 
   import Mint.HTTP2.Frame, except: [encode: 1, decode_next: 1, inspect: 1]
+  import Mint.HTTP1.Parse, only: [is_alpha: 1, is_digit: 1, is_hex_digit: 1]
 
   alias Mint.{HTTPError, ParsingTools, TransportError}
   alias Mint.Types
@@ -309,15 +320,18 @@ defmodule Mint.HTTP2 do
     * `:max_frame_size` - corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the
       maximum size of an HTTP/2 frame for the peer that sends this setting.
 
-    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`. For the
-      client, this also bounds the size of an inbound header block (a HEADERS frame plus
-      its trailing CONTINUATION frames): the connection is closed with a connection error
-      if a server streams a header block larger than this value, which prevents a server
-      from exhausting client memory with an unbounded chain of CONTINUATION frames. A
-      decoded header list larger than this value fails the request with a
-      `{:max_header_list_size_exceeded, size, max_size}` error, and a server push whose
-      promised request headers are larger than this value is refused. Defaults to
-      `256 KB` for the client.
+    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`. The
+      server setting is `:infinity` until the server sends it. The client setting must be
+      an integer and defaults to `256 KB`. It limits the decoded size (names, values and
+      32 bytes per field) of header lists received from the server. Response headers,
+      informational response headers and trailers over the limit reset the request with
+      `PROTOCOL_ERROR` and fail it with a `{:max_header_list_size_exceeded, size, max_size}`
+      error. Promised request headers over the limit reset the promised stream with
+      `REFUSED_STREAM`. The connection stays open in both cases. Header block fragments
+      buffered while waiting for `END_HEADERS` close the connection with `PROTOCOL_ERROR`
+      if they exceed `max_header_list_size * 30 / 8 + 12` bytes, an upper bound on the
+      encoded size of a header list within the limit (assuming minimal integer
+      representations and at most two dynamic table size updates).
 
     * `:enable_connect_protocol` - corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
       Sets whether the client may invoke the extended connect protocol which is used to
@@ -2206,19 +2220,15 @@ defmodule Mint.HTTP2 do
   # 32 bytes per field. The compressed block is bounded while it is accumulated,
   # but indexed fields decode to far more bytes than they take on the wire.
   defp header_list_size_error(conn, headers) do
-    case conn.client_settings.max_header_list_size do
-      :infinity ->
-        nil
+    max_size = conn.client_settings.max_header_list_size
 
-      max_size ->
-        # TODO: replace with Enum.sum_by when we depend on 1.18+
-        size =
-          Enum.reduce(headers, 0, fn {name, value}, acc ->
-            acc + byte_size(name) + byte_size(value) + 32
-          end)
+    # TODO: replace with Enum.sum_by when we depend on 1.18+
+    size =
+      Enum.reduce(headers, 0, fn {name, value}, acc ->
+        acc + byte_size(name) + byte_size(value) + 32
+      end)
 
-        if size > max_size, do: {:max_header_list_size_exceeded, size, max_size}
-    end
+    if size > max_size, do: {:max_header_list_size_exceeded, size, max_size}
   end
 
   # RFC 9113 5.1: HEADERS frames move a stream reserved by a PUSH_PROMISE to the
@@ -2340,12 +2350,13 @@ defmodule Mint.HTTP2 do
   # RFC 9113 8.1.1: a response with content is malformed if the sum of the DATA
   # frame payload lengths doesn't equal the content-length header value. Responses
   # to HEAD and 204 and 304 responses must not have content, whatever their
-  # content-length header says, and 2xx responses to CONNECT carry tunnel data.
+  # content-length header says. Any 2xx response to CONNECT, including 204,
+  # establishes a tunnel (RFC 9110 9.3.6, RFC 9113 8.5) and carries tunnel data.
   defp response_content_length(%{method: method}, status, headers) do
     cond do
       method == "HEAD" -> {:ok, 0}
-      status in [204, 304] -> {:ok, 0}
       method == "CONNECT" and status in 200..299 -> {:ok, nil}
+      status in [204, 304] -> {:ok, 0}
       true -> content_length(headers)
     end
   end
@@ -2740,10 +2751,16 @@ defmodule Mint.HTTP2 do
           pseudo[":scheme"] in [nil, ""] ->
             "missing or empty :scheme pseudo-header in promised request"
 
+          not valid_scheme?(pseudo[":scheme"]) ->
+            "invalid :scheme pseudo-header in promised request"
+
           pseudo[":authority"] in [nil, ""] ->
             "missing or empty :authority pseudo-header in promised request"
 
-          not String.starts_with?(pseudo[":path"] || "", "/") ->
+          not valid_authority?(pseudo[":scheme"], pseudo[":authority"]) ->
+            "invalid :authority pseudo-header in promised request"
+
+          not valid_path?(pseudo[":path"]) ->
             "missing or invalid :path pseudo-header in promised request"
 
           pseudo[":method"] not in ["GET", "HEAD"] ->
@@ -2758,6 +2775,113 @@ defmodule Mint.HTTP2 do
         end
     end
   end
+
+  # RFC 3986 3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+  defp valid_scheme?(<<char, rest::binary>>) when is_alpha(char), do: uri_chars?(rest, :scheme)
+  defp valid_scheme?(_scheme), do: false
+
+  # RFC 3986 3.2: authority = [ userinfo "@" ] host [ ":" port ]. RFC 9113 8.3.1
+  # forbids userinfo for the "http" and "https" schemes, and RFC 9110 4.2.1 and
+  # 4.2.2 forbid an empty host for them.
+  defp valid_authority?(scheme, authority) do
+    http? = String.downcase(scheme, :ascii) in ["http", "https"]
+
+    case String.split(authority, "@", parts: 2) do
+      [host_and_port] ->
+        valid_host_and_port?(host_and_port, http?)
+
+      [userinfo, host_and_port] ->
+        not http? and uri_chars?(userinfo, :userinfo) and
+          valid_host_and_port?(host_and_port, http?)
+    end
+  end
+
+  defp valid_host_and_port?("[" <> rest, _http?) do
+    case String.split(rest, "]", parts: 2) do
+      [ip_literal, port] -> valid_ip_literal?(ip_literal) and valid_port?(port)
+      [_rest] -> false
+    end
+  end
+
+  defp valid_host_and_port?(host_and_port, http?) do
+    {reg_name, port} =
+      case String.split(host_and_port, ":", parts: 2) do
+        [reg_name] -> {reg_name, ""}
+        [reg_name, port] -> {reg_name, ":" <> port}
+      end
+
+    # An IPv4address is also a valid reg-name.
+    (reg_name != "" or not http?) and uri_chars?(reg_name, :reg_name) and valid_port?(port)
+  end
+
+  # RFC 3986 3.2.3: port = *DIGIT, after a ":".
+  defp valid_port?(""), do: true
+  defp valid_port?(":" <> port), do: port == "" or ParsingTools.only_digits?(port)
+  defp valid_port?(_port), do: false
+
+  # RFC 3986 3.2.2: IP-literal = "[" ( IPv6address / IPvFuture ) "]", where
+  # IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" ). RFC 6874 2
+  # allows an IPv6address to be followed by "%25" and a zone ID.
+  defp valid_ip_literal?(<<v, rest::binary>>) when v in ~c"vV" do
+    case String.split(rest, ".", parts: 2) do
+      [version, address] ->
+        version != "" and uri_chars?(version, :hex) and address != "" and
+          uri_chars?(address, :ipvfuture)
+
+      [_rest] ->
+        false
+    end
+  end
+
+  defp valid_ip_literal?(ip_literal) do
+    case String.split(ip_literal, "%25", parts: 2) do
+      [address] ->
+        ipv6_address?(address)
+
+      [address, zone_id] ->
+        ipv6_address?(address) and zone_id != "" and uri_chars?(zone_id, :zone_id)
+    end
+  end
+
+  # :inet.parse_ipv6strict_address/1 accepts a zone ID after a bare "%" and signs
+  # in embedded IPv4 octets, which the RFC 3986 3.2.2 IPv6address grammar doesn't
+  # allow, so the address is first restricted to HEXDIG, ":" and ".".
+  defp ipv6_address?(address) do
+    uri_chars?(address, :ipv6) and
+      match?({:ok, _}, :inet.parse_ipv6strict_address(:binary.bin_to_list(address)))
+  end
+
+  # RFC 9113 8.3.1: :path is the RFC 9110 absolute-path, optionally followed by "?"
+  # and the RFC 3986 3.4 query, so it's made of pchar, "/" and "?" characters.
+  defp valid_path?("/" <> rest), do: uri_chars?(rest, :path)
+  defp valid_path?(_path), do: false
+
+  # Checks that a binary is made of characters of the given class, and of RFC 3986
+  # 2.1 pct-encoded characters for the classes that allow them.
+  defp uri_chars?(<<?%, hex1, hex2, rest::binary>>, class)
+       when class in [:userinfo, :reg_name, :zone_id, :path] and is_hex_digit(hex1) and
+              is_hex_digit(hex2),
+       do: uri_chars?(rest, class)
+
+  defp uri_chars?(<<char, rest::binary>>, class),
+    do: uri_char?(char, class) and uri_chars?(rest, class)
+
+  defp uri_chars?(<<>>, _class), do: true
+
+  # RFC 3986 2.3 unreserved and 2.2 sub-delims characters.
+  defguardp is_unreserved(char) when is_alpha(char) or is_digit(char) or char in ~c"-._~"
+  defguardp is_sub_delim(char) when char in ~c"!$&'()*+,;="
+
+  defp uri_char?(char, :scheme), do: is_alpha(char) or is_digit(char) or char in ~c"+-."
+  defp uri_char?(char, :hex), do: is_hex_digit(char)
+  defp uri_char?(char, :ipv6), do: is_hex_digit(char) or char in ~c":."
+  defp uri_char?(char, :zone_id), do: is_unreserved(char)
+  defp uri_char?(char, :reg_name), do: is_unreserved(char) or is_sub_delim(char)
+
+  defp uri_char?(char, class) when class in [:userinfo, :ipvfuture],
+    do: is_unreserved(char) or is_sub_delim(char) or char == ?:
+
+  defp uri_char?(char, :path), do: is_unreserved(char) or is_sub_delim(char) or char in ~c":@/?"
 
   defp validate_promised_fields([], pseudo, _regular?), do: {:ok, pseudo}
 
@@ -2954,22 +3078,35 @@ defmodule Mint.HTTP2 do
   # The header block accumulated from a HEADERS frame and its trailing
   # CONTINUATION frames is buffered (in compressed form) until END_HEADERS
   # arrives. A server can withhold END_HEADERS and stream CONTINUATION frames
-  # indefinitely, so the buffered size is bounded by the locally advertised
-  # SETTINGS_MAX_HEADER_LIST_SIZE. Empty fragments are not retained in the
-  # accumulator. The compressed accumulator is never larger than the
-  # uncompressed header list it decodes to, so the size limit never rejects a
-  # header block that fits within the advertised limit.
+  # indefinitely, so the buffered fragments are bounded by the largest encoding
+  # of a header list within the locally advertised SETTINGS_MAX_HEADER_LIST_SIZE,
+  # which is enforced on the decoded list. The fragment that carries END_HEADERS
+  # isn't buffered or counted. Empty fragments are not retained in the
+  # accumulator.
+  #
+  # The bound assumes minimal integer representations (RFC 7541 5.1) and at most
+  # two dynamic table size updates (RFC 7541 4.2). HPACK decoders also accept
+  # redundant zero continuation bytes in integers and any number of size updates,
+  # which no finite bound covers. A Huffman-coded octet takes at most 30 bits
+  # (RFC 7541 Appendix B), and a field's representation byte, integers (at most 6
+  # bytes each below 2^32) and Huffman padding take less than 15 bytes, so a
+  # field encodes to less than the (name + value + 32) * 30 / 8 bytes that its
+  # decoded size (RFC 9113 6.5.2) allows. A size update takes at most 6 bytes,
+  # since SETTINGS values are 32-bit (RFC 9113 6.5.1).
+  @max_dynamic_table_size_updates_size 2 * 6
+
   defp assert_header_block_within_max_size(conn, size) do
-    case conn.client_settings.max_header_list_size do
-      :infinity ->
-        conn
+    max_size = conn.client_settings.max_header_list_size
+    max_block_size = div(max_size * 30, 8) + @max_dynamic_table_size_updates_size
 
-      max_size when size > max_size ->
-        debug_data = "header block exceeds SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
-        send_connection_error!(conn, :protocol_error, debug_data)
+    if size > max_block_size do
+      debug_data =
+        "header block fragments exceed #{max_block_size} bytes, the bound for " <>
+          "SETTINGS_MAX_HEADER_LIST_SIZE of #{max_size} bytes"
 
-      _max_size ->
-        conn
+      send_connection_error!(conn, :protocol_error, debug_data)
+    else
+      conn
     end
   end
 

@@ -313,6 +313,18 @@ defmodule Mint.HTTP2Test do
       end
     end
 
+    test "raises an error if the client :max_header_list_size setting is :infinity",
+         %{server_port: port} do
+      message = ":max_header_list_size must be an integer, got: :infinity"
+
+      assert_raise ArgumentError, message, fn ->
+        HTTP2.connect(:https, "localhost", port,
+          client_settings: [max_header_list_size: :infinity],
+          transport_opts: [verify: :verify_none]
+        )
+      end
+    end
+
     test "closes the transport socket if anything goes wrong during the setup",
          %{server_port: port} do
       {:ok, socket} = :ssl.connect(~c"localhost", port, verify: :verify_none)
@@ -1052,10 +1064,11 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       # Each CONTINUATION is individually under the limit, but together they
-      # accumulate past the advertised SETTINGS_MAX_HEADER_LIST_SIZE. The client
-      # must refuse to buffer the header block without bound rather than growing
-      # `headers_being_processed` until it runs out of memory.
-      chunk = :binary.copy(<<0>>, 400)
+      # accumulate past the upper bound on the encoded size of a header list
+      # within the advertised SETTINGS_MAX_HEADER_LIST_SIZE (1_000 * 30 / 8 + 12
+      # bytes). The client must refuse to buffer the header block without bound
+      # rather than growing `headers_being_processed` until it runs out of memory.
+      chunk = :binary.copy(<<0>>, 1_300)
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -1083,6 +1096,74 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
       refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "header block fragments buffered up to the encoded size bound are accepted",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 1_000 * 30 / 8 + 12 = 3_762 bytes.
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: :binary.copy(<<0>>, 1_001),
+                   flags: set_flags(:headers, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: :binary.copy(<<0>>, 2_761),
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert {^stream_id, _hbf, _callback, 3_762} = conn.headers_being_processed
+      assert HTTP2.open?(conn)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: <<0>>,
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "fragments exceed 3762 bytes"
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "the fragment that ends a header block is not counted against the buffered size",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 4_000 dynamic table size updates to 0 followed by the indexed :status 200
+      # field are 4_001 bytes that decode to a 42-byte header list.
+      hbf = :binary.copy(<<0x20>>, 4_000) <> <<0x88>>
+      {hbf1, hbf2} = :erlang.split_binary(hbf, 1_000)
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf1,
+                   flags: set_flags(:headers, [:end_stream])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert HTTP2.open?(conn)
     end
 
     # Regression for GitHub Security Advisory GHSA-8pf6-g464-h6h9.
@@ -1251,6 +1332,40 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    # RFC 7541 5.2: Huffman coding can make a string longer than its octets, so an
+    # encoded block can be larger than the header list it decodes to.
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a Huffman-coded header list under max_header_list_size is accepted when split " <>
+           "over CONTINUATION frames",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # A 475-byte header list that encodes to 1_307 bytes.
+      value = :binary.copy(<<255>>, 400)
+      hbf = huffman_encode_headers([{":status", "200"}, {"x", value}])
+      assert byte_size(hbf) == 1_307
+      {hbf1, hbf2} = :erlang.split_binary(hbf, 1_001)
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf1,
+                   flags: set_flags(:headers, [:end_stream])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, [{"x", ^value}]}, {:done, ^ref}] = responses
+      assert HTTP2.open?(conn)
+    end
+
     @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
     test "a decoded trailer list past max_header_list_size is a stream error", %{conn: conn} do
       {conn, ref} = open_request(conn)
@@ -1303,7 +1418,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      oversized_hbf = :binary.copy(<<0>>, 2_000)
+      oversized_hbf = :binary.copy(<<0>>, 3_763)
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -2458,6 +2573,30 @@ defmodule Mint.HTTP2Test do
             {":authority", "localhost"},
             {":path", "/"},
             {"content-length", "zero"}
+          ],
+          space_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a b"}
+          ],
+          fragment_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a#fragment"}
+          ],
+          invalid_percent_encoding_in_path: [
+            {":method", "GET"},
+            {":scheme", "https"},
+            {":authority", "localhost"},
+            {":path", "/a%2"}
+          ],
+          scheme_starting_with_digit: [
+            {":method", "GET"},
+            {":scheme", "1https"},
+            {":authority", "localhost"},
+            {":path", "/"}
           ]
         ] do
       test "a PUSH_PROMISE with #{variant} in the promised request resets the promised stream",
@@ -2494,6 +2633,105 @@ defmodule Mint.HTTP2Test do
         assert_recv_frames [headers(stream_id: stream_id)]
 
         promised_headers = promised_headers() ++ unquote(fields)
+
+        assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        refute_receive {:ssl, _socket, _data}, 100
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    # RFC 6874 2: a zone ID is made of unreserved and percent-encoded characters.
+    invalid_zone_id_authorities =
+      for char <- ~c"!$&'()*+,;=", do: {"https", "[fe80::1%25en#{<<char>>}0]"}
+
+    for {scheme, authority} <-
+          [
+            {"https", "user@localhost"},
+            {"http", "user@localhost"},
+            {"HTTPS", "user@localhost"},
+            {"https", "localhost:abc"},
+            {"https", "[::1"},
+            {"https", "[garbage]"},
+            {"https", "localhost:80:90"},
+            {"https", "a[b]"},
+            {"https", "[v.z]"},
+            {"https", "]]]"},
+            {"https", ":443"},
+            {"https", "%zz"},
+            {"https", "[fe80::1%en0]"},
+            {"https", "[::ffff:192.+1.2.3]"},
+            {"https", "[::ffff:01.2.3.4]"},
+            {"https", "[fe80::1%25]"},
+            {"https", "[v1.a%20]"},
+            {"https", "[vg.x]"},
+            {"ftp", "us[er@localhost"}
+          ] ++ invalid_zone_id_authorities do
+      test "a PUSH_PROMISE with :scheme #{scheme} and :authority #{inspect(authority)} " <>
+             "resets the promised stream",
+           %{conn: conn} do
+        {conn, _ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        promised_headers = [
+          {":method", "GET"},
+          {":scheme", unquote(scheme)},
+          {":authority", unquote(authority)},
+          {":path", "/"}
+        ]
+
+        assert {:ok, %HTTP2{} = conn, []} =
+                 stream_frames(conn, [
+                   push_promise(
+                     stream_id: stream_id,
+                     hbf: server_encode_headers(promised_headers),
+                     promised_stream_id: 2,
+                     flags: set_flags(:push_promise, [:end_headers])
+                   )
+                 ])
+
+        assert_recv_frames [rst_stream(stream_id: 2, error_code: :protocol_error)]
+        refute Map.has_key?(conn.streams, 2)
+        assert HTTP2.open?(conn)
+      end
+    end
+
+    for {scheme, authority, path} <- [
+          {"https", "[::1]:8443", "/"},
+          {"https", "[fe80::1%25en0]:443", "/"},
+          {"https", "[fe80::1%25en%210]", "/"},
+          {"https", "[::ffff:192.1.2.3]", "/"},
+          {"https", "[v1.fe80::a+en1]", "/"},
+          {"https", "localhost:", "/"},
+          {"https", "%41bc", "/"},
+          {"https", "127.0.0.1:80", "/"},
+          {"HTTPS", "localhost", "/"},
+          {"ftp", "user@localhost", "/"},
+          {"ftp", ":21", "/"},
+          {"coap+tcp-1.0", "localhost", "//a/b;c=d/~e:f@g!$&'()*+,?h=i%20j/?k"}
+        ] do
+      test "a PUSH_PROMISE with :scheme #{scheme}, :authority #{inspect(authority)} and " <>
+             ":path #{inspect(path)} is accepted",
+           %{conn: conn} do
+        {conn, ref} = open_request(conn)
+
+        assert_recv_frames [headers(stream_id: stream_id)]
+
+        promised_headers = [
+          {":method", "GET"},
+          {":scheme", unquote(scheme)},
+          {":authority", unquote(authority)},
+          {":path", unquote(path)}
+        ]
 
         assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
                  stream_frames(conn, [
@@ -3844,6 +4082,10 @@ defmodule Mint.HTTP2Test do
         HTTP2.put_settings(conn, header_table_size: :oops)
       end
 
+      assert_raise ArgumentError, ~r/:max_header_list_size must be an integer/, fn ->
+        HTTP2.put_settings(conn, max_header_list_size: :infinity)
+      end
+
       assert_raise ArgumentError, "unknown setting parameter :oops", fn ->
         HTTP2.put_settings(conn, oops: 1)
       end
@@ -4061,6 +4303,33 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [data(stream_id: ^stream_id, data: "out")]
 
       assert HTTP2.open_request_count(conn) == 1
+      assert HTTP2.open?(conn)
+    end
+
+    test "a 204 response establishes the tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "204"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 204},
+               {:headers, ref, []},
+               {:data, ref, "hello"},
+               {:done, ref}
+             ]
+
       assert HTTP2.open?(conn)
     end
 
@@ -4764,6 +5033,13 @@ defmodule Mint.HTTP2Test do
     {server, hbf} = TestServer.encode_headers(server, headers)
     Process.put(@server_pdict_key, server)
     hbf
+  end
+
+  # Encodes without touching the dynamic table, so the server's HPAX context stays in sync.
+  defp huffman_encode_headers(headers) do
+    table = HPAX.new(4096, huffman_encoding: :always)
+    {hbf, _table} = HPAX.encode(:no_store, headers, table)
+    IO.iodata_to_binary(hbf)
   end
 
   defp server_decode_headers(hbf) do
