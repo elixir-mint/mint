@@ -2340,12 +2340,13 @@ defmodule Mint.HTTP2 do
   # RFC 9113 8.1.1: a response with content is malformed if the sum of the DATA
   # frame payload lengths doesn't equal the content-length header value. Responses
   # to HEAD and 204 and 304 responses must not have content, whatever their
-  # content-length header says, and 2xx responses to CONNECT carry tunnel data.
+  # content-length header says. Any 2xx response to CONNECT, including 204,
+  # establishes a tunnel (RFC 9110 9.3.6, RFC 9113 8.5) and carries tunnel data.
   defp response_content_length(%{method: method}, status, headers) do
     cond do
       method == "HEAD" -> {:ok, 0}
-      status in [204, 304] -> {:ok, 0}
       method == "CONNECT" and status in 200..299 -> {:ok, nil}
+      status in [204, 304] -> {:ok, 0}
       true -> content_length(headers)
     end
   end

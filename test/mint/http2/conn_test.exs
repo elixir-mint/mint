@@ -4306,6 +4306,33 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    test "a 204 response establishes the tunnel", %{conn: conn} do
+      assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      hbf = server_encode_headers([{":status", "204"}])
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf,
+                   flags: set_flags(:headers, [:end_headers])
+                 ),
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert responses == [
+               {:status, ref, 204},
+               {:headers, ref, []},
+               {:data, ref, "hello"},
+               {:done, ref}
+             ]
+
+      assert HTTP2.open?(conn)
+    end
+
     test "an END_STREAM from the server closes the whole tunnel", %{conn: conn} do
       assert {:ok, conn, ref} = HTTP2.request(conn, "CONNECT", "example.com:443", [], :stream)
 
