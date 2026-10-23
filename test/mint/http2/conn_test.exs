@@ -1052,10 +1052,11 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       # Each CONTINUATION is individually under the limit, but together they
-      # accumulate past the advertised SETTINGS_MAX_HEADER_LIST_SIZE. The client
-      # must refuse to buffer the header block without bound rather than growing
-      # `headers_being_processed` until it runs out of memory.
-      chunk = :binary.copy(<<0>>, 400)
+      # accumulate past the upper bound on the encoded size of a header list
+      # within the advertised SETTINGS_MAX_HEADER_LIST_SIZE (1_000 * 30 / 8 + 12
+      # bytes). The client must refuse to buffer the header block without bound
+      # rather than growing `headers_being_processed` until it runs out of memory.
+      chunk = :binary.copy(<<0>>, 1_300)
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -1083,6 +1084,74 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [goaway(error_code: :protocol_error)]
 
       refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "header block fragments buffered up to the encoded size bound are accepted",
+         %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 1_000 * 30 / 8 + 12 = 3_762 bytes.
+      assert {:ok, %HTTP2{} = conn, []} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: :binary.copy(<<0>>, 1_001),
+                   flags: set_flags(:headers, [])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: :binary.copy(<<0>>, 2_761),
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert {^stream_id, _hbf, _callback, 3_762} = conn.headers_being_processed
+      assert HTTP2.open?(conn)
+
+      assert {:error, %HTTP2{} = conn, error, []} =
+               stream_frames(conn, [
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: <<0>>,
+                   flags: set_flags(:continuation, [])
+                 )
+               ])
+
+      assert_http2_error error, {:protocol_error, debug_data}
+      assert debug_data =~ "fragments exceed 3762 bytes"
+      refute HTTP2.open?(conn)
+    end
+
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "the fragment that ends a header block is not counted against the buffered size",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # 4_000 dynamic table size updates to 0 followed by the indexed :status 200
+      # field are 4_001 bytes that decode to a 42-byte header list.
+      hbf = :binary.copy(<<0x20>>, 4_000) <> <<0x88>>
+      {hbf1, hbf2} = :erlang.split_binary(hbf, 1_000)
+
+      assert {:ok, %HTTP2{} = conn, [{:status, ^ref, 200}, {:headers, ^ref, []}, {:done, ^ref}]} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf1,
+                   flags: set_flags(:headers, [:end_stream])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert HTTP2.open?(conn)
     end
 
     # Regression for GitHub Security Advisory GHSA-8pf6-g464-h6h9.
@@ -1251,6 +1320,40 @@ defmodule Mint.HTTP2Test do
       assert HTTP2.open?(conn)
     end
 
+    # RFC 7541 5.2: Huffman coding can make a string longer than its octets, so an
+    # encoded block can be larger than the header list it decodes to.
+    @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
+    test "a Huffman-coded header list under max_header_list_size is accepted when split " <>
+           "over CONTINUATION frames",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # A 475-byte header list that encodes to 1_307 bytes.
+      value = :binary.copy(<<255>>, 400)
+      hbf = huffman_encode_headers([{":status", "200"}, {"x", value}])
+      assert byte_size(hbf) == 1_307
+      {hbf1, hbf2} = :erlang.split_binary(hbf, 1_001)
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 headers(
+                   stream_id: stream_id,
+                   hbf: hbf1,
+                   flags: set_flags(:headers, [:end_stream])
+                 ),
+                 continuation(
+                   stream_id: stream_id,
+                   hbf: hbf2,
+                   flags: set_flags(:continuation, [:end_headers])
+                 )
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, [{"x", ^value}]}, {:done, ^ref}] = responses
+      assert HTTP2.open?(conn)
+    end
+
     @tag connect_options: [client_settings: [max_header_list_size: 1_000]]
     test "a decoded trailer list past max_header_list_size is a stream error", %{conn: conn} do
       {conn, ref} = open_request(conn)
@@ -1303,7 +1406,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      oversized_hbf = :binary.copy(<<0>>, 2_000)
+      oversized_hbf = :binary.copy(<<0>>, 3_763)
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -4764,6 +4867,13 @@ defmodule Mint.HTTP2Test do
     {server, hbf} = TestServer.encode_headers(server, headers)
     Process.put(@server_pdict_key, server)
     hbf
+  end
+
+  # Encodes without touching the dynamic table, so the server's HPAX context stays in sync.
+  defp huffman_encode_headers(headers) do
+    table = HPAX.new(4096, huffman_encoding: :always)
+    {hbf, _table} = HPAX.encode(:no_store, headers, table)
+    IO.iodata_to_binary(hbf)
   end
 
   defp server_decode_headers(hbf) do
