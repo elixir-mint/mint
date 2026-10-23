@@ -313,6 +313,18 @@ defmodule Mint.HTTP2Test do
       end
     end
 
+    test "raises an error if the client :max_header_list_size setting is :infinity",
+         %{server_port: port} do
+      message = ":max_header_list_size must be an integer, got: :infinity"
+
+      assert_raise ArgumentError, message, fn ->
+        HTTP2.connect(:https, "localhost", port,
+          client_settings: [max_header_list_size: :infinity],
+          transport_opts: [verify: :verify_none]
+        )
+      end
+    end
+
     test "closes the transport socket if anything goes wrong during the setup",
          %{server_port: port} do
       {:ok, socket} = :ssl.connect(~c"localhost", port, verify: :verify_none)
@@ -4068,6 +4080,10 @@ defmodule Mint.HTTP2Test do
     test "put_settings/2 fails with unknown or invalid settings", %{conn: conn} do
       assert_raise ArgumentError, ":header_table_size must be an integer, got: :oops", fn ->
         HTTP2.put_settings(conn, header_table_size: :oops)
+      end
+
+      assert_raise ArgumentError, ~r/:max_header_list_size must be an integer/, fn ->
+        HTTP2.put_settings(conn, max_header_list_size: :infinity)
       end
 
       assert_raise ArgumentError, "unknown setting parameter :oops", fn ->
