@@ -873,6 +873,8 @@ defmodule Mint.HTTP1 do
   # Informational (1xx) responses have no body and must not finalize the
   # request; the final response follows on the same request ref. Reset the
   # request's response-side fields and continue parsing without popping it.
+  # A "close" option is kept, so the connection is closed after the final
+  # response (RFC 9112 9.6).
   defp decode_body(:informational, conn, data, _request_ref, responses) do
     request = %{
       conn.request
@@ -883,7 +885,7 @@ defmodule Mint.HTTP1 do
         headers_size: 0,
         data_buffer: [],
         content_length: nil,
-        connection: [],
+        connection: if("close" in conn.request.connection, do: ["close"], else: []),
         transfer_encoding: nil,
         body: nil
     }

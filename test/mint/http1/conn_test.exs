@@ -1148,6 +1148,78 @@ defmodule Mint.HTTP1Test do
              )
   end
 
+  for {name, final_response} <- [
+        {"a final", "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n"},
+        {"a 101", "HTTP/1.1 101 Switching Protocols\r\nupgrade: foo\r\n\r\n"},
+        {"an HTTP/1.0 keep-alive", "HTTP/1.0 200 OK\r\nconnection: keep-alive\r\n\r\n"}
+      ] do
+    test "connection: close in an informational response closes after #{name} response",
+         %{conn: conn} do
+      {:ok, conn, ref1} = HTTP1.request(conn, "HEAD", "/", [], nil)
+      {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+      response =
+        "HTTP/1.1 103 Early Hints\r\nconnection: close\r\n\r\n" <> unquote(final_response)
+
+      assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+      assert [
+               {:status, ^ref1, 103},
+               {:headers, ^ref1, [{"connection", "close"}]},
+               {:status, ^ref1, _},
+               {:headers, ^ref1, _},
+               {:done, ^ref1},
+               {:error, ^ref2, %HTTPError{reason: :unprocessed}}
+             ] = responses
+
+      refute HTTP1.open?(conn)
+    end
+  end
+
+  test "connection: close in an informational response is ignored after a 2xx response to CONNECT",
+       %{conn: conn} do
+    {:ok, conn, ref} = HTTP1.request(conn, "CONNECT", "example.com:443", [], nil)
+
+    response =
+      "HTTP/1.1 103 Early Hints\r\nconnection: close\r\n\r\n" <>
+        "HTTP/1.1 200 Connection established\r\n\r\n"
+
+    assert {:ok, conn,
+            [
+              {:status, ^ref, 103},
+              {:headers, ^ref, _},
+              {:status, ^ref, 200},
+              {:headers, ^ref, []},
+              {:done, ^ref}
+            ]} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert HTTP1.open?(conn)
+  end
+
+  test "connection: keep-alive in an informational response doesn't apply to the final response",
+       %{conn: conn} do
+    {:ok, conn, ref1} = HTTP1.request(conn, "GET", "/", [], nil)
+    {:ok, conn, ref2} = HTTP1.request(conn, "GET", "/", [], nil)
+
+    response =
+      "HTTP/1.1 103 Early Hints\r\nconnection: keep-alive\r\n\r\n" <>
+        "HTTP/1.0 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+    assert {:ok, conn, responses} = HTTP1.stream(conn, {:tcp, conn.socket, response})
+
+    assert [
+             {:status, ^ref1, 103},
+             {:headers, ^ref1, _},
+             {:status, ^ref1, 200},
+             {:headers, ^ref1, _},
+             {:data, ^ref1, "ok"},
+             {:done, ^ref1},
+             {:error, ^ref2, %TransportError{reason: :closed}}
+           ] = responses
+
+    refute HTTP1.open?(conn)
+  end
+
   test "body following a 101 switching-protocols", %{conn: conn} do
     {:ok, conn, ref} = HTTP1.request(conn, "GET", "/socket/websocket", [], nil)
 
