@@ -865,7 +865,7 @@ defmodule Mint.HTTP1 do
   # treated as faulty, so the connection is closed after it without processing the
   # final response, and the current request fails along with the queued ones.
   defp decode_body(:informational, %{request: request} = conn, _data, _request_ref, responses)
-       when request.version < {1, 1} and request.transfer_encoding != [] do
+       when request.version < {1, 1} and request.transfer_encoding != nil do
     {conn, responses} = close_after_response(conn, responses, conn.transport.wrap_error(:closed))
     {:ok, conn, responses}
   end
@@ -884,7 +884,7 @@ defmodule Mint.HTTP1 do
         data_buffer: [],
         content_length: nil,
         connection: [],
-        transfer_encoding: [],
+        transfer_encoding: nil,
         body: nil
     }
 
@@ -1143,9 +1143,11 @@ defmodule Mint.HTTP1 do
          do: {:ok, %{request | connection: connection ++ connection_header}}
   end
 
+  # Transfer-Encoding values are kept unparsed, nil meaning there's no such field.
+  # They're only parsed when they decide the framing of the body, so they don't
+  # fail responses that have no body.
   defp store_header(%{transfer_encoding: transfer_encoding} = request, "transfer-encoding", value) do
-    with {:ok, transfer_encoding_header} <- Parse.transfer_encoding_header(value),
-         do: {:ok, %{request | transfer_encoding: transfer_encoding ++ transfer_encoding_header}}
+    {:ok, %{request | transfer_encoding: List.wrap(transfer_encoding) ++ [value]}}
   end
 
   defp store_header(_request, "content-length", _value) do
@@ -1179,7 +1181,7 @@ defmodule Mint.HTTP1 do
 
       # RFC 9112 6.1: the framing of an HTTP/1.0 message with Transfer-Encoding is
       # treated as faulty, so the connection is closed after it even if kept alive.
-      "keep-alive" in request.connection and request.transfer_encoding == [] ->
+      "keep-alive" in request.connection and request.transfer_encoding == nil ->
         {conn, responses}
 
       true ->
@@ -1266,7 +1268,7 @@ defmodule Mint.HTTP1 do
       method == "CONNECT" and status in 200..299 ->
         {:ok, :none}
 
-      request.transfer_encoding != [] && request.content_length ->
+      request.transfer_encoding != nil && request.content_length ->
         {:error, :transfer_encoding_and_content_length}
 
       # RFC9112 6.3:
@@ -1274,11 +1276,16 @@ defmodule Mint.HTTP1 do
       # > chunked transfer coding is not the final encoding, the message body
       # > length is determined by reading the connection until it is closed by
       # > the server.
-      "chunked" == List.last(request.transfer_encoding) ->
-        {:ok, {:chunked, nil}}
-
-      request.transfer_encoding != [] ->
-        {:ok, :until_closed}
+      # A Transfer-Encoding field with no codings leaves the response without
+      # framing, so it's read until close as well.
+      request.transfer_encoding != nil ->
+        with {:ok, codings} <- transfer_codings(request.transfer_encoding) do
+          if List.last(codings) == "chunked" do
+            {:ok, {:chunked, nil}}
+          else
+            {:ok, :until_closed}
+          end
+        end
 
       request.content_length ->
         {:ok, {:content_length, request.content_length}}
@@ -1331,7 +1338,7 @@ defmodule Mint.HTTP1 do
       data_buffer: [],
       content_length: nil,
       connection: [],
-      transfer_encoding: [],
+      transfer_encoding: nil,
       body: nil
     }
   end
@@ -1391,13 +1398,18 @@ defmodule Mint.HTTP1 do
   end
 
   # Adds chunked as the final transfer coding, after the codings of the last
-  # Transfer-Encoding field.
+  # Transfer-Encoding field. A last field with no codings is replaced.
   defp append_chunked_coding(headers) do
     headers = Enum.reverse(headers)
     {name, "transfer-encoding", value} = List.keyfind(headers, "transfer-encoding", 1)
 
+    value =
+      if Parse.transfer_encoding_header(value) == {:ok, []},
+        do: "chunked",
+        else: value <> ",chunked"
+
     headers
-    |> Headers.replace(name, "transfer-encoding", value <> ",chunked")
+    |> Headers.replace(name, "transfer-encoding", value)
     |> Enum.reverse()
   end
 
