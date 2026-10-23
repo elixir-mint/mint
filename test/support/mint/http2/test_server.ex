@@ -121,6 +121,7 @@ defmodule Mint.HTTP2.TestServer do
       Task.async(fn ->
         # Let's accept a new connection.
         {:ok, socket} = :ssl.transport_accept(listen_socket)
+        :ok = :ssl.close(listen_socket)
 
         if function_exported?(:ssl, :handshake, 1) do
           {:ok, _} = apply(:ssl, :handshake, [socket])
