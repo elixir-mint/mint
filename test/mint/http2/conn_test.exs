@@ -1488,6 +1488,16 @@ defmodule Mint.HTTP2Test do
         assert_http2_error error, {:invalid_request_method, unquote(method)}
         assert_request_was_not_sent(conn)
       end
+
+      test "an invalid explicitly passed :method #{inspect(method)} returns an error", %{
+        conn: conn
+      } do
+        assert {:error, ^conn, error} =
+                 HTTP2.request(conn, "GET", "/", [{":method", unquote(method)}], nil)
+
+        assert_http2_error error, {:invalid_request_method, unquote(method)}
+        assert_request_was_not_sent(conn)
+      end
     end
 
     for target <- ["", "/p\r\nath", "/pa\nth", "/pa\0th", " /path", "/path "] do

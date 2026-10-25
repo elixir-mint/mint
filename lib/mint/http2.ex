@@ -628,7 +628,7 @@ defmodule Mint.HTTP2 do
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
 
-    validate_request_headers!(conn, method, headers)
+    validate_request_headers!(conn, headers)
     {conn, stream_id, ref} = open_stream(conn, method)
     {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
     conn = send!(conn, payload)
@@ -1758,14 +1758,12 @@ defmodule Mint.HTTP2 do
   # method, the request target and caller-provided pseudo-headers are covered too.
   # HTTP/2 framing isn't confused by these bytes, but an intermediary that forwards
   # the request over HTTP/1.1 could be, so the check matches what Mint.HTTP1 does.
-  defp validate_request_headers!(conn, method, headers) do
-    unless valid_method?(method) do
-      throw({:mint, conn, wrap_error({:invalid_request_method, method})})
-    end
-
+  defp validate_request_headers!(conn, headers) do
     Enum.each(headers, fn
-      {":method", _value} ->
-        :ok
+      {":method", value} ->
+        unless valid_method?(value) do
+          throw({:mint, conn, wrap_error({:invalid_request_method, value})})
+        end
 
       {pseudo_header, value} when pseudo_header in [":path", ":authority"] ->
         unless valid_request_target?(value) do
