@@ -382,12 +382,19 @@ defmodule Mint.HTTP2 do
     * `{:invalid_status_header, value}` - when the `:status` pseudo-header of a response
       is not a three-digit status code. `value` is the received value.
 
-    * `{:invalid_header_name, name}` - when a response header name is invalid, for
-      example because it contains uppercase characters.
+    * `{:invalid_request_method, method}` - when the request method is not a valid
+      HTTP token. `method` is the given method.
 
-    * `{:invalid_header_value, name, value}` - when a response header value is invalid,
-      for example because it contains control characters. `name` is the name of the
-      header and `value` is the invalid value.
+    * `{:invalid_request_target, target}` - when the request target (the `:path`
+      or `:authority` pseudo-header) is empty or contains characters that are not allowed
+      in a header value. `target` is the given target.
+
+    * `{:invalid_header_name, name}` - when a request or response header name is invalid,
+      for example because it contains a space or control characters.
+
+    * `{:invalid_header_value, name, value}` - when a request or response header value is
+      invalid, for example because it contains control characters. `name` is the name of
+      the header and `value` is the invalid value.
 
     * `{:invalid_content_length_header, value}` - when the `content-length` header of a
       response is not a non-negative integer. `value` is the received value.
@@ -619,6 +626,7 @@ defmodule Mint.HTTP2 do
       |> add_default_headers(body)
       |> sort_pseudo_headers_to_front()
 
+    validate_request_headers!(conn, headers)
     {conn, stream_id, ref} = open_stream(conn, method)
     {conn, payload} = encode_request_payload(conn, stream_id, headers, body)
     conn = send!(conn, payload)
@@ -1434,6 +1442,7 @@ defmodule Mint.HTTP2 do
     end
 
     trailer_headers = Headers.to_raw(trailers, _case_sensitive = false)
+    validate_request_trailers!(conn, trailer_headers)
     enabled_flags = [:end_headers, :end_stream]
     {conn, payload} = encode_header_block(conn, stream_id, trailer_headers, enabled_flags)
     conn = put_in(conn.streams[stream_id].state, :half_closed_local)
@@ -1740,6 +1749,74 @@ defmodule Mint.HTTP2 do
       not String.starts_with?(key, ":")
     end)
   end
+
+  # RFC 9113 8.2.1 and 8.3: a request whose field names or values contain characters
+  # outside the allowed set is malformed, and a sender must not generate it. The
+  # headers are validated after lowercasing and adding the pseudo-headers, so the
+  # method, the request target and caller-provided pseudo-headers are covered too.
+  # HTTP/2 framing isn't confused by these bytes, but an intermediary that forwards
+  # the request over HTTP/1.1 could be.
+  defp validate_request_headers!(conn, headers) do
+    Enum.each(headers, fn
+      {":method", value} ->
+        unless valid_method?(value) do
+          throw({:mint, conn, wrap_error({:invalid_request_method, value})})
+        end
+
+      {pseudo_header, value} when pseudo_header in [":path", ":authority"] ->
+        unless valid_request_target?(value) do
+          throw({:mint, conn, wrap_error({:invalid_request_target, value})})
+        end
+
+      {":" <> name = pseudo_header, value} ->
+        unless valid_field_name?(name) do
+          throw({:mint, conn, wrap_error({:invalid_header_name, pseudo_header})})
+        end
+
+        unless valid_field_value?(value) do
+          throw({:mint, conn, wrap_error({:invalid_header_value, pseudo_header, value})})
+        end
+
+      {name, value} ->
+        validate_request_field!(conn, name, value)
+    end)
+  end
+
+  # RFC 9113 8.1: trailers must not include pseudo-header fields, and the field
+  # character rules apply to them as to any other field.
+  defp validate_request_trailers!(conn, trailers) do
+    Enum.each(trailers, fn {name, value} -> validate_request_field!(conn, name, value) end)
+  end
+
+  defp validate_request_field!(conn, name, value) do
+    cond do
+      not valid_field_name?(name) ->
+        throw({:mint, conn, wrap_error({:invalid_header_name, name})})
+
+      not valid_field_value?(value) ->
+        throw({:mint, conn, wrap_error({:invalid_header_value, name, value})})
+
+      true ->
+        :ok
+    end
+  end
+
+  # RFC 9110 9.1: method = token.
+  defp valid_method?(<<>>), do: false
+  defp valid_method?(method), do: token_chars?(method)
+
+  defp token_chars?(<<char, rest::binary>>)
+       when char in ?0..?9 or char in ?a..?z or char in ?A..?Z or char in ~c"!#$%&'*+-.^_`|~",
+       do: token_chars?(rest)
+
+  defp token_chars?(<<_char, _rest::binary>>), do: false
+  defp token_chars?(<<>>), do: true
+
+  # RFC 9113 8.3.1: :path must not be empty for http and https URIs, and :authority
+  # carries the target of a CONNECT request. Both are field values, so RFC 9113 8.2.1
+  # forbids NUL, CR and LF in them and leading or trailing whitespace.
+  defp valid_request_target?(<<>>), do: false
+  defp valid_request_target?(target), do: valid_field_value?(target)
 
   ## Frame handling
 
@@ -3153,12 +3230,20 @@ defmodule Mint.HTTP2 do
     "invalid :status pseudo-header in the response: #{inspect(value)}"
   end
 
+  def format_error({:invalid_request_method, method}) do
+    "invalid request method: #{inspect(method)}"
+  end
+
+  def format_error({:invalid_request_target, target}) do
+    "invalid request target: #{inspect(target)}"
+  end
+
   def format_error({:invalid_header_name, name}) do
-    "invalid header name in the response: #{inspect(name)}"
+    "invalid header name: #{inspect(name)}"
   end
 
   def format_error({:invalid_header_value, name, value}) do
-    "invalid value for header #{inspect(name)} in the response: #{inspect(value)}"
+    "invalid value for header #{inspect(name)}: #{inspect(value)}"
   end
 
   def format_error({:invalid_content_length_header, value}) do
