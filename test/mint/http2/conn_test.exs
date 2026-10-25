@@ -1479,6 +1479,129 @@ defmodule Mint.HTTP2Test do
     end
   end
 
+  describe "request header validation" do
+    for method <- ["", "GET /admin", "GET\t", "G\r\nET", "GET\0"] do
+      test "an invalid method #{inspect(method)} returns an error", %{conn: conn} do
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.request(conn, unquote(method), "/", [], nil)
+
+        assert_http2_error error, {:invalid_request_method, unquote(method)}
+        assert_request_was_not_sent(conn)
+      end
+    end
+
+    for target <- ["", "/p\r\nath", "/pa\nth", "/pa\0th", " /path", "/path "] do
+      test "an invalid request target #{inspect(target)} returns an error", %{conn: conn} do
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.request(conn, "GET", unquote(target), [], nil)
+
+        assert_http2_error error, {:invalid_request_target, unquote(target)}
+        assert_request_was_not_sent(conn)
+      end
+    end
+
+    for target <- ["", "example.com:443\r\n", "example.com:443\0"] do
+      test "an invalid CONNECT target #{inspect(target)} returns an error", %{conn: conn} do
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.request(conn, "CONNECT", unquote(target), [], :stream)
+
+        assert_http2_error error, {:invalid_request_target, unquote(target)}
+        assert_request_was_not_sent(conn)
+      end
+    end
+
+    for name <- [
+          "",
+          "x-upper case",
+          "x\rfoo",
+          "x\nfoo",
+          "x\0foo",
+          "x:foo",
+          "x\x7Ffoo",
+          "x\xC3\xA4"
+        ] do
+      test "an invalid header name #{inspect(name)} returns an error", %{conn: conn} do
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.request(conn, "GET", "/", [{unquote(name), "bar"}], nil)
+
+        assert_http2_error error, {:invalid_header_name, unquote(name)}
+        assert_request_was_not_sent(conn)
+      end
+    end
+
+    for value <- ["evil\r\nx-injected: 1", "b\rar", "b\nar", "b\0ar", " bar", "bar ", "bar\t"] do
+      test "an invalid header value #{inspect(value)} returns an error", %{conn: conn} do
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.request(conn, "GET", "/", [{"foo", unquote(value)}], nil)
+
+        assert_http2_error error, {:invalid_header_value, "foo", unquote(value)}
+        assert_request_was_not_sent(conn)
+      end
+    end
+
+    test "an invalid value in an explicitly passed pseudo-header returns an error",
+         %{conn: conn} do
+      headers = [{":scheme", "https"}, {":path", "/ws"}, {":protocol", "web\r\nsocket"}]
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.request(conn, "CONNECT", "/ws", headers, :stream)
+
+      assert_http2_error error, {:invalid_header_value, ":protocol", "web\r\nsocket"}
+      assert_request_was_not_sent(conn)
+    end
+
+    test "an invalid explicitly passed :path pseudo-header returns an error", %{conn: conn} do
+      headers = [{":scheme", "https"}, {":path", "/w\r\ns"}, {":protocol", "websocket"}]
+
+      assert {:error, %HTTP2{} = conn, error} =
+               HTTP2.request(conn, "CONNECT", "/ws", headers, :stream)
+
+      assert_http2_error error, {:invalid_request_target, "/w\r\ns"}
+      assert_request_was_not_sent(conn)
+    end
+
+    test "header values may be empty or contain obs-text and inner whitespace", %{conn: conn} do
+      headers = [{"empty", ""}, {"foo", "b\xC3\xA4r \tbaz"}, {"A-b_c.d!", "v"}]
+
+      assert {:ok, %HTTP2{} = conn, _ref} = HTTP2.request(conn, "GET", "/", headers, nil)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      assert [
+               {":method", "GET"},
+               {":path", "/"},
+               {":scheme", "https"},
+               {":authority", _},
+               {"user-agent", _},
+               {"empty", ""},
+               {"foo", "b\xC3\xA4r \tbaz"},
+               {"a-b_c.d!", "v"}
+             ] = server_decode_headers(hbf)
+
+      assert HTTP2.open?(conn)
+    end
+
+    for {name, value, reason} <- [
+          {"x\r\nfoo", "bar", {:invalid_header_name, "x\r\nfoo"}},
+          {":status", "200", {:invalid_header_name, ":status"}},
+          {"foo", "b\r\nar", {:invalid_header_value, "foo", "b\r\nar"}}
+        ] do
+      test "an invalid trailer #{inspect({name, value})} returns an error", %{conn: conn} do
+        {conn, ref} = open_request(conn, :stream)
+        assert_recv_frames [headers(stream_id: _stream_id)]
+
+        assert {:error, %HTTP2{} = conn, error} =
+                 HTTP2.stream_request_body(conn, ref, {:eof, [{unquote(name), unquote(value)}]})
+
+        assert_http2_error error, unquote(Macro.escape(reason))
+
+        refute_receive {:ssl, _socket, _data}, 100
+        assert HTTP2.open_request_count(conn) == 1
+        assert HTTP2.open?(conn)
+      end
+    end
+  end
+
   describe "response header validation" do
     for status <- ["abc", "", "+200", "2000", "20", "200 ", " 200", "1ab", "000", "099"] do
       test "an invalid :status of #{inspect(status)} is a stream error", %{conn: conn} do
@@ -4781,5 +4904,12 @@ defmodule Mint.HTTP2Test do
     assert {:ok, %HTTP2{} = conn, ref} = HTTP2.request(conn, "GET", "/", [], body)
     assert is_reference(ref)
     {conn, ref}
+  end
+
+  # A rejected request must not reach the server or take up a stream.
+  defp assert_request_was_not_sent(conn) do
+    refute_receive {:ssl, _socket, _data}, 100
+    assert HTTP2.open_request_count(conn) == 0
+    assert HTTP2.open?(conn)
   end
 end
