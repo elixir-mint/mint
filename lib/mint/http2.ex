@@ -386,13 +386,11 @@ defmodule Mint.HTTP2 do
       HTTP token. `method` is the given method.
 
     * `{:invalid_request_target, target}` - when the request target (the `:path`
-      pseudo-header, or the `:authority` pseudo-header for `CONNECT` requests) is empty or
-      contains characters that are not allowed in a header value. `target` is the given
-      target.
+      or `:authority` pseudo-header) is empty or contains characters that are not allowed
+      in a header value. `target` is the given target.
 
     * `{:invalid_header_name, name}` - when a request or response header name is invalid,
-      for example because it contains uppercase characters or characters that are not
-      allowed in HTTP/2 header names.
+      for example because it contains a space or control characters.
 
     * `{:invalid_header_value, name, value}` - when a request or response header value is
       invalid, for example because it contains control characters. `name` is the name of
@@ -1757,7 +1755,7 @@ defmodule Mint.HTTP2 do
   # headers are validated after lowercasing and adding the pseudo-headers, so the
   # method, the request target and caller-provided pseudo-headers are covered too.
   # HTTP/2 framing isn't confused by these bytes, but an intermediary that forwards
-  # the request over HTTP/1.1 could be, so the check matches what Mint.HTTP1 does.
+  # the request over HTTP/1.1 could be.
   defp validate_request_headers!(conn, headers) do
     Enum.each(headers, fn
       {":method", value} ->
