@@ -308,9 +308,9 @@ defmodule Mint.HTTP1.FuzzTest do
 
   defp run_client_ops(conn, state) do
     ops =
-      for {index, op, arg1, arg2} <- state.scenario.ops,
-          index == state.index,
-          do: {op, arg1, arg2}
+      for op <- state.scenario.ops,
+          elem(op, 0) == state.index,
+          do: Tuple.delete_at(op, 0)
 
     Enum.reduce_while(ops, {:open, conn, state}, fn op, {:open, conn, state} ->
       state = %{state | log: state.log ++ [{:client, op}]}
