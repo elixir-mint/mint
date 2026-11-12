@@ -366,6 +366,10 @@ defmodule Mint.HTTP do
       Defaults to `true` and may be overridden by the caller. *Available since
       v1.6.0*.
 
+    `:inet6` and `:inet4` only apply when `address` is a hostname. When it is
+    an IPv4 or IPv6 literal, such as `"127.0.0.1"`, `"::1"`, or an IP tuple,
+    Mint connects once using that address family.
+
   Options for `:https` only:
 
     * `:alpn_advertised_protocols` - managed by Mint. Cannot be overridden.

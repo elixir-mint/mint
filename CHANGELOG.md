@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes and Improvements
+
+  * Connect to IP literals such as `"::1"` or `"127.0.0.1"` using their own address family, ignoring `:inet6` and `:inet4`. Previously, a failed connection to an IPv6 literal returned `:nxdomain` from the IPv4 fallback instead of the real error.
+
 ## v1.11.0
 
 This is a minor version bump with *no breaking changes*. Please do upgrade from 1.10.x versions as it contains fixes for three recently-published CVEs.
