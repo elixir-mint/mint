@@ -85,6 +85,62 @@ defmodule Mint.Core.Transport.TCPTest do
                  timeout: 1000
                )
     end
+
+    test "connects to IPv6 literals without the :inet6 option" do
+      {:ok, listen_socket} =
+        :gen_tcp.listen(0, [:inet6, ip: {0, 0, 0, 0, 0, 0, 0, 1}, active: false])
+
+      {:ok, port} = :inet.port(listen_socket)
+
+      task = Task.async(fn -> :gen_tcp.accept(listen_socket) end)
+
+      assert {:ok, _socket} = TCP.connect("::1", port, active: false, timeout: 1000)
+      assert {:ok, _server_socket} = Task.await(task)
+    end
+
+    test "connects to IPv4 literals when IPv4 is disabled" do
+      {:ok, listen_socket} = :gen_tcp.listen(0, [:inet, ip: {127, 0, 0, 1}, active: false])
+      {:ok, port} = :inet.port(listen_socket)
+
+      for address <- ["127.0.0.1", {127, 0, 0, 1}] do
+        task = Task.async(fn -> :gen_tcp.accept(listen_socket) end)
+
+        assert {:ok, _socket} =
+                 TCP.connect(address, port,
+                   active: false,
+                   inet6: true,
+                   inet4: false,
+                   timeout: 1000
+                 )
+
+        assert {:ok, _server_socket} = Task.await(task)
+      end
+    end
+
+    test "returns the connection error for IP literals instead of a lookup error" do
+      v6_port = closed_port(:inet6, {0, 0, 0, 0, 0, 0, 0, 1})
+      v4_port = closed_port(:inet, {127, 0, 0, 1})
+
+      for {address, port, opts} <- [
+            {"::1", v6_port, []},
+            {"::1", v6_port, [inet6: true]},
+            {"::1", v6_port, [inet6: true, inet4: false]},
+            {"127.0.0.1", v4_port, [inet6: true]},
+            {"127.0.0.1", v4_port, [inet6: true, inet4: false]},
+            {{127, 0, 0, 1}, v4_port, [inet6: true, inet4: false]}
+          ] do
+        assert {:error, %Mint.TransportError{reason: :econnrefused}} =
+                 TCP.connect(address, port, [active: false, timeout: 1000] ++ opts),
+               "for #{inspect(address)} with #{inspect(opts)}"
+      end
+    end
+  end
+
+  defp closed_port(family, ip) do
+    {:ok, socket} = :gen_tcp.listen(0, [family, ip: ip])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
   end
 
   describe "controlling_process/2" do

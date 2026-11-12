@@ -27,22 +27,32 @@ defmodule Mint.Core.Transport.TCP do
       |> Keyword.merge(@transport_opts)
       |> Keyword.drop([:alpn_advertised_protocols, :timeout, :inet4, :inet6])
 
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # gen_tcp if connection fails.
-      case :gen_tcp.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, socket} ->
-          {:ok, socket}
+    case Mint.Core.Util.address_family(address) do
+      # IP literals can only be reached over their own family, so
+      # connect once with it and ignore :inet6/:inet4.
+      :inet6 ->
+        wrap_err(:gen_tcp.connect(address, port, [:inet6 | opts], timeout))
 
-        _error when inet4? ->
-          wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+      :inet ->
+        wrap_err(:gen_tcp.connect(address, port, [:inet | opts], timeout))
 
-        error ->
-          wrap_err(error)
-      end
-    else
-      # Use the defaults provided by gen_tcp.
-      wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+      :hostname when inet6? ->
+        # Try inet6 first, then fall back to the defaults provided by
+        # gen_tcp if connection fails.
+        case :gen_tcp.connect(address, port, [:inet6 | opts], timeout) do
+          {:ok, socket} ->
+            {:ok, socket}
+
+          _error when inet4? ->
+            wrap_err(:gen_tcp.connect(address, port, opts, timeout))
+
+          error ->
+            wrap_err(error)
+        end
+
+      :hostname ->
+        # Use the defaults provided by gen_tcp.
+        wrap_err(:gen_tcp.connect(address, port, opts, timeout))
     end
   end
 
