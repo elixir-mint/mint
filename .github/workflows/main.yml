@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }}, OTP ${{ matrix.erlang }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -22,9 +22,11 @@ jobs:
           # One version down.
           - erlang: "28.1"
             elixir: "1.19"
-          # Oldest version.
+          # Oldest version. builds.hex.pm has no OTP 24 builds for the
+          # Ubuntu image ubuntu-latest points to.
           - erlang: "24.3"
             elixir: "1.15.8"
+            os: ubuntu-24.04
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
