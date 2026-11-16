@@ -1279,7 +1279,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      hbf = server_encode_headers(promised_headers() ++ for(i <- 1..40, do: {"h#{i}", "v"}))
+      hbf = server_encode_headers(promised_headers(conn) ++ for(i <- 1..40, do: {"h#{i}", "v"}))
 
       assert {:ok, %HTTP2{} = conn, []} =
                stream_frames(conn, [
@@ -2295,7 +2295,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_hbf = server_encode_headers(promised_headers())
+      promised_hbf = server_encode_headers(promised_headers(conn))
       hbf1 = server_encode_headers([{":status", "200"}])
       hbf2 = server_encode_headers([{":status", "200"}])
       trailer_hbf = server_encode_headers([{"x-trailer", "some value"}])
@@ -2337,7 +2337,7 @@ defmodule Mint.HTTP2Test do
                {:done, promised_ref}
              ] = responses
 
-      assert promised_headers == promised_headers()
+      assert promised_headers == promised_headers(conn)
       assert HTTP2.open?(conn)
     end
 
@@ -2424,7 +2424,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 2,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -2459,7 +2459,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 2,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -2486,7 +2486,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 2,
                    flags: set_flags(:push_promise, [:end_headers])
                  ),
@@ -2626,7 +2626,7 @@ defmodule Mint.HTTP2Test do
 
         assert_recv_frames [headers(stream_id: stream_id)]
 
-        promised_headers = promised_headers() ++ unquote(fields)
+        promised_headers = promised_headers(conn) ++ unquote(fields)
 
         assert {:ok, %HTTP2{} = conn, [{:push_promise, ^ref, _promised_ref, ^promised_headers}]} =
                  stream_frames(conn, [
@@ -2641,6 +2641,77 @@ defmodule Mint.HTTP2Test do
         refute_receive {:ssl, _socket, _data}, 100
         assert HTTP2.open?(conn)
       end
+    end
+
+    test "a PUSH_PROMISE for another origin resets the promised stream", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      other_origins = [
+        {"https", "example.com"},
+        {"https", "localhost:1"},
+        {"http", conn.authority}
+      ]
+
+      frames =
+        for {{scheme, authority}, index} <- Enum.with_index(other_origins, 1) do
+          promised_headers =
+            [{":method", "GET"}, {":scheme", scheme}, {":authority", authority}, {":path", "/"}]
+
+          push_promise(
+            stream_id: stream_id,
+            hbf: server_encode_headers(promised_headers),
+            promised_stream_id: index * 2,
+            flags: set_flags(:push_promise, [:end_headers])
+          )
+        end
+
+      assert {:ok, %HTTP2{} = conn, []} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        rst_stream(stream_id: 2, error_code: :protocol_error),
+        rst_stream(stream_id: 4, error_code: :protocol_error),
+        rst_stream(stream_id: 6, error_code: :protocol_error)
+      ]
+
+      refute Map.has_key?(conn.streams, 2)
+      refute Map.has_key?(conn.streams, 4)
+      refute Map.has_key?(conn.streams, 6)
+      assert HTTP2.open?(conn)
+    end
+
+    test "a PUSH_PROMISE for the connection's origin is accepted regardless of case " <>
+           "and an explicit default port",
+         %{conn: conn} do
+      # The authority of a connection on the scheme's default port has no port.
+      conn = %{conn | authority: "localhost"}
+      {conn, ref} = open_request(conn)
+
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      frames =
+        for {{scheme, authority}, index} <-
+              Enum.with_index([{"https", "LocalHost"}, {"HTTPS", "localhost:443"}], 1) do
+          promised_headers =
+            [{":method", "GET"}, {":scheme", scheme}, {":authority", authority}, {":path", "/"}]
+
+          push_promise(
+            stream_id: stream_id,
+            hbf: server_encode_headers(promised_headers),
+            promised_stream_id: index * 2,
+            flags: set_flags(:push_promise, [:end_headers])
+          )
+        end
+
+      assert {:ok, %HTTP2{} = conn,
+              [
+                {:push_promise, ^ref, _, [_, _, {":authority", "LocalHost"}, _]},
+                {:push_promise, ^ref, _, [_, _, {":authority", "localhost:443"}, _]}
+              ]} = stream_frames(conn, frames)
+
+      refute_receive {:ssl, _socket, _data}, 100
+      assert HTTP2.open?(conn)
     end
 
     for {name, promised_stream_id} <- [
@@ -2658,7 +2729,7 @@ defmodule Mint.HTTP2Test do
                  stream_frames(conn, [
                    push_promise(
                      stream_id: stream_id,
-                     hbf: server_encode_headers(promised_headers()),
+                     hbf: server_encode_headers(promised_headers(conn)),
                      promised_stream_id: 4,
                      flags: set_flags(:push_promise, [:end_headers])
                    )
@@ -2668,7 +2739,7 @@ defmodule Mint.HTTP2Test do
                  stream_frames(conn, [
                    push_promise(
                      stream_id: stream_id,
-                     hbf: server_encode_headers(promised_headers()),
+                     hbf: server_encode_headers(promised_headers(conn)),
                      promised_stream_id: unquote(promised_stream_id),
                      flags: set_flags(:push_promise, [:end_headers])
                    )
@@ -2690,7 +2761,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 2,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -2704,7 +2775,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: 2,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 4,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -2724,7 +2795,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 4,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -2824,7 +2895,7 @@ defmodule Mint.HTTP2Test do
       assert_recv_frames [headers(stream_id: stream_id)]
 
       # Promised headers.
-      headers = promised_headers() ++ [{"foo", "bar"}, {"baz", "bong"}]
+      headers = promised_headers(conn) ++ [{"foo", "bar"}, {"baz", "bong"}]
 
       <<hbf1::1-bytes, hbf2::1-bytes, hbf3::binary>> = server_encode_headers(headers)
 
@@ -2859,7 +2930,7 @@ defmodule Mint.HTTP2Test do
              ] = responses
 
       assert is_reference(promised_ref)
-      assert headers == promised_headers() ++ [{"foo", "bar"}, {"baz", "bong"}]
+      assert headers == promised_headers(conn) ++ [{"foo", "bar"}, {"baz", "bong"}]
 
       assert {:ok, %HTTP2{} = conn, responses} =
                stream_frames(conn, [
@@ -2892,7 +2963,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      hbf = server_encode_headers(promised_headers())
+      hbf = server_encode_headers(promised_headers(conn))
 
       assert {:error, %HTTP2{} = conn, error, []} =
                stream_frames(conn, [
@@ -2917,7 +2988,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers(promised_headers())
+      promised_headers_hbf = server_encode_headers(promised_headers(conn))
       normal_headers_hbf = server_encode_headers([{":status", "200"}])
 
       assert {:error, %HTTP2{} = conn, error, _responses} =
@@ -2956,7 +3027,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers(promised_headers())
+      promised_headers_hbf = server_encode_headers(promised_headers(conn))
       normal_headers_hbf = server_encode_headers([{":status", "200"}])
 
       assert {:ok, %HTTP2{} = conn, responses} =
@@ -3009,7 +3080,7 @@ defmodule Mint.HTTP2Test do
                  stream_frames(conn, [
                    push_promise(
                      stream_id: stream_id,
-                     hbf: server_encode_headers(promised_headers()),
+                     hbf: server_encode_headers(promised_headers(conn)),
                      promised_stream_id: 2,
                      flags: set_flags(:push_promise, [:end_headers])
                    )
@@ -3039,7 +3110,7 @@ defmodule Mint.HTTP2Test do
 
       assert_recv_frames [headers(stream_id: stream_id)]
 
-      promised_headers_hbf = server_encode_headers(promised_headers())
+      promised_headers_hbf = server_encode_headers(promised_headers(conn))
 
       # The server promises many more streams than the client's limit but never
       # follows up with the response HEADERS for any of them. Each promise must
@@ -3091,7 +3162,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 6,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -4415,7 +4486,7 @@ defmodule Mint.HTTP2Test do
                stream_frames(conn, [
                  push_promise(
                    stream_id: stream_id,
-                   hbf: server_encode_headers(promised_headers()),
+                   hbf: server_encode_headers(promised_headers(conn)),
                    promised_stream_id: 2,
                    flags: set_flags(:push_promise, [:end_headers])
                  )
@@ -4906,8 +4977,8 @@ defmodule Mint.HTTP2Test do
     headers
   end
 
-  defp promised_headers do
-    [{":method", "GET"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}]
+  defp promised_headers(conn) do
+    [{":method", "GET"}, {":scheme", "https"}, {":authority", conn.authority}, {":path", "/"}]
   end
 
   defp open_request(conn, body \\ nil) do
