@@ -3425,7 +3425,8 @@ defmodule Mint.HTTP2Test do
          %{conn: conn} do
       max_frame_size = HTTP2.get_server_setting(conn, :max_frame_size)
 
-      body = :binary.copy(<<0>>, max_frame_size + 1)
+      # The nested list is converted to an iovec which is then split across frames.
+      body = [:binary.copy(<<0>>, max_frame_size - 1), [<<1>>, <<2>>]]
       {conn, _ref} = open_request(conn, body)
 
       assert_recv_frames [
@@ -3435,10 +3436,10 @@ defmodule Mint.HTTP2Test do
       ]
 
       assert flags1 == set_flags(:data, [])
-      assert data1 == :binary.copy(<<0>>, max_frame_size)
+      assert data1 == :binary.copy(<<0>>, max_frame_size - 1) <> <<1>>
 
       assert flags2 == set_flags(:data, [:end_stream])
-      assert data2 == <<0>>
+      assert data2 == <<2>>
 
       assert HTTP2.open?(conn)
     end

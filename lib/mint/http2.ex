@@ -1515,7 +1515,6 @@ defmodule Mint.HTTP2 do
   defp headers_to_encoded_frames(conn, stream_id, hbf, enabled_flags) do
     if IO.iodata_length(hbf) > conn.server_settings.max_frame_size do
       hbf
-      |> IO.iodata_to_binary()
       |> split_payload_in_chunks(conn.server_settings.max_frame_size)
       |> split_hbf_to_encoded_frames(stream_id, enabled_flags)
     else
@@ -1571,9 +1570,7 @@ defmodule Mint.HTTP2 do
       # on the max frame size.
       data_size > conn.server_settings.max_frame_size ->
         {chunks, last_chunk} =
-          data
-          |> IO.iodata_to_binary()
-          |> split_payload_in_chunks(conn.server_settings.max_frame_size)
+          split_payload_in_chunks(data, conn.server_settings.max_frame_size)
 
         {encoded_chunks, conn} =
           Enum.map_reduce(chunks, conn, fn chunk, acc ->
@@ -1606,17 +1603,34 @@ defmodule Mint.HTTP2 do
     {conn, Frame.encode(frame)}
   end
 
-  defp split_payload_in_chunks(binary, chunk_size),
-    do: split_payload_in_chunks(binary, chunk_size, [])
+  # Splits iodata into chunks of exactly chunk_size bytes plus a non-empty last
+  # chunk. While the head of the list is a binary, we split it into sub-binaries
+  # to avoid copying the payload. Anything else is converted to an iovec.
+  defp split_payload_in_chunks(iodata, chunk_size),
+    do: split_payload_in_chunks(iodata, chunk_size, chunk_size, [], [])
 
-  defp split_payload_in_chunks(chunk, chunk_size, acc) when byte_size(chunk) <= chunk_size do
-    {Enum.reverse(acc), chunk}
+  defp split_payload_in_chunks([], _size, _left, chunk, chunks),
+    do: {Enum.reverse(chunks), Enum.reverse(chunk)}
+
+  defp split_payload_in_chunks([binary | rest], size, left, chunk, chunks)
+       when byte_size(binary) <= left do
+    split_payload_in_chunks(rest, size, left - byte_size(binary), [binary | chunk], chunks)
   end
 
-  defp split_payload_in_chunks(binary, chunk_size, acc) do
-    {chunk, rest} = :erlang.split_binary(binary, chunk_size)
-    split_payload_in_chunks(rest, chunk_size, [chunk | acc])
+  # The current chunk is full and there is more data, so we start a new one.
+  defp split_payload_in_chunks([binary | _] = iodata, size, 0, chunk, chunks)
+       when is_binary(binary) do
+    split_payload_in_chunks(iodata, size, size, [], [Enum.reverse(chunk) | chunks])
   end
+
+  defp split_payload_in_chunks([binary | rest], size, left, chunk, chunks)
+       when is_binary(binary) do
+    {part, binary} = :erlang.split_binary(binary, left)
+    split_payload_in_chunks([binary | rest], size, 0, [part | chunk], chunks)
+  end
+
+  defp split_payload_in_chunks(iodata, size, left, chunk, chunks),
+    do: split_payload_in_chunks(:erlang.iolist_to_iovec(iodata), size, left, chunk, chunks)
 
   defp send_ping(conn, payload) do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)
