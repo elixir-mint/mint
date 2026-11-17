@@ -282,6 +282,7 @@ defmodule Mint.HTTP2.FuzzTest do
       refs: refs,
       promised: [],
       next_promised: 2,
+      authority: conn.authority,
       closed: closed_sid,
       server: Process.get(:fuzz_server),
       chunks: Stream.cycle(chunk_sizes),
@@ -789,6 +790,7 @@ defmodule Mint.HTTP2.FuzzTest do
         do: %{state | next_promised: promised + 2, promised: [promised | state.promised]},
         else: state
 
+    headers = List.keyreplace(headers, ":authority", 0, {":authority", state.authority})
     {server, hbf} = TestServer.encode_headers(server, headers)
 
     bytes =

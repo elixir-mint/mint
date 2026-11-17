@@ -100,7 +100,11 @@ defmodule Mint.HTTP2 do
   `promised_headers` are headers that tell the client *what request* the promised response
   will respond to. The idea is that the server tells the client a request the client will
   want to make and then preemptively sends a response for that request. Promised headers
-  will always include `:method`, `:path`, and `:authority`.
+  will always include `:method`, `:scheme`, `:path`, and `:authority`.
+
+  Mint only accepts pushes for the connection's own origin: the promised `:scheme` and
+  `:authority` must match the connection's scheme, host, and port. Mint resets pushes for
+  any other origin with a `PROTOCOL_ERROR` and doesn't return them to the caller.
 
       next_message =
         receive do
@@ -2739,7 +2743,7 @@ defmodule Mint.HTTP2 do
         conn = reset_promised_stream(conn, promised_stream_id, :refused_stream)
         {conn, responses}
 
-      debug_data = promised_headers_error(headers) ->
+      debug_data = promised_headers_error(conn, headers) ->
         log(conn, :debug, "Resetting promised stream #{promised_stream_id}: #{debug_data}")
         conn = reset_promised_stream(conn, promised_stream_id, :protocol_error)
         {conn, responses}
@@ -2818,7 +2822,9 @@ defmodule Mint.HTTP2 do
   # content, and RFC 9113 8.4 and 8.3.1 require the :method, :scheme, :authority and
   # :path pseudo-headers. Field names and values follow the same rules as response
   # headers, except that "te" is allowed with the "trailers" value (RFC 9113 8.2.2).
-  defp promised_headers_error(headers) do
+  # RFC 9113 8.4.1 also requires the client to check that the server is authoritative
+  # for the promised request. Mint only accepts the connection's own origin.
+  defp promised_headers_error(conn, headers) do
     case validate_promised_fields(headers, _pseudo = %{}, _regular? = false) do
       {:error, debug_data} ->
         debug_data
@@ -2842,12 +2848,41 @@ defmodule Mint.HTTP2 do
 
           true ->
             case content_length(headers) do
-              {:ok, content_length} when content_length in [nil, 0] -> nil
-              {:ok, _content_length} -> "promised request must not have content"
-              {:error, _reason} -> "invalid content-length header in promised request"
+              {:ok, content_length} when content_length in [nil, 0] ->
+                promised_origin_error(conn, pseudo)
+
+              {:ok, _content_length} ->
+                "promised request must not have content"
+
+              {:error, _reason} ->
+                "invalid content-length header in promised request"
             end
         end
     end
+  end
+
+  defp promised_origin_error(conn, pseudo) do
+    cond do
+      String.downcase(pseudo[":scheme"], :ascii) != conn.scheme ->
+        "promised request scheme #{inspect(pseudo[":scheme"])} is not the connection's " <>
+          "scheme #{inspect(conn.scheme)}"
+
+      normalize_authority(pseudo[":authority"], conn.scheme) !=
+          normalize_authority(conn.authority, conn.scheme) ->
+        "promised request authority #{inspect(pseudo[":authority"])} is not the " <>
+          "connection's authority #{inspect(conn.authority)}"
+
+      true ->
+        nil
+    end
+  end
+
+  # Hosts are case-insensitive and an explicit default port names the same origin as
+  # no port (RFC 3986 6.2.2.1 and 6.2.3).
+  defp normalize_authority(authority, scheme) do
+    authority
+    |> String.downcase(:ascii)
+    |> String.replace_suffix(":#{URI.default_port(scheme)}", "")
   end
 
   defp validate_promised_fields([], pseudo, _regular?), do: {:ok, pseudo}
