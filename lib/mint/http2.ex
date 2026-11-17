@@ -214,6 +214,10 @@ defmodule Mint.HTTP2 do
     # Minimum remaining receive window before we send a WINDOW_UPDATE.
     # Configurable via the `:receive_window_update_threshold` connect option.
     receive_window_update_threshold: @default_receive_window_update_threshold,
+    # `:auto` refills stream receive windows as DATA arrives, `:manual` only
+    # refills the bytes released with `refill_window/3`. Configurable via the
+    # `:stream_window_refill` connect option.
+    stream_window_refill: :auto,
     encode_table: HPAX.new(4096),
     decode_table: HPAX.new(4096),
 
@@ -368,6 +372,10 @@ defmodule Mint.HTTP2 do
       exceeds the window size of the connection (if `what` is `:connection`) or of a request
       (if `what` is `:request`). `window_size` is the allowed window size. See
       `get_window_size/2`.
+
+    * `{:refill_exceeds_received, unreleased, size}` - when `refill_window/3` is called
+      with a `size` larger than the `unreleased` number of response body bytes received
+      on the request and not released yet.
 
     * `{:stream_not_found, stream_id}` - when the given request is not found.
 
@@ -960,7 +968,9 @@ defmodule Mint.HTTP2 do
   The client *receive* window is the symmetric bound on the server's
   outbound flow: it starts at 64 KB for the connection and for each new
   request, is decremented by response body bytes, and is refilled by
-  `stream/2` as the body is consumed. A window size is kept for the entire
+  `stream/2` as the body is consumed. On connections started with
+  `stream_window_refill: :manual`, request windows are refilled by
+  `refill_window/3` instead. A window size is kept for the entire
   connection and all responses affect this window size; a window size is
   also kept per request.
 
@@ -995,9 +1005,9 @@ defmodule Mint.HTTP2 do
   end
 
   def set_window_size(%__MODULE__{} = conn, :connection, new_size) do
-    do_set_window_size(conn, 0, conn.receive_window_size, new_size, fn conn, size ->
+    do_set_window_size(conn, 0, conn.receive_window_size, new_size, fn conn, size, increment ->
       conn = put_in(conn.receive_window_size, size)
-      put_in(conn.receive_window_remaining, size)
+      update_in(conn.receive_window_remaining, &(&1 + increment))
     end)
   catch
     :throw, {:mint, conn, error} -> {:error, conn, error}
@@ -1008,9 +1018,9 @@ defmodule Mint.HTTP2 do
       {:ok, stream_id} ->
         current = conn.streams[stream_id].receive_window_size
 
-        do_set_window_size(conn, stream_id, current, new_size, fn conn, size ->
+        do_set_window_size(conn, stream_id, current, new_size, fn conn, size, increment ->
           conn = put_in(conn.streams[stream_id].receive_window_size, size)
-          put_in(conn.streams[stream_id].receive_window_remaining, size)
+          update_in(conn.streams[stream_id].receive_window_remaining, &(&1 + increment))
         end)
 
       :error ->
@@ -1033,7 +1043,77 @@ defmodule Mint.HTTP2 do
     increment = new_size - current
     frame = window_update(stream_id: stream_id, window_size_increment: increment)
     conn = send!(conn, Frame.encode(frame))
-    {:ok, update.(conn, new_size)}
+    {:ok, update.(conn, new_size, increment)}
+  end
+
+  @doc """
+  Releases `size` bytes of a request's response body so the server can send more.
+
+  Only available on connections started with the `stream_window_refill: :manual`
+  option (see `Mint.HTTP.connect/4`). On those connections, `stream/2` doesn't refill
+  the receive window of a request as `{:data, request_ref, data}` responses arrive.
+  Call this function with `byte_size(data)` once you're done with `data`. The server
+  can have at most the request's receive window of unreleased body data in flight
+  (`:initial_window_size` in the client settings, or the size set with
+  `set_window_size/3`), so a request whose body isn't consumed stops receiving data
+  without pausing the other requests on the connection. Use this to apply
+  backpressure to a single request.
+
+  Released bytes are batched the same way as automatic refills: a `WINDOW_UPDATE`
+  frame is sent only once the window the server can still fill drops to the
+  `:receive_window_update_threshold` connect option.
+
+  Returns `{:ok, conn}` without doing anything if the request has already completed
+  or was closed, so it's safe to release data after `{:done, request_ref}`.
+  Releasing more bytes than were received and not yet released returns
+  `{:error, conn, %Mint.HTTPError{reason: {:refill_exceeds_received, unreleased, size}}}`.
+
+  ## Examples
+
+      {:ok, conn} = Mint.HTTP2.connect(:https, host, 443, stream_window_refill: :manual)
+      {:ok, conn, ref} = Mint.HTTP2.request(conn, "GET", "/large", [], nil)
+
+      # After receiving {:data, ^ref, data} from stream/2 and handling data:
+      {:ok, conn} = Mint.HTTP2.refill_window(conn, ref, byte_size(data))
+
+  """
+  @doc since: "1.12.0"
+  @spec refill_window(t(), Types.request_ref(), non_neg_integer()) ::
+          {:ok, t()} | {:error, t(), Types.error()}
+  def refill_window(conn, request_ref, size)
+
+  def refill_window(%__MODULE__{stream_window_refill: :auto}, _request_ref, _size) do
+    raise ArgumentError,
+          "refill_window/3 requires the connection to be started with " <>
+            "the stream_window_refill: :manual option"
+  end
+
+  def refill_window(%__MODULE__{}, _request_ref, size)
+      when not (is_integer(size) and size >= 0) do
+    raise ArgumentError, "size must be a non-negative integer, got: #{inspect(size)}"
+  end
+
+  def refill_window(%__MODULE__{} = conn, _request_ref, 0) do
+    {:ok, conn}
+  end
+
+  def refill_window(%__MODULE__{} = conn, request_ref, size) do
+    with {:ok, stream_id} <- Map.fetch(conn.ref_to_stream_id, request_ref),
+         {:ok, stream} <- Map.fetch(conn.streams, stream_id) do
+      unreleased = stream.receive_window_unreleased
+
+      if size > unreleased do
+        {:error, conn, wrap_error({:refill_exceeds_received, unreleased, size})}
+      else
+        conn = put_in(conn.streams[stream_id].receive_window_unreleased, unreleased - size)
+        frames = maybe_refill_stream([], conn, stream_id)
+        {:ok, send_refills(conn, frames)}
+      end
+    else
+      :error -> {:ok, conn}
+    end
+  catch
+    :throw, {:mint, conn, error} -> {:error, conn, error}
   end
 
   @doc """
@@ -1210,6 +1290,7 @@ defmodule Mint.HTTP2 do
     scheme_string = Atom.to_string(scheme)
     mode = Keyword.get(opts, :mode, :active)
     log? = Keyword.get(opts, :log, false)
+    stream_window_refill = Keyword.get(opts, :stream_window_refill, :auto)
 
     connection_window_size =
       Keyword.get(opts, :connection_window_size, @default_connection_window_size)
@@ -1252,6 +1333,12 @@ defmodule Mint.HTTP2 do
             "the :log option must be a boolean, got: #{inspect(log?)}"
     end
 
+    unless stream_window_refill in [:auto, :manual] do
+      raise ArgumentError,
+            "the :stream_window_refill option must be either :auto or :manual, got: " <>
+              inspect(stream_window_refill)
+    end
+
     conn = %__MODULE__{
       hostname: hostname,
       port: port,
@@ -1264,7 +1351,8 @@ defmodule Mint.HTTP2 do
       log: log?,
       receive_window_size: connection_window_size,
       receive_window_remaining: connection_window_size,
-      receive_window_update_threshold: receive_window_update_threshold
+      receive_window_update_threshold: receive_window_update_threshold,
+      stream_window_refill: stream_window_refill
     }
 
     # Mirror the advertised client settings into `conn.client_settings` up
@@ -1410,6 +1498,9 @@ defmodule Mint.HTTP2 do
       # Current remaining receive window for this stream, tracked
       # independently from the peak so that refills can be batched.
       receive_window_remaining: conn.client_settings.initial_window_size,
+      # Response body bytes received but not yet released with
+      # `refill_window/3`. Always 0 unless `stream_window_refill` is `:manual`.
+      receive_window_unreleased: 0,
       received_first_headers?: false,
       method: method,
       content_length: nil,
@@ -2019,9 +2110,17 @@ defmodule Mint.HTTP2 do
     # byte and the padding.
     window_size_increment = byte_size(data) + padding_size(padding)
 
+    # In manual mode the caller releases the data bytes with `refill_window/3`.
+    # The caller never sees the padding, so it's refilled right away.
+    unreleased_size =
+      case conn.stream_window_refill do
+        :auto -> 0
+        :manual -> byte_size(data)
+      end
+
     conn =
       if window_size_increment > 0 do
-        refill_client_windows(conn, stream_id, window_size_increment)
+        refill_client_windows(conn, stream_id, window_size_increment, unreleased_size)
       else
         conn
       end
@@ -2080,13 +2179,22 @@ defmodule Mint.HTTP2 do
   # WINDOW_UPDATE flood of outbound frames. Batching caps that ratio at
   # roughly one update per `(receive_window_size - threshold)` bytes
   # consumed.
-  defp refill_client_windows(conn, stream_id, data_size) do
+  #
+  # `unreleased_size` of those bytes are held back from the stream refill
+  # until the caller releases them with `refill_window/3`.
+  defp refill_client_windows(conn, stream_id, data_size, unreleased_size) do
     conn = update_in(conn.receive_window_remaining, &(&1 - data_size))
 
     conn =
       case Map.fetch(conn.streams, stream_id) do
-        {:ok, _stream} ->
-          update_in(conn.streams[stream_id].receive_window_remaining, &(&1 - data_size))
+        {:ok, stream} ->
+          stream = %{
+            stream
+            | receive_window_remaining: stream.receive_window_remaining - data_size,
+              receive_window_unreleased: stream.receive_window_unreleased + unreleased_size
+          }
+
+          put_in(conn.streams[stream_id], stream)
 
         :error ->
           conn
@@ -2097,6 +2205,10 @@ defmodule Mint.HTTP2 do
       |> maybe_refill_stream(conn, stream_id)
       |> maybe_refill_conn(conn)
 
+    send_refills(conn, frames)
+  end
+
+  defp send_refills(conn, frames) do
     if frames != [] and open?(conn) do
       conn = send!(conn, Enum.map(frames, &Frame.encode/1))
       apply_refills(conn, frames)
@@ -2118,7 +2230,9 @@ defmodule Mint.HTTP2 do
   defp maybe_refill_stream(frames, conn, stream_id) do
     case Map.fetch(conn.streams, stream_id) do
       {:ok, stream} ->
-        increment = stream.receive_window_size - stream.receive_window_remaining
+        increment =
+          stream.receive_window_size - stream.receive_window_remaining -
+            stream.receive_window_unreleased
 
         if stream.receive_window_remaining <= conn.receive_window_update_threshold and
              increment > 0 do
@@ -2136,14 +2250,11 @@ defmodule Mint.HTTP2 do
 
   defp apply_refills(conn, frames) do
     Enum.reduce(frames, conn, fn
-      window_update(stream_id: 0), conn ->
-        put_in(conn.receive_window_remaining, conn.receive_window_size)
+      window_update(stream_id: 0, window_size_increment: increment), conn ->
+        update_in(conn.receive_window_remaining, &(&1 + increment))
 
-      window_update(stream_id: stream_id), conn ->
-        put_in(
-          conn.streams[stream_id].receive_window_remaining,
-          conn.streams[stream_id].receive_window_size
-        )
+      window_update(stream_id: stream_id, window_size_increment: increment), conn ->
+        update_in(conn.streams[stream_id].receive_window_remaining, &(&1 + increment))
     end)
   end
 
@@ -2756,6 +2867,7 @@ defmodule Mint.HTTP2 do
           send_window_size: conn.server_settings.initial_window_size,
           receive_window_size: conn.client_settings.initial_window_size,
           receive_window_remaining: conn.client_settings.initial_window_size,
+          receive_window_unreleased: 0,
           received_first_headers?: false,
           method: promised_method(headers),
           content_length: nil,
@@ -3226,6 +3338,11 @@ defmodule Mint.HTTP2 do
   def format_error({:window_size_too_small, current, new_size}) do
     "set_window_size/3 can only grow a window; new size #{new_size} is " <>
       "smaller than the current size #{current}"
+  end
+
+  def format_error({:refill_exceeds_received, unreleased, size}) do
+    "refill_window/3 can't release #{size} bytes, only #{unreleased} bytes of the " <>
+      "response body were received and not released yet"
   end
 
   def format_error(:request_is_not_streaming) do
