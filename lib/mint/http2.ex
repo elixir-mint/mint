@@ -1605,7 +1605,7 @@ defmodule Mint.HTTP2 do
 
   # Splits iodata into chunks of exactly chunk_size bytes plus a non-empty last
   # chunk. While the head of the list is a binary, we split it into sub-binaries
-  # to avoid copying the payload. Anything else is converted to a binary.
+  # to avoid copying the payload. Anything else is converted to an iovec.
   defp split_payload_in_chunks(iodata, chunk_size),
     do: split_payload_in_chunks(iodata, chunk_size, chunk_size, [], [])
 
@@ -1630,7 +1630,7 @@ defmodule Mint.HTTP2 do
   end
 
   defp split_payload_in_chunks(iodata, size, left, chunk, chunks),
-    do: split_payload_in_chunks([IO.iodata_to_binary(iodata)], size, left, chunk, chunks)
+    do: split_payload_in_chunks(:erlang.iolist_to_iovec(iodata), size, left, chunk, chunks)
 
   defp send_ping(conn, payload) do
     frame = Frame.ping(stream_id: 0, opaque_data: payload)

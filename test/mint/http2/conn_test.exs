@@ -3425,7 +3425,7 @@ defmodule Mint.HTTP2Test do
          %{conn: conn} do
       max_frame_size = HTTP2.get_server_setting(conn, :max_frame_size)
 
-      # The nested list is converted to a binary which is then split across frames.
+      # The nested list is converted to an iovec which is then split across frames.
       body = [:binary.copy(<<0>>, max_frame_size - 1), [<<1>>, <<2>>]]
       {conn, _ref} = open_request(conn, body)
 
