@@ -30,11 +30,8 @@ defmodule Mint.Core.Transport.TCP do
     case Mint.Core.Util.address_family(address) do
       # IP literals can only be reached over their own family, so
       # connect once with it and ignore :inet6/:inet4.
-      :inet6 ->
-        wrap_err(:gen_tcp.connect(address, port, [:inet6 | opts], timeout))
-
-      :inet ->
-        wrap_err(:gen_tcp.connect(address, port, [:inet | opts], timeout))
+      family when family in [:inet, :inet6] ->
+        wrap_err(:gen_tcp.connect(address, port, [family | opts], timeout))
 
       :hostname when inet6? ->
         # Try inet6 first, then fall back to the defaults provided by

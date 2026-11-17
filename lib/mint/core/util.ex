@@ -7,8 +7,8 @@ defmodule Mint.Core.Util do
   # address needs a lookup. Connecting to a literal with the wrong family
   # makes :gen_tcp resolve it as a name, which fails with :nxdomain.
   @spec address_family(Types.address() | charlist()) :: :inet | :inet6 | :hostname
-  def address_family(address) when is_tuple(address) and tuple_size(address) == 4, do: :inet
-  def address_family(address) when is_tuple(address) and tuple_size(address) == 8, do: :inet6
+  def address_family(address) when tuple_size(address) == 4, do: :inet
+  def address_family(address) when tuple_size(address) == 8, do: :inet6
 
   def address_family(address) when is_list(address) do
     case :inet.parse_strict_address(address) do
