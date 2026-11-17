@@ -3,11 +3,9 @@ defmodule Mint.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.{TransportError, HTTP, HttpBin}
+  alias Mint.{TransportError, HTTP, HttpBin, TestCertificates, TLSTestServer}
 
-  @moduletag :requires_internet_connection
-
-  describe "nghttp2.org" do
+  describe "protocol selection" do
     test "SSL - select HTTP1" do
       assert {:ok, conn} =
                HTTP.connect(:https, HttpBin.host(), HttpBin.https_port(),
@@ -48,12 +46,15 @@ defmodule Mint.IntegrationTest do
 
   describe "ssl certificate verification" do
     @tag :capture_log
-    test "bad certificate - badssl.com" do
+    test "bad certificate" do
+      %{server_config: server_config} = TestCertificates.pkix_test_chain()
+      {:ok, port} = TLSTestServer.start(server_config)
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
                  :https,
-                 "untrusted-root.badssl.com",
-                 443,
+                 "localhost",
+                 port,
                  transport_opts: [log_alert: false, reuse_sessions: false]
                )
 
@@ -64,20 +65,29 @@ defmodule Mint.IntegrationTest do
       assert {:ok, _conn} =
                HTTP.connect(
                  :https,
-                 "untrusted-root.badssl.com",
-                 443,
+                 "localhost",
+                 port,
                  transport_opts: [verify: :verify_none]
                )
     end
 
     @tag :capture_log
-    test "bad hostname - badssl.com" do
+    test "bad hostname" do
+      %{server_config: server_config, client_config: client_config} =
+        TestCertificates.pkix_test_chain(hostname: "wrong.host.example")
+
+      {:ok, port} = TLSTestServer.start(server_config)
+
       assert {:error, %TransportError{reason: reason}} =
                HTTP.connect(
                  :https,
-                 "wrong.host.badssl.com",
-                 443,
-                 transport_opts: [log_alert: false, reuse_sessions: false]
+                 "localhost",
+                 port,
+                 transport_opts: [
+                   cacerts: client_config[:cacerts],
+                   log_alert: false,
+                   reuse_sessions: false
+                 ]
                )
 
       # OTP 21.3 changes the format of SSL errors. OTP 29 reports a hostname
@@ -90,66 +100,54 @@ defmodule Mint.IntegrationTest do
       assert {:ok, _conn} =
                HTTP.connect(
                  :https,
-                 "wrong.host.badssl.com",
-                 443,
+                 "localhost",
+                 port,
                  transport_opts: [verify: :verify_none]
-               )
-    end
-
-    if List.to_integer(:erlang.system_info(:otp_release)) < 25 do
-      @tag :skip
-    end
-
-    @tag :capture_log
-    test "using :public_key.cacerts_get/0" do
-      cacerts = apply(:public_key, :cacerts_get, [])
-
-      assert {:error, %TransportError{}} =
-               HTTP.connect(
-                 :https,
-                 "untrusted-root.badssl.com",
-                 443,
-                 transport_opts: [
-                   log_alert: false,
-                   reuse_sessions: false,
-                   cacerts: cacerts
-                 ]
-               )
-
-      assert {:ok, _conn} =
-               HTTP.connect(
-                 :https,
-                 "nghttp2.org",
-                 443,
-                 transport_opts: [reuse_sessions: false, cacerts: cacerts]
                )
     end
   end
 
   describe "partial chain handling" do
-    @dst_and_isrg Path.expand("../support/mint/dst_and_isrg.pem", __DIR__)
+    # The server sends an intermediate signed by an expired root. The client
+    # trusts both the expired root and a second root with the intermediate's
+    # key, the way Let's Encrypt's ISRG Root X1 was cross-signed by the
+    # expired DST Root CA X3.
+    test "intermediate cross-signed by an expired root" do
+      key = {:rsa, 2048, 17}
+      today = Date.utc_today()
+      expired = {Date.to_erl(Date.add(today, -30)), Date.to_erl(Date.add(today, -1))}
+      san_extension = {:Extension, {2, 5, 29, 17}, false, [dNSName: ~c"localhost"]}
 
-    # OTP 18.3 fails to connect to letsencrypt.org, skip this test
-    if Mint.Core.Transport.SSL.ssl_version() < [8, 0] do
-      @tag skip: ":ssl version too old"
-    end
+      expired_root =
+        :public_key.pkix_test_root_cert(~c"Expired Root",
+          key: key,
+          validity: expired,
+          digest: :sha256
+        )
 
-    # This test assumes the letsencrypt.org server presents the 'long chain',
-    # consisting of the following certificates:
-    #
-    #  0 s:/CN=lencr.org
-    #    i:/C=US/O=Let's Encrypt/CN=R3
-    #  1 s:/C=US/O=Let's Encrypt/CN=R3
-    #    i:/C=US/O=Internet Security Research Group/CN=ISRG Root X1
-    #  2 s:/C=US/O=Internet Security Research Group/CN=ISRG Root X1
-    #    i:/O=Digital Signature Trust Co./CN=DST Root CA X3
-    #
-    # This is currently the case, but won't be the case after Sep 2024, or
-    # possibly earlier.
-    test "Let's Encrypt ISRG cross-signed by expired root" do
+      cross_signed_key = :public_key.generate_key(key)
+
+      trusted_root =
+        :public_key.pkix_test_root_cert(~c"Trusted Root", key: cross_signed_key, digest: :sha256)
+
+      %{server_config: server_config} =
+        :public_key.pkix_test_data(%{
+          server_chain: %{
+            root: expired_root,
+            intermediates: [[key: cross_signed_key, digest: :sha256]],
+            peer: [key: key, digest: :sha256, extensions: [san_extension]]
+          },
+          client_chain: %{root: [key: key], intermediates: [], peer: [key: key]}
+        })
+
+      {:ok, port} = TLSTestServer.start(server_config)
+
       assert {:ok, _conn} =
-               HTTP.connect(:https, "letsencrypt.org", 443,
-                 transport_opts: [cacertfile: @dst_and_isrg, reuse_sessions: false]
+               HTTP.connect(:https, "localhost", port,
+                 transport_opts: [
+                   cacerts: [expired_root.cert, trusted_root.cert],
+                   reuse_sessions: false
+                 ]
                )
     end
   end
@@ -231,13 +229,18 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "information from connection's socket" do
-    test "TLSv1.2 - badssl.com" do
+    test "TLSv1.2" do
+      %{server_config: server_config, client_config: client_config} =
+        TestCertificates.pkix_test_chain()
+
+      {:ok, port} = TLSTestServer.start([versions: [:"tlsv1.2"]] ++ server_config)
+
       assert {:ok, conn} =
                HTTP.connect(
                  :https,
-                 "tls-v1-2.badssl.com",
-                 1012,
-                 transport_opts: [keep_secrets: true]
+                 "localhost",
+                 port,
+                 transport_opts: [keep_secrets: true, cacerts: client_config[:cacerts]]
                )
 
       assert socket = Mint.HTTP.get_socket(conn)
@@ -251,18 +254,23 @@ defmodule Mint.IntegrationTest do
   end
 
   describe "force TLS v1.3 only" do
-    test "rabbitmq.com" do
+    test "connects with only TLS 1.3 versions and ciphers" do
       if Mint.Core.Transport.SSL.ssl_version() >= [10, 2] do
+        %{server_config: server_config, client_config: client_config} =
+          TestCertificates.pkix_test_chain()
+
+        {:ok, port} = TLSTestServer.start(server_config)
         ciphers = :ssl.filter_cipher_suites(:ssl.cipher_suites(:all, :"tlsv1.3"), [])
 
         opts = [
           transport_opts: [
             versions: [:"tlsv1.3"],
-            ciphers: ciphers
+            ciphers: ciphers,
+            cacerts: client_config[:cacerts]
           ]
         ]
 
-        assert {:ok, _conn} = HTTP.connect(:https, "rabbitmq.com", 443, opts)
+        assert {:ok, _conn} = HTTP.connect(:https, "localhost", port, opts)
       else
         :ok
       end

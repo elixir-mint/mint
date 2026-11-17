@@ -1477,6 +1477,20 @@ defmodule Mint.HTTP2Test do
 
       assert HTTP2.open?(conn)
     end
+
+    # https://github.com/elixir-mint/mint/issues/171
+    test "request header names are lowercased before HPACK encoding", %{conn: conn} do
+      headers = [{"If-Modified-Since", "Wed, 26 May 2019 07:43:40 GMT"}]
+      assert {:ok, conn, _ref} = HTTP2.request(conn, "GET", "/", headers, nil)
+
+      assert_recv_frames [headers(hbf: hbf)]
+
+      decoded_headers = server_decode_headers(hbf)
+      assert {"if-modified-since", "Wed, 26 May 2019 07:43:40 GMT"} in decoded_headers
+      refute List.keymember?(decoded_headers, "If-Modified-Since", 0)
+
+      assert HTTP2.open?(conn)
+    end
   end
 
   describe "request header validation" do

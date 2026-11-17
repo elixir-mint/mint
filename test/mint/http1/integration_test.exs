@@ -3,9 +3,7 @@ defmodule Mint.HTTP1.IntegrationTest do
 
   import Mint.HTTP1.TestHelpers
 
-  alias Mint.{TransportError, HTTP1, HttpBin}
-
-  @moduletag :requires_internet_connection
+  alias Mint.{TransportError, HTTP1, HttpBin, TestCertificates, TLSTestServer}
 
   describe "local httpbin" do
     test "200 response" do
@@ -102,15 +100,29 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
   end
 
-  describe "twitter.com" do
-    test "timeout with http" do
-      assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:http, "twitter.com", 80, transport_opts: [timeout: 0])
+  describe "connect timeout" do
+    # A local connect can complete before a timeout of 0 fires. Linux drops the
+    # SYN for a listen socket whose accept queue is full, so the connect can't
+    # complete at all. Other systems reset the connection instead.
+    if :os.type() != {:unix, :linux} do
+      @tag skip: "needs Linux's handling of a full accept queue"
     end
 
-    test "timeout with https" do
+    test "timeout with http" do
+      {:ok, listen_socket} = :gen_tcp.listen(0, backlog: 0)
+      {:ok, port} = :inet.port(listen_socket)
+      fill_accept_queue(port)
+
       assert {:error, %TransportError{reason: :timeout}} =
-               HTTP1.connect(:https, "twitter.com", 443, transport_opts: [timeout: 0])
+               HTTP1.connect(:http, "localhost", port, transport_opts: [timeout: 0])
+    end
+
+    # The server never answers the ClientHello, so the handshake can't finish.
+    test "timeout with https" do
+      {:ok, port, _server_ref} = HTTP1.TestServer.start()
+
+      assert {:error, %TransportError{reason: :timeout}} =
+               HTTP1.connect(:https, "localhost", port, transport_opts: [timeout: 0])
     end
   end
 
@@ -197,13 +209,14 @@ defmodule Mint.HTTP1.IntegrationTest do
     end
   end
 
-  describe "badssl.com" do
-    @describetag :requires_internet_connection
-
+  describe "certificate verification" do
     @tag :capture_log
     test "SSL with bad certificate" do
+      %{server_config: server_config} = TestCertificates.pkix_test_chain()
+      {:ok, port} = TLSTestServer.start(server_config)
+
       assert {:error, %TransportError{reason: reason}} =
-               HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
+               HTTP1.connect(:https, "localhost", port,
                  transport_opts: [log_alert: false, reuse_sessions: false]
                )
 
@@ -212,16 +225,23 @@ defmodule Mint.HTTP1.IntegrationTest do
                match?({:tls_alert, {:unknown_ca, _}}, reason)
 
       assert {:ok, _conn} =
-               HTTP1.connect(:https, "untrusted-root.badssl.com", 443,
-                 transport_opts: [verify: :verify_none]
-               )
+               HTTP1.connect(:https, "localhost", port, transport_opts: [verify: :verify_none])
     end
 
     @tag :capture_log
     test "SSL with bad hostname" do
+      %{server_config: server_config, client_config: client_config} =
+        TestCertificates.pkix_test_chain(hostname: "wrong.host.example")
+
+      {:ok, port} = TLSTestServer.start(server_config)
+
       assert {:error, %TransportError{reason: reason}} =
-               HTTP1.connect(:https, "wrong.host.badssl.com", 443,
-                 transport_opts: [log_alert: false, reuse_sessions: false]
+               HTTP1.connect(:https, "localhost", port,
+                 transport_opts: [
+                   cacerts: client_config[:cacerts],
+                   log_alert: false,
+                   reuse_sessions: false
+                 ]
                )
 
       # OTP 21.3 changes the format of SSL errors. OTP 29 reports a hostname
@@ -232,9 +252,14 @@ defmodule Mint.HTTP1.IntegrationTest do
                match?({:tls_alert, {:bad_certificate, _}}, reason)
 
       assert {:ok, _conn} =
-               HTTP1.connect(:https, "wrong.host.badssl.com", 443,
-                 transport_opts: [verify: :verify_none]
-               )
+               HTTP1.connect(:https, "localhost", port, transport_opts: [verify: :verify_none])
+    end
+  end
+
+  defp fill_accept_queue(port) do
+    case :gen_tcp.connect(~c"localhost", port, [], 100) do
+      {:ok, _socket} -> fill_accept_queue(port)
+      {:error, :timeout} -> :ok
     end
   end
 end

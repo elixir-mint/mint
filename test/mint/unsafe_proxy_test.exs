@@ -6,7 +6,6 @@ defmodule Mint.UnsafeProxyTest do
   alias Mint.HttpBin
 
   @moduletag :proxy
-  @moduletag :requires_internet_connection
 
   test "200 response - http://httpbin.org" do
     assert {:ok, conn} =
