@@ -3787,6 +3787,256 @@ defmodule Mint.HTTP2Test do
         window_update(stream_id: ^stream_id, window_size_increment: 460_000)
       ]
     end
+
+    test "set_window_size/3 keeps the bytes consumed before the window grew",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      {:ok, conn} = HTTP2.set_window_size(conn, :connection, 110_000)
+      assert_recv_frames [window_update(stream_id: 0, window_size_increment: 10_000)]
+
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 110_000)
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 10_000)]
+
+      assert conn.receive_window_remaining == 60_000
+      assert conn.streams[stream_id].receive_window_remaining == 60_000
+
+      # 20_000 more bytes drop both windows to the 40_000 threshold.
+      frames = for _ <- 1..2, do: data(stream_id: stream_id, data: chunk)
+      assert {:ok, %HTTP2{} = _conn, _responses} = stream_frames(conn, frames)
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 70_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 70_000)
+      ]
+    end
+  end
+
+  describe "manual stream window refill" do
+    @describetag connect_options: [
+                   connection_window_size: 100_000,
+                   receive_window_update_threshold: 40_000,
+                   client_settings: [initial_window_size: 100_000],
+                   stream_window_refill: :manual
+                 ]
+
+    test "holds back the stream refill until the body is released and refills the connection",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []} | data_responses] = responses
+      assert data_responses == List.duplicate({:data, ref, chunk}, 7)
+
+      # The 6th frame drops the connection window to the 40_000 threshold.
+      assert_recv_frames [window_update(stream_id: 0, window_size_increment: 60_000)]
+
+      assert conn.streams[stream_id].receive_window_remaining == 30_000
+      assert conn.streams[stream_id].receive_window_unreleased == 70_000
+
+      assert {:ok, conn} = HTTP2.refill_window(conn, ref, 70_000)
+
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 70_000)]
+
+      assert conn.streams[stream_id].receive_window_remaining == 100_000
+      assert conn.streams[stream_id].receive_window_unreleased == 0
+    end
+
+    test "refills only the released part of the body", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      assert_recv_frames [window_update(stream_id: 0)]
+
+      assert {:ok, conn} = HTTP2.refill_window(conn, ref, 20_000)
+
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 20_000)]
+
+      assert conn.streams[stream_id].receive_window_remaining == 50_000
+      assert conn.streams[stream_id].receive_window_unreleased == 50_000
+    end
+
+    test "batches released bytes into the next refill below the threshold", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..5, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      # 50_000 bytes remain on the stream window, above the threshold.
+      assert {:ok, conn} = HTTP2.refill_window(conn, ref, 50_000)
+      assert_recv_frames []
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [data(stream_id: stream_id, data: chunk)])
+
+      # The released 50_000 bytes go out once the window drops to the threshold,
+      # the 10_000 bytes of the last frame are still held back.
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 60_000),
+        window_update(stream_id: ^stream_id, window_size_increment: 50_000)
+      ]
+
+      assert conn.streams[stream_id].receive_window_remaining == 90_000
+      assert conn.streams[stream_id].receive_window_unreleased == 10_000
+    end
+
+    test "refills padding without waiting for the body to be released", %{conn: conn} do
+      {conn, _ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      # Each payload is 9_201 bytes: 1 byte of pad length, 9_000 bytes of data
+      # and 200 bytes of padding. 7 frames drop both windows below the 40_000
+      # threshold and the stream refill covers the 7 * 201 padding bytes.
+      chunk = String.duplicate("a", 9_000)
+      padding = String.duplicate("p", 200)
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk, padding: padding)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      assert_recv_frames [
+        window_update(stream_id: 0, window_size_increment: 64_407),
+        window_update(stream_id: ^stream_id, window_size_increment: 1_407)
+      ]
+
+      assert conn.streams[stream_id].receive_window_remaining == 37_000
+      assert conn.streams[stream_id].receive_window_unreleased == 63_000
+    end
+
+    test "refills after set_window_size/3 grows a window with unreleased data",
+         %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      chunk = String.duplicate("a", 10_000)
+      frames = for _ <- 1..7, do: data(stream_id: stream_id, data: chunk)
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]} | frames
+               ])
+
+      assert_recv_frames [window_update(stream_id: 0)]
+
+      {:ok, conn} = HTTP2.set_window_size(conn, {:request, ref}, 110_000)
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 10_000)]
+
+      assert conn.streams[stream_id].receive_window_remaining == 40_000
+
+      assert {:ok, conn} = HTTP2.refill_window(conn, ref, 70_000)
+
+      assert_recv_frames [window_update(stream_id: ^stream_id, window_size_increment: 70_000)]
+
+      assert conn.streams[stream_id].receive_window_remaining == 110_000
+    end
+
+    test "returns an error when releasing more than was received", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: String.duplicate("a", 10_000))
+               ])
+
+      assert {:ok, conn} = HTTP2.refill_window(conn, ref, 4_000)
+
+      assert {:error, ^conn, error} = HTTP2.refill_window(conn, ref, 6_001)
+      assert_http2_error error, {:refill_exceeds_received, 6_000, 6_001}
+
+      assert_recv_frames []
+    end
+
+    test "is a no-op for completed and unknown requests", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, _responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "hello", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert {:ok, ^conn} = HTTP2.refill_window(conn, ref, 5)
+      assert {:ok, ^conn} = HTTP2.refill_window(conn, make_ref(), 5)
+
+      assert_recv_frames []
+    end
+
+    test "accepts the size of an empty DATA frame", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+      assert_recv_frames [headers(stream_id: stream_id)]
+
+      assert {:ok, %HTTP2{} = conn, responses} =
+               stream_frames(conn, [
+                 {:headers, stream_id, [{":status", "200"}], [:end_headers]},
+                 data(stream_id: stream_id, data: "", flags: set_flags(:data, [:end_stream]))
+               ])
+
+      assert [{:status, ^ref, 200}, {:headers, ^ref, []}, {:data, ^ref, ""}, {:done, ^ref}] =
+               responses
+
+      assert {:ok, ^conn} = HTTP2.refill_window(conn, ref, 0)
+      assert_recv_frames []
+    end
+
+    test "raises on a negative size", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_raise ArgumentError, ~r/size must be a non-negative integer/, fn ->
+        HTTP2.refill_window(conn, ref, -1)
+      end
+    end
+
+    @tag connect_options: []
+    test "raises when the connection refills stream windows automatically", %{conn: conn} do
+      {conn, ref} = open_request(conn)
+
+      assert_raise ArgumentError, ~r/stream_window_refill: :manual/, fn ->
+        HTTP2.refill_window(conn, ref, 1)
+      end
+    end
+
+    @tag :no_connection
+    test "rejects an invalid :stream_window_refill option" do
+      assert_raise ArgumentError, ~r/:stream_window_refill/, fn ->
+        HTTP2.initiate(:https, self(), "localhost", 443, stream_window_refill: :sometimes)
+      end
+    end
   end
 
   describe "settings" do

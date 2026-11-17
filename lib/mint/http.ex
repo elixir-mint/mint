@@ -254,6 +254,14 @@ defmodule Mint.HTTP do
       at or below the threshold, the client refills after every DATA frame on
       that window. *Available since v1.8.0*.
 
+    * `:stream_window_refill` - (`:auto` or `:manual`) when Mint refills the receive
+      window of each request. With `:auto`, `Mint.HTTP2.stream/2` refills it as response
+      body data arrives. With `:manual`, the window is only refilled for the bytes you
+      release with `Mint.HTTP2.refill_window/3`, so a request whose body you aren't
+      consuming stops receiving data once its window is full while other requests on the
+      connection keep going. The connection-level window is always refilled
+      automatically. Defaults to `:auto`. *Available since v1.12.0*.
+
   There may be further protocol specific options that only take effect when the corresponding
   connection is established. Check `Mint.HTTP1.connect/4` and `Mint.HTTP2.connect/4` for
   details.
