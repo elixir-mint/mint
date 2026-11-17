@@ -275,6 +275,33 @@ defmodule Mint.Core.Transport.SSLTest do
                  verify: :verify_none
                )
     end
+
+    test "returns the connection error for IP literals instead of a lookup error" do
+      v6_port = closed_port(:inet6, {0, 0, 0, 0, 0, 0, 0, 1})
+      v4_port = closed_port(:inet, {127, 0, 0, 1})
+
+      for {address, port, opts} <- [
+            {"::1", v6_port, []},
+            {"::1", v6_port, [inet6: true]},
+            {"127.0.0.1", v4_port, [inet6: true, inet4: false]},
+            {{127, 0, 0, 1}, v4_port, [inet6: true, inet4: false, hostname: "localhost"]}
+          ] do
+        assert {:error, %Mint.TransportError{reason: :econnrefused}} =
+                 SSL.connect(
+                   address,
+                   port,
+                   [active: false, timeout: 1000, verify: :verify_none] ++ opts
+                 ),
+               "for #{inspect(address)} with #{inspect(opts)}"
+      end
+    end
+  end
+
+  defp closed_port(family, ip) do
+    {:ok, socket} = :gen_tcp.listen(0, [family, ip: ip])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
   end
 
   describe "controlling_process/2" do

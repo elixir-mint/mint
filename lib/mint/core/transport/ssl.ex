@@ -329,22 +329,29 @@ defmodule Mint.Core.Transport.SSL do
 
     opts = ssl_opts(String.to_charlist(hostname), opts)
 
-    if inet6? do
-      # Try inet6 first, then fall back to the defaults provided by
-      # ssl/gen_tcp if connection fails.
-      case :ssl.connect(address, port, [:inet6 | opts], timeout) do
-        {:ok, sslsocket} ->
-          {:ok, sslsocket}
+    case Mint.Core.Util.address_family(address) do
+      # IP literals can only be reached over their own family, so
+      # connect once with it and ignore :inet6/:inet4.
+      family when family in [:inet, :inet6] ->
+        wrap_err(:ssl.connect(address, port, [family | opts], timeout))
 
-        _error when inet4? ->
-          wrap_err(:ssl.connect(address, port, opts, timeout))
+      :hostname when inet6? ->
+        # Try inet6 first, then fall back to the defaults provided by
+        # ssl/gen_tcp if connection fails.
+        case :ssl.connect(address, port, [:inet6 | opts], timeout) do
+          {:ok, sslsocket} ->
+            {:ok, sslsocket}
 
-        error ->
-          wrap_err(error)
-      end
-    else
-      # Use the defaults provided by ssl/gen_tcp.
-      wrap_err(:ssl.connect(address, port, opts, timeout))
+          _error when inet4? ->
+            wrap_err(:ssl.connect(address, port, opts, timeout))
+
+          error ->
+            wrap_err(error)
+        end
+
+      :hostname ->
+        # Use the defaults provided by ssl/gen_tcp.
+        wrap_err(:ssl.connect(address, port, opts, timeout))
     end
   end
 
