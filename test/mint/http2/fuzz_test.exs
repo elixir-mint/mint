@@ -616,7 +616,8 @@ defmodule Mint.HTTP2.FuzzTest do
   end
 
   # RFC 9113 8.1.1: the body must match a valid content-length, and responses to
-  # HEAD, 204 and 304 responses have no content.
+  # HEAD, 204 and 304 responses have no content. A 2xx response to CONNECT opens a
+  # tunnel and the DATA after it is tunnel data (RFC 9110 9.3.6, RFC 9113 8.5).
   defp update_meta(meta, {:status, ref, status}, _ref_state, _state) when is_map_key(meta, ref) do
     put_in(meta[ref].status, status)
   end
@@ -642,7 +643,8 @@ defmodule Mint.HTTP2.FuzzTest do
     %{method: method, status: status, content_length: content_length, body_size: body_size} =
       meta[ref]
 
-    bodiless? = method == "HEAD" or status in [204, 304]
+    tunnel? = method == "CONNECT" and status in 200..299
+    bodiless? = method == "HEAD" or (status in [204, 304] and not tunnel?)
 
     cond do
       bodiless? and body_size > 0 ->
@@ -650,8 +652,7 @@ defmodule Mint.HTTP2.FuzzTest do
           "#{method} #{status} response completed with #{body_size} body bytes\n#{describe(state)}"
         )
 
-      not bodiless? and content_length != nil and body_size != content_length and
-          not (method == "CONNECT" and status in 200..299) ->
+      not bodiless? and not tunnel? and content_length != nil and body_size != content_length ->
         flunk(
           "response completed with #{body_size} body bytes but content-length #{content_length}\n#{describe(state)}"
         )
