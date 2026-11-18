@@ -91,7 +91,12 @@ defmodule Mint.HTTP2 do
       ] = responses
 
       promised_headers
-      #=> [{":method", "GET"}, {":path", "/style.css"}]
+      #=> [
+      #=>   {":method", "GET"},
+      #=>   {":scheme", "https"},
+      #=>   {":authority", "example.com"},
+      #=>   {":path", "/style.css"}
+      #=> ]
 
   As you can see in the example above, when the server sends a push promise then a
   `:push_promise` response is returned as a response to a request. The `:push_promise`
@@ -100,7 +105,12 @@ defmodule Mint.HTTP2 do
   `promised_headers` are headers that tell the client *what request* the promised response
   will respond to. The idea is that the server tells the client a request the client will
   want to make and then preemptively sends a response for that request. Promised headers
-  will always include `:method`, `:path`, and `:authority`.
+  will always include `:method`, `:scheme`, `:authority`, and `:path`.
+
+  A server may only push responses for origins it's authoritative for (RFC 9113 8.4).
+  Mint doesn't check this. Before using a pushed response, for example to cache it,
+  compare `:scheme` and `:authority` with the origin you connected to, and cancel the
+  promised request with `cancel_request/2` if they don't match.
 
       next_message =
         receive do
