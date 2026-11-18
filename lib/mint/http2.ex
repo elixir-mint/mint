@@ -309,15 +309,18 @@ defmodule Mint.HTTP2 do
     * `:max_frame_size` - corresponds to `SETTINGS_MAX_FRAME_SIZE`. Tells what is the
       maximum size of an HTTP/2 frame for the peer that sends this setting.
 
-    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`. For the
-      client, this also bounds the size of an inbound header block (a HEADERS frame plus
-      its trailing CONTINUATION frames): the connection is closed with a connection error
-      if a server streams a header block larger than this value, which prevents a server
-      from exhausting client memory with an unbounded chain of CONTINUATION frames. A
-      decoded header list larger than this value fails the request with a
-      `{:max_header_list_size_exceeded, size, max_size}` error, and a server push whose
-      promised request headers are larger than this value is refused. Defaults to
-      `256 KB` for the client.
+    * `:max_header_list_size` - corresponds to `SETTINGS_MAX_HEADER_LIST_SIZE`. The
+      server setting is `:infinity` until the server sends it. The client setting must be
+      an integer and defaults to `256 KB`. It limits the decoded size (names, values and
+      32 bytes per field) of header lists received from the server. Response headers,
+      informational response headers and trailers over the limit reset the request with
+      `PROTOCOL_ERROR` and fail it with a `{:max_header_list_size_exceeded, size, max_size}`
+      error. Promised request headers over the limit reset the promised stream with
+      `REFUSED_STREAM`. The connection stays open in both cases. Header block fragments
+      buffered while waiting for `END_HEADERS` close the connection with `PROTOCOL_ERROR`
+      if they exceed `max_header_list_size * 30 / 8 + 12` bytes, an upper bound on the
+      encoded size of a header list within the limit (assuming minimal integer
+      representations and at most two dynamic table size updates).
 
     * `:enable_connect_protocol` - corresponds to `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
       Sets whether the client may invoke the extended connect protocol which is used to
