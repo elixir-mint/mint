@@ -527,6 +527,15 @@ defmodule Mint.HTTP2 do
   end
 
   @doc """
+  Returns `true` if the connection is waiting for the server's connection
+  preface (its initial SETTINGS frame), `false` otherwise.
+
+  *Available since v1.12.0*.
+  """
+  @spec handshaking?(t()) :: boolean()
+  def handshaking?(%__MODULE__{state: state} = _conn), do: state == :handshaking
+
+  @doc """
   See `Mint.HTTP.request/5`.
 
   In HTTP/2, opening a request means opening a new HTTP/2 stream (see the
